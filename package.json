@@ -1,0 +1,10 @@
+{
+  "name": "geelong-underwater-hockey",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Geelong Underwater Hockey club site — live build (Netlify + Netlify DB + Netlify Identity).",
+  "dependencies": {
+    "@netlify/database": "latest",
+    "@netlify/functions": "latest"
+  }
+}

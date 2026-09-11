@@ -1,0 +1,12 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# The app is a client-side router (no page-per-URL), so any direct hit or
+# refresh on a path other than "/" needs to fall back to index.html.
+# Netlify Functions (registered via their own `config.path`) are matched
+# before redirects, so /api/* is unaffected by this catch-all.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
