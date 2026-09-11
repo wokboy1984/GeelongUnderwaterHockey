@@ -23,7 +23,10 @@
   // Real members (live site) only get what's actually been migrated so far —
   // the rest of PLAYER_NAV still runs on demo data and isn't ready to show
   // to a real logged-in visitor yet.
-  const REAL_PLAYER_NAV = [{ label: "Dashboard", path: "/portal/dashboard" }];
+  const REAL_PLAYER_NAV = [
+    { label: "Dashboard", path: "/portal/dashboard" },
+    { label: "Bring a Mate", path: "/portal/bring-a-mate" },
+  ];
 
   const ORGANISER_NAV = [
     { label: "Attendance", path: "/organiser/attendance" },
@@ -181,7 +184,13 @@
     }
     if (path === "/portal/book") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BookGame); }
     if (path === "/portal/board") { const r = requireAuth(path); if (r) { navigate(r); return null; } return h(GUWH.Pages.GameBoard); }
-    if (path === "/portal/bring-a-mate") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate); }
+    if (path === "/portal/bring-a-mate") {
+      if (GUWH.Identity) {
+        if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+        return h(GUWH.Pages.BringAMate);
+      }
+      const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate);
+    }
     if (path === "/portal/profile") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Profile); }
 
     if (path === "/organiser/attendance") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "attendance" }); }
