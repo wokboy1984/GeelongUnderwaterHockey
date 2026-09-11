@@ -27,7 +27,25 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  function LoginPage() {
+  // Real member login (live site — index.html loads js/identity.js).
+  function RealLoginPage() {
+    return h(
+      Container,
+      { className: "py-16 sm:py-24 max-w-md" },
+      h(Pill, { tone: "accent" }, "Member portal"),
+      h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-4" }, "Welcome back."),
+      h("p", { className: "mt-2 text-[var(--ink-soft)]" }, "Log in or create an account to book in for Wednesday."),
+      h(
+        "div",
+        { className: "mt-8 rounded-2xl bg-white ring-1 ring-black/5 p-6 flex gap-3" },
+        h(Button, { onClick: () => GUWH.Identity.login() }, "Log in"),
+        h(Button, { variant: "secondary", onClick: () => GUWH.Identity.signup() }, "Sign up")
+      )
+    );
+  }
+
+  // Concept-preview login (artifact-entry.html only — no Identity loaded there).
+  function DemoLoginPage() {
     function loginAs(role) {
       GUWH.Store.login(role);
       navigate(role === "organiser" ? "/organiser/attendance" : "/portal/dashboard");
@@ -53,6 +71,10 @@ GUWH.Pages = GUWH.Pages || {};
         h(DemoAccountCard, { role: "board", name: "This week's game", sub: "The schedule and teams every member sees", onClick: viewGameBoard })
       )
     );
+  }
+
+  function LoginPage() {
+    return GUWH.Identity ? h(RealLoginPage) : h(DemoLoginPage);
   }
 
   GUWH.Pages.PortalLogin = LoginPage;

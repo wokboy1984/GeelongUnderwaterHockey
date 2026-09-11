@@ -22,7 +22,102 @@ GUWH.Pages = GUWH.Pages || {};
     };
   }
 
-  function DashboardPage() {
+  // Real dashboard (live site) — real Identity user, real booking via
+  // /api/booking. Deliberately minimal: only shows what we actually have
+  // real data for. Game board, bring-a-mate and profile get added back here
+  // as each one is migrated off demo data.
+  function RealDashboardPage() {
+    const [user, setUser] = React.useState(() => GUWH.Identity.currentUser());
+    const [status, setStatus] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+
+    React.useEffect(() => GUWH.Identity.onChange(() => setUser(GUWH.Identity.currentUser())), []);
+
+    React.useEffect(() => {
+      if (!user) { navigate("/portal"); return; }
+      setLoading(true);
+      setError(null);
+      GUWH.Identity.authFetch("/api/booking")
+        .then((r) => r.json())
+        .then((data) => (data.ok ? setStatus(data) : setError(data.error || "Something went wrong")))
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+    }, [user]);
+
+    async function toggle() {
+      if (!status) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: !status.inSession }) });
+        const data = await res.json();
+        if (data.ok) setStatus(data);
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (!user) return null;
+    const displayName = (user.user_metadata && user.user_metadata.full_name) || user.email.split("@")[0];
+
+    return h(
+      Container,
+      { className: "py-10 sm:py-14 max-w-lg" },
+      h(
+        "div",
+        { className: "flex items-center justify-between mb-8" },
+        h(
+          "div",
+          null,
+          h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)]" }, "G'day " + displayName),
+          h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-1" }, "Wednesday dashboard")
+        ),
+        h(Button, { variant: "ghost", size: "sm", onClick: () => { GUWH.Identity.logout(); navigate("/"); } }, "Log out")
+      ),
+
+      error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
+
+      status &&
+        h(
+          "div",
+          { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" },
+          h(Pill, { tone: "white" }, h(Icon, { name: "calendar", size: 14 }), GUWH.formatDate(new Date(status.sessionDate + "T00:00:00"))),
+          h("p", { className: "mt-4 text-white/70 text-sm" }, GUWH.club.sessionTime.split("–")[0].trim() + " · " + GUWH.club.venue),
+          h(
+            "div",
+            { className: "mt-6 flex items-center gap-4" },
+            h(
+              Button,
+              {
+                size: "lg",
+                variant: status.inSession ? "dark" : "primary",
+                className: status.inSession ? "!bg-[var(--good)] hover:!bg-[var(--good-dark)]" : "",
+                disabled: loading,
+                onClick: toggle,
+              },
+              h(Icon, { name: status.inSession ? "check" : "plus", size: 18 }),
+              status.inSession ? "I'm in" : "I'm in?"
+            ),
+            h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white" }, status.confirmedCount), " confirmed so far")
+          )
+        ),
+
+      loading && !status && h("p", { className: "text-sm text-[var(--ink-soft)] mt-6" }, "Loading…"),
+
+      h(
+        "p",
+        { className: "text-xs text-[var(--ink-soft)] mt-8" },
+        "Team board, bring-a-mate and profile are being brought onto the real site next — for now this page just handles the real booking."
+      )
+    );
+  }
+
+  // Concept-preview dashboard (artifact-entry.html only) — unchanged demo data.
+  function DemoDashboardPage() {
     const [, force] = React.useReducer((x) => x + 1, 0);
     React.useEffect(() => GUWH.Store.subscribe(force), []);
 
@@ -133,6 +228,10 @@ GUWH.Pages = GUWH.Pages || {};
         )
       )
     );
+  }
+
+  function DashboardPage() {
+    return GUWH.Identity ? h(RealDashboardPage) : h(DemoDashboardPage);
   }
 
   GUWH.Pages.Dashboard = DashboardPage;
