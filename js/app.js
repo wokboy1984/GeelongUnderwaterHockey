@@ -20,6 +20,11 @@
     { label: "My Profile", path: "/portal/profile" },
   ];
 
+  // Real members (live site) only get what's actually been migrated so far —
+  // the rest of PLAYER_NAV still runs on demo data and isn't ready to show
+  // to a real logged-in visitor yet.
+  const REAL_PLAYER_NAV = [{ label: "Dashboard", path: "/portal/dashboard" }];
+
   const ORGANISER_NAV = [
     { label: "Attendance", path: "/organiser/attendance" },
     { label: "Team Builder", path: "/organiser/teams" },
@@ -30,8 +35,19 @@
     const { auth } = GUWH.Store.getState();
     const [open, setOpen] = React.useState(false);
     const inPortal = path.startsWith("/portal") || path.startsWith("/organiser");
-    const items = auth.loggedIn ? (auth.role === "organiser" ? ORGANISER_NAV : PLAYER_NAV) : PUBLIC_NAV;
-    const homeHref = auth.loggedIn ? (auth.role === "organiser" ? "/organiser/attendance" : "/portal/dashboard") : "/";
+
+    // Real Identity user (live site) takes priority over the demo store,
+    // which only exists for the concept preview.
+    const identityUser = GUWH.Identity ? GUWH.Identity.currentUser() : null;
+    const loggedIn = GUWH.Identity ? !!identityUser : auth.loggedIn;
+    const role = GUWH.Identity ? "player" : auth.role; // no real organiser accounts yet
+    const items = loggedIn ? (GUWH.Identity ? REAL_PLAYER_NAV : role === "organiser" ? ORGANISER_NAV : PLAYER_NAV) : PUBLIC_NAV;
+    const homeHref = loggedIn ? (role === "organiser" ? "/organiser/attendance" : "/portal/dashboard") : "/";
+    function doLogout() {
+      if (GUWH.Identity) GUWH.Identity.logout();
+      else GUWH.Store.logout();
+      navigate("/");
+    }
 
     return h(
       "header",
@@ -63,8 +79,8 @@
         h(
           "div",
           { className: "hidden lg:flex items-center gap-2" },
-          !auth.loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/portal") }, "Member portal"),
-          auth.loggedIn && h(Button, { size: "sm", variant: "secondary", className: "!bg-white/10 !text-white !border-white/25", onClick: () => { GUWH.Store.logout(); navigate("/"); } }, "Log out")
+          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/portal") }, "Member portal"),
+          loggedIn && h(Button, { size: "sm", variant: "secondary", className: "!bg-white/10 !text-white !border-white/25", onClick: doLogout }, "Log out")
         ),
         h(
           "button",
@@ -86,9 +102,9 @@
                 item.label
               )
             ),
-            !auth.loggedIn
+            !loggedIn
               ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/portal"); setOpen(false); } }, "Member portal")
-              : h(Button, { size: "sm", variant: "secondary", className: "mt-2 w-fit !bg-white/10 !text-white !border-white/25", onClick: () => { GUWH.Store.logout(); navigate("/"); setOpen(false); } }, "Log out")
+              : h(Button, { size: "sm", variant: "secondary", className: "mt-2 w-fit !bg-white/10 !text-white !border-white/25", onClick: () => { doLogout(); setOpen(false); } }, "Log out")
           )
         )
     );
@@ -148,11 +164,21 @@
     }
 
     if (path === "/portal") {
+      if (GUWH.Identity) {
+        if (GUWH.Identity.currentUser()) { navigate("/portal/dashboard"); return null; }
+        return h(GUWH.Pages.PortalLogin);
+      }
       const { auth } = GUWH.Store.getState();
       if (auth.loggedIn) { navigate(auth.role === "organiser" ? "/organiser/attendance" : "/portal/dashboard"); return null; }
       return h(GUWH.Pages.PortalLogin);
     }
-    if (path === "/portal/dashboard") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Dashboard); }
+    if (path === "/portal/dashboard") {
+      if (GUWH.Identity) {
+        if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+        return h(GUWH.Pages.Dashboard);
+      }
+      const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Dashboard);
+    }
     if (path === "/portal/book") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BookGame); }
     if (path === "/portal/board") { const r = requireAuth(path); if (r) { navigate(r); return null; } return h(GUWH.Pages.GameBoard); }
     if (path === "/portal/bring-a-mate") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate); }
@@ -175,7 +201,9 @@
     const [, force] = React.useReducer((x) => x + 1, 0);
     React.useEffect(() => GUWH.Store.subscribe(force), []);
     React.useEffect(() => {
-      if (GUWH.Identity) GUWH.Identity.init(); // no-op on the concept preview, which never loads identity.js
+      if (!GUWH.Identity) return; // no-op on the concept preview, which never loads identity.js
+      GUWH.Identity.init();
+      return GUWH.Identity.onChange(force); // re-render nav/routes on login, logout, and widget init
     }, []);
 
     return h(
