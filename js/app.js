@@ -34,6 +34,7 @@
   function realNavFor(roles) {
     const items = [
       { label: "Dashboard", path: "/portal/dashboard" },
+      { label: "This Week's Game", path: "/portal/board" },
       { label: "Bring a Mate", path: "/portal/bring-a-mate" },
     ];
     if (roles.includes("game_coordinator") || roles.includes("administrator")) {
@@ -204,7 +205,13 @@
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Dashboard);
     }
     if (path === "/portal/book") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BookGame); }
-    if (path === "/portal/board") { const r = requireAuth(path); if (r) { navigate(r); return null; } return h(GUWH.Pages.GameBoard); }
+    if (path === "/portal/board") {
+      if (GUWH.Identity) {
+        if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+        return h(GUWH.Pages.GameBoard);
+      }
+      const r = requireAuth(path); if (r) { navigate(r); return null; } return h(GUWH.Pages.GameBoard);
+    }
     if (path === "/portal/bring-a-mate") {
       if (GUWH.Identity) {
         if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
@@ -223,11 +230,12 @@
     // endpoints that re-check the same role against the database, so a
     // direct URL visit without the role gets a 403 from the server, not
     // just a redirect here.
-    if (path === "/coordinator") {
+    if (path === "/coordinator" || path === "/coordinator/teams" || path === "/coordinator/publish") {
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
       const roles = GUWH.Identity.currentRoles();
       if (!roles.includes("game_coordinator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
-      return h(GUWH.Pages.Coordinator);
+      const tab = path === "/coordinator/teams" ? "teams" : path === "/coordinator/publish" ? "publish" : "attendance";
+      return h(GUWH.Pages.Coordinator, { tab });
     }
     if (path === "/community") {
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }

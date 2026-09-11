@@ -77,7 +77,66 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  function GameBoardPage() {
+  // Real Game Board (live site) — read-only, shows published team
+  // assignments from /api/game-board, or a "not yet finalised" state.
+  // No run sheet / milestones yet since those are demo-only fixtures not
+  // tied to real data.
+  function RealGameBoardPage() {
+    const [data, setData] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/game-board")
+        .then((r) => r.json())
+        .then((d) => (d.ok ? setData(d) : setError(d.error || "Something went wrong")))
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+    }, []);
+
+    return h(
+      Container,
+      { className: "py-12 sm:py-16 max-w-3xl" },
+      h(SectionHeading, { eyebrow: "This week's game", title: data ? GUWH.formatDate(new Date(data.sessionDate + "T00:00:00")) : "" }),
+      error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
+      loading && h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"),
+      data && !data.published &&
+        h(
+          "div",
+          { className: "rounded-2xl border-2 border-dashed border-black/10 p-10 text-center text-[var(--ink-soft)]" },
+          "Check back soon — the Game Coordinator is still sorting teams for this week."
+        ),
+      data && data.published &&
+        h(
+          "div",
+          { className: "grid sm:grid-cols-2 gap-6" },
+          ["Pool A", "Pool B"].map((pool) =>
+            h(
+              "div",
+              { key: pool, className: "flex flex-col gap-3" },
+              h("h3", { className: "font-display font-bold text-[var(--ink)]" }, pool),
+              ["White", "Black"].map((cap) =>
+                h(
+                  "div",
+                  { key: cap, className: "rounded-2xl bg-[var(--sand)] p-4" },
+                  h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-2" }, cap + " caps"),
+                  data.assignments[pool][cap].length === 0
+                    ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "—")
+                    : h(
+                        "div",
+                        { className: "flex flex-col gap-1.5" },
+                        data.assignments[pool][cap].map((p) => h("p", { key: p.id, className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")))
+                      )
+                )
+              )
+            )
+          )
+        )
+    );
+  }
+
+  // Concept-preview Game Board (artifact-entry.html only) — unchanged demo data.
+  function DemoGameBoardPage() {
     const [, force] = React.useReducer((x) => x + 1, 0);
     React.useEffect(() => GUWH.Store.subscribe(force), []);
     const state = GUWH.Store.getState();
@@ -148,6 +207,10 @@ GUWH.Pages = GUWH.Pages || {};
             "Check back soon — the organiser is still sorting ", GUWH.TEAM_NAMES.join(", "), " for this week."
           )
     );
+  }
+
+  function GameBoardPage() {
+    return GUWH.Identity ? h(RealGameBoardPage) : h(DemoGameBoardPage);
   }
 
   GUWH.Pages.GameBoard = GameBoardPage;
