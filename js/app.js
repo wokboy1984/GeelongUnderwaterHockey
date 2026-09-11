@@ -20,19 +20,36 @@
     { label: "My Profile", path: "/portal/profile" },
   ];
 
-  // Real members (live site) only get what's actually been migrated so far —
-  // the rest of PLAYER_NAV still runs on demo data and isn't ready to show
-  // to a real logged-in visitor yet.
-  const REAL_PLAYER_NAV = [
-    { label: "Dashboard", path: "/portal/dashboard" },
-    { label: "Bring a Mate", path: "/portal/bring-a-mate" },
-  ];
-
   const ORGANISER_NAV = [
     { label: "Attendance", path: "/organiser/attendance" },
     { label: "Team Builder", path: "/organiser/teams" },
     { label: "Publish", path: "/organiser/publish" },
   ];
+
+  // Real workspaces (live site) — each one only appears in nav for a member
+  // who actually holds the role it needs, and each route re-checks the same
+  // role server-side isn't enough on its own, so the page behind it also
+  // bounces anyone without the role. Every registered member is implicitly
+  // a "Member" — these are the roles stacked on top.
+  function realNavFor(roles) {
+    const items = [
+      { label: "Dashboard", path: "/portal/dashboard" },
+      { label: "Bring a Mate", path: "/portal/bring-a-mate" },
+    ];
+    if (roles.includes("game_coordinator") || roles.includes("administrator")) {
+      items.push({ label: "Game Coordination", path: "/coordinator" });
+    }
+    if (roles.includes("community_moderator") || roles.includes("administrator")) {
+      items.push({ label: "Community & Content", path: "/community" });
+    }
+    if (roles.includes("treasurer") || roles.includes("administrator")) {
+      items.push({ label: "Finance", path: "/finance" });
+    }
+    if (roles.includes("administrator")) {
+      items.push({ label: "Administration", path: "/admin/roles" });
+    }
+    return items;
+  }
 
   function NavBar({ path }) {
     const { auth } = GUWH.Store.getState();
@@ -43,8 +60,12 @@
     // which only exists for the concept preview.
     const identityUser = GUWH.Identity ? GUWH.Identity.currentUser() : null;
     const loggedIn = GUWH.Identity ? !!identityUser : auth.loggedIn;
-    const role = GUWH.Identity ? "player" : auth.role; // no real organiser accounts yet
-    const items = loggedIn ? (GUWH.Identity ? REAL_PLAYER_NAV : role === "organiser" ? ORGANISER_NAV : PLAYER_NAV) : PUBLIC_NAV;
+    const role = GUWH.Identity ? "player" : auth.role; // demo-only concept preview has no real roles
+    const items = loggedIn
+      ? GUWH.Identity
+        ? realNavFor(GUWH.Identity.currentRoles())
+        : role === "organiser" ? ORGANISER_NAV : PLAYER_NAV
+      : PUBLIC_NAV;
     const homeHref = loggedIn ? (role === "organiser" ? "/organiser/attendance" : "/portal/dashboard") : "/";
     function doLogout() {
       if (GUWH.Identity) GUWH.Identity.logout();
@@ -196,6 +217,35 @@
     if (path === "/organiser/attendance") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "attendance" }); }
     if (path === "/organiser/teams") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "teams" }); }
     if (path === "/organiser/publish") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "publish" }); }
+
+    // Real role-gated workspaces (live site only — GUWH.Identity present).
+    // Each check is client-side convenience only; the pages themselves call
+    // endpoints that re-check the same role against the database, so a
+    // direct URL visit without the role gets a 403 from the server, not
+    // just a redirect here.
+    if (path === "/coordinator") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      const roles = GUWH.Identity.currentRoles();
+      if (!roles.includes("game_coordinator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
+      return h(GUWH.Pages.Coordinator);
+    }
+    if (path === "/community") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      const roles = GUWH.Identity.currentRoles();
+      if (!roles.includes("community_moderator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
+      return h(GUWH.Pages.Community);
+    }
+    if (path === "/finance") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      const roles = GUWH.Identity.currentRoles();
+      if (!roles.includes("treasurer") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
+      return h(GUWH.Pages.Finance);
+    }
+    if (path === "/admin/roles") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      if (!GUWH.Identity.currentRoles().includes("administrator")) { navigate("/portal/dashboard"); return null; }
+      return h(GUWH.Pages.AdminRoles);
+    }
 
     return h(
       Container,

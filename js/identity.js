@@ -7,16 +7,49 @@ window.GUWH = window.GUWH || {};
 
 (function () {
   const listeners = new Set();
+  let cachedMember = null; // { id, email, firstName, lastName, age, roles } — always from /api/me, never client-guessed
 
   function ready() {
     return typeof window.netlifyIdentity !== "undefined";
   }
 
+  // Fetches the real member profile + roles for whoever's logged in right
+  // now. Roles are the server's answer, not anything cached client-side
+  // trusted on its own — every privileged endpoint re-checks them anyway.
+  async function refreshMember() {
+    if (!currentUser()) {
+      cachedMember = null;
+      listeners.forEach((fn) => fn());
+      return null;
+    }
+    try {
+      const res = await authFetch("/api/me");
+      const data = await res.json();
+      cachedMember = data.ok ? data.member : null;
+    } catch (e) {
+      cachedMember = null;
+    }
+    listeners.forEach((fn) => fn());
+    return cachedMember;
+  }
+
+  function currentMember() {
+    return cachedMember;
+  }
+
+  function currentRoles() {
+    return cachedMember ? cachedMember.roles : [];
+  }
+
+  function hasRole(role) {
+    return currentRoles().includes(role);
+  }
+
   function init() {
     if (!ready()) return;
-    window.netlifyIdentity.on("login", () => listeners.forEach((fn) => fn()));
-    window.netlifyIdentity.on("logout", () => listeners.forEach((fn) => fn()));
-    window.netlifyIdentity.on("init", () => listeners.forEach((fn) => fn()));
+    window.netlifyIdentity.on("login", () => { refreshMember(); listeners.forEach((fn) => fn()); });
+    window.netlifyIdentity.on("logout", () => { cachedMember = null; listeners.forEach((fn) => fn()); });
+    window.netlifyIdentity.on("init", (user) => { if (user) refreshMember(); listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.init();
   }
 
@@ -55,5 +88,5 @@ window.GUWH = window.GUWH || {};
     return fetch(url, Object.assign({}, options, { headers }));
   }
 
-  GUWH.Identity = { init, onChange, currentUser, login, signup, logout, authFetch };
+  GUWH.Identity = { init, onChange, currentUser, login, signup, logout, authFetch, currentMember, currentRoles, hasRole, refreshMember };
 })();
