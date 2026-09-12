@@ -77,12 +77,12 @@ function nextWednesdayISO(): string {
 }
 
 function shapePlayer(r: any) {
-  return { id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };
+  return { id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new, grade: r.grade || null, position: r.position || null };
 }
 
 async function fullBoard(db: any, sessionId: number, published: boolean, sessionDate: string) {
   const confirmedRows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new
+    select m.id, m.email, m.first_name, m.last_name, m.is_new, m.grade, m.position
     from bookings b join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'in'
     order by b.created_at asc
@@ -94,7 +94,7 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   `;
 
   const assignedRows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new, ta.team_id
+    select m.id, m.email, m.first_name, m.last_name, m.is_new, m.grade, m.position, ta.team_id
     from team_assignments ta join members m on m.id = ta.member_id
     where ta.session_id = ${sessionId}
   `;

@@ -23,6 +23,18 @@ function lastNameFrom(fullName: string | undefined): string {
   return parts.length > 1 ? parts.slice(1).join(" ") : "";
 }
 
+// The DB driver can hand back date_of_birth as either a plain "YYYY-MM-DD"
+// string or a native Date object depending on how it's stored — and a raw
+// Date serializes via JSON.stringify to a full ISO timestamp
+// ("2001-05-04T00:00:00.000Z"), which an <input type="date"> silently
+// refuses to display. Always normalize to a bare date string here so the
+// profile form actually shows a DOB that's already on file.
+function dobToInputString(dob: string | Date | null | undefined): string | null {
+  if (!dob) return null;
+  if (typeof dob === "string") return dob.length > 10 ? dob.slice(0, 10) : dob;
+  return dob.toISOString().slice(0, 10);
+}
+
 async function shapeProfile(db: any, memberId: string) {
   const [row] = await db.sql`
     select id, email, first_name, last_name, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new
@@ -38,7 +50,7 @@ async function shapeProfile(db: any, memberId: string) {
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
-    dateOfBirth: row.date_of_birth,
+    dateOfBirth: dobToInputString(row.date_of_birth),
     age: ageFromDOB(row.date_of_birth),
     emergencyName: row.emergency_name,
     emergencyPhone: row.emergency_phone,
@@ -70,21 +82,36 @@ export default async (req: Request, context: Context) => {
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
 
-      let dateOfBirth: string | null = null;
-      if (body.dateOfBirth) {
-        const d = new Date(String(body.dateOfBirth) + "T00:00:00");
-        if (Number.isNaN(d.getTime()) || d > new Date()) {
-          return new Response(JSON.stringify({ ok: false, error: "That date of birth doesn't look right" }), {
-            status: 400,
-            headers: { "content-type": "application/json" },
-          });
-        }
-        dateOfBirth = String(body.dateOfBirth);
+      // Name, date of birth and an emergency contact are all safety- or
+      // eligibility-critical (DOB gates the adults-only Members Forum;
+      // emergency contact is needed poolside) — the form now requires them,
+      // so the API does too, rather than trusting the client alone.
+      const firstName = String(body.firstName || "").trim();
+      const lastName = String(body.lastName || "").trim();
+      const emergencyName = String(body.emergencyName || "").trim();
+      const emergencyPhone = String(body.emergencyPhone || "").trim();
+      const phone = String(body.phone || "").trim() || null;
+
+      const missing: string[] = [];
+      if (!firstName) missing.push("first name");
+      if (!body.dateOfBirth) missing.push("date of birth");
+      if (!emergencyName) missing.push("emergency contact name");
+      if (!emergencyPhone) missing.push("emergency contact phone");
+      if (missing.length) {
+        return new Response(JSON.stringify({ ok: false, error: "Please fill in: " + missing.join(", ") }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
       }
 
-      const emergencyName = String(body.emergencyName || "").trim() || null;
-      const emergencyPhone = String(body.emergencyPhone || "").trim() || null;
-      const phone = String(body.phone || "").trim() || null;
+      const d = new Date(String(body.dateOfBirth) + "T00:00:00");
+      if (Number.isNaN(d.getTime()) || d > new Date()) {
+        return new Response(JSON.stringify({ ok: false, error: "That date of birth doesn't look right" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const dateOfBirth = String(body.dateOfBirth);
 
       const rawPosition = String(body.position || "").trim();
       if (rawPosition && !isPosition(rawPosition)) {
@@ -106,6 +133,8 @@ export default async (req: Request, context: Context) => {
 
       await db.sql`
         update members set
+          first_name = ${firstName},
+          last_name = ${lastName},
           date_of_birth = ${dateOfBirth},
           emergency_name = ${emergencyName},
           emergency_phone = ${emergencyPhone},

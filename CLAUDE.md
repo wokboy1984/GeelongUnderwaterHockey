@@ -45,7 +45,8 @@ served as part of the live site and should be left alone.
 
 ## Local environment notes
 
-- Node and Python are not installed on this machine. There is no way
-  to run a local static server, and `npm install` will not work.
+- Node is installed and used for `netlify dev`, `node --check`, and
+  running `netlify database migrations apply` against the local dev
+  Postgres.
 - The terminal is Windows PowerShell 5.1. `&&` is a syntax error
   there — chain commands with `;`, or run them as separate commands.

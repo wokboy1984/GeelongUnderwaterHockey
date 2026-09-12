@@ -30,7 +30,7 @@ GUWH.Pages = GUWH.Pages || {};
 
     return h(
       Container,
-      { className: "py-10 sm:py-14 max-w-3xl" },
+      { className: "py-10 sm:py-14 max-w-4xl" },
       h(SectionHeading, { eyebrow: "Book a game", title: GUWH.formatDate(wed) }),
 
       h(

@@ -5,48 +5,16 @@ window.GUWH = window.GUWH || {};
 GUWH.Pages = GUWH.Pages || {};
 
 (function () {
-  const { Container, Button, Pill, Icon, SectionHeading, FormField, inputCls } = GUWH.UI;
+  const { Container, Button, Pill, Icon, SectionHeading, FormField, inputCls, MemberPhoto } = GUWH.UI;
+  const { navigate } = GUWH.Router;
 
   const EMOJI_CHOICES = ["🏊", "🤿", "🐬", "🦈", "🐢", "🐙", "🌊", "🥽"];
 
   const REAL_POSITIONS = ["Forward", "Back", "Wing", "Goalie", "Centre", "Unknown"];
   const REAL_GRADES = ["A", "B", "Casual", "Junior"];
 
-  // Fetches a member's photo through the authenticated endpoint (a plain
-  // <img src> can't carry the login token) and shows it as a circle, or a
-  // generic placeholder if there isn't one yet.
-  function MemberPhoto({ memberId, version, size }) {
-    const [url, setUrl] = React.useState(null);
-    const dim = size || 88;
-
-    React.useEffect(() => {
-      let objectUrl = null;
-      let cancelled = false;
-      setUrl(null);
-      if (!memberId || !version) return undefined;
-      GUWH.Identity.authFetch("/api/profile-photo?memberId=" + encodeURIComponent(memberId) + "&v=" + version)
-        .then((r) => (r.ok ? r.blob() : Promise.reject()))
-        .then((blob) => {
-          if (cancelled) return;
-          objectUrl = URL.createObjectURL(blob);
-          setUrl(objectUrl);
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-      };
-    }, [memberId, version]);
-
-    if (url) {
-      return h("img", { src: url, className: "rounded-full object-cover", style: { width: dim, height: dim } });
-    }
-    return h(
-      "div",
-      { className: "rounded-full bg-[var(--sand)] flex items-center justify-center text-[var(--ink-soft)]", style: { width: dim, height: dim } },
-      h(Icon, { name: "users", size: Math.round(dim / 2.5) })
-    );
-  }
+  // MemberPhoto now lives in js/ui.js (GUWH.UI.MemberPhoto) so the
+  // Dashboard's profile summary card can share it too.
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -159,6 +127,85 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // Members Forum preferences — adult members only. Kept separate from the
+  // main profile form/save button since it talks to /api/forum/me, not
+  // /api/profile. Mirrors the opt-in flow in js/pages/forum.js's OptInGate,
+  // but here for members who are already opted in and just want to adjust
+  // privacy settings or leave.
+  function ForumPrefsCard() {
+    const [me, setMe] = React.useState(null);
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState(null);
+
+    function load() {
+      return GUWH.Identity.authFetch("/api/forum/me").then((r) => r.json()).then((d) => { if (d.ok) setMe(d); });
+    }
+    React.useEffect(() => { load(); }, []);
+
+    async function updatePrivacy(patch) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/forum/me", { method: "POST", body: JSON.stringify(Object.assign({ action: "update_privacy" }, patch)) });
+        const d = await res.json();
+        if (d.ok) load();
+        else setError(d.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function leaveForum() {
+      if (!window.confirm("Leave the Members Forum? Your existing posts stay, but you'll stop seeing forum content and won't be able to post until you opt back in.")) return;
+      setBusy(true);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/forum/me", { method: "POST", body: JSON.stringify({ action: "opt_out" }) });
+        const d = await res.json();
+        if (d.ok) load();
+        else setError(d.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    if (!me || !me.eligible) return null; // juniors and members without a DOB on file see nothing forum-related here
+
+    const p = me.participation;
+    if (!p || !p.optedIn) {
+      return h(
+        "div",
+        { className: "rounded-2xl bg-[var(--sand)] p-4 flex items-center justify-between gap-4 flex-wrap" },
+        h(
+          "div",
+          null,
+          h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Members Forum"),
+          h("p", { className: "text-sm text-[var(--ink)] mt-1" }, "Not joined yet — club chat, game-day talk and announcements, opt-in only.")
+        ),
+        h(Button, { type: "button", size: "sm", onClick: () => navigate("/portal/forum") }, "View & join")
+      );
+    }
+
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Members Forum"),
+      error && h("p", { className: "text-xs text-[var(--bad)]" }, error),
+      h("label", { className: "flex items-center gap-2 text-sm text-[var(--ink)]" }, h("input", { type: "checkbox", checked: p.showPhoto, disabled: busy, onChange: (e) => updatePrivacy({ showPhoto: e.target.checked, showGrade: p.showGrade, showBadges: p.showBadges }) }), "Show my profile photo on my posts"),
+      h("label", { className: "flex items-center gap-2 text-sm text-[var(--ink)]" }, h("input", { type: "checkbox", checked: p.showGrade, disabled: busy, onChange: (e) => updatePrivacy({ showPhoto: p.showPhoto, showGrade: e.target.checked, showBadges: p.showBadges }) }), "Show my grade on my posts"),
+      h("label", { className: "flex items-center gap-2 text-sm text-[var(--ink)]" }, h("input", { type: "checkbox", checked: p.showBadges, disabled: busy, onChange: (e) => updatePrivacy({ showPhoto: p.showPhoto, showGrade: p.showGrade, showBadges: e.target.checked }) }), "Show contribution badges on my posts"),
+      h(
+        "div",
+        { className: "flex items-center gap-3 mt-1" },
+        h(Button, { type: "button", size: "sm", variant: "secondary", onClick: () => navigate("/portal/forum") }, "Open Members Forum"),
+        h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: leaveForum }, "Leave the forum")
+      )
+    );
+  }
+
   // Real Profile (live site) — a member's own details. Games played is
   // read-only (counted from real attendance history, never typed in);
   // grade can be self-set here but a Game Coordinator/Administrator may
@@ -178,6 +225,8 @@ GUWH.Pages = GUWH.Pages || {};
           if (d.ok) {
             setMember(d.member);
             setForm({
+              firstName: d.member.firstName || "",
+              lastName: d.member.lastName || "",
               dateOfBirth: d.member.dateOfBirth || "",
               emergencyName: d.member.emergencyName || "",
               emergencyPhone: d.member.emergencyPhone || "",
@@ -197,9 +246,28 @@ GUWH.Pages = GUWH.Pages || {};
       setForm((f) => Object.assign({}, f, { [key]: value }));
     }
 
+    // First name, date of birth and an emergency contact are safety- or
+    // eligibility-critical (DOB gates the adults-only Members Forum;
+    // emergency contact is needed poolside), so the form won't submit
+    // without them — checked here for an instant message, and re-checked
+    // by /api/profile itself as the real gate.
+    function missingRequiredFields() {
+      const missing = [];
+      if (!form.firstName.trim()) missing.push("First name");
+      if (!form.dateOfBirth) missing.push("Date of birth");
+      if (!form.emergencyName.trim()) missing.push("Emergency contact name");
+      if (!form.emergencyPhone.trim()) missing.push("Emergency contact phone");
+      return missing;
+    }
+
     async function save(ev) {
       ev.preventDefault();
       setError(null);
+      const missing = missingRequiredFields();
+      if (missing.length) {
+        setError("Please fill in: " + missing.join(", "));
+        return;
+      }
       try {
         const res = await GUWH.Identity.authFetch("/api/profile", { method: "POST", body: JSON.stringify(form) });
         const d = await res.json();
@@ -207,18 +275,22 @@ GUWH.Pages = GUWH.Pages || {};
           setMember(d.member);
           setSavedFlash(true);
           setTimeout(() => setSavedFlash(false), 2200);
+          // Date of birth (and therefore adult-forum eligibility) lives on
+          // the cached identity used for nav visibility — refresh it so a
+          // just-added DOB shows the Members Forum link without a re-login.
+          GUWH.Identity.refreshMember();
         } else setError(d.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
       }
     }
 
-    if (loading) return h(Container, { className: "py-10 sm:py-14 max-w-2xl" }, h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"));
-    if (!member) return h(Container, { className: "py-10 sm:py-14 max-w-2xl" }, error && h("p", { className: "text-sm text-[var(--bad)]" }, error));
+    if (loading) return h(Container, { className: "py-10 sm:py-14 max-w-3xl" }, h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"));
+    if (!member) return h(Container, { className: "py-10 sm:py-14 max-w-3xl" }, error && h("p", { className: "text-sm text-[var(--bad)]" }, error));
 
     return h(
       Container,
-      { className: "py-10 sm:py-14 max-w-2xl" },
+      { className: "py-10 sm:py-14 max-w-3xl" },
       h(SectionHeading, { eyebrow: "My profile", title: member.firstName + " " + member.lastName }),
 
       h(
@@ -229,6 +301,8 @@ GUWH.Pages = GUWH.Pages || {};
 
       h(EmailUpdateCard, { currentEmail: member.email }),
 
+      h("div", { className: "mt-6" }, h(ForumPrefsCard)),
+
       h(
         "form",
         { onSubmit: save, className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 mt-6 flex flex-col gap-5" },
@@ -238,8 +312,8 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "First name" }, h("input", { className: inputCls, value: member.firstName, disabled: true })),
-          h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: member.lastName, disabled: true }))
+          h(FormField, { label: "First name *" }, h("input", { className: inputCls, value: form.firstName, onChange: (e) => set("firstName", e.target.value) })),
+          h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: form.lastName, onChange: (e) => set("lastName", e.target.value) }))
         ),
         h(
           "div",
@@ -251,7 +325,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "Date of birth" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) })),
+          h(FormField, { label: "Date of birth *" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) })),
           h(
             FormField,
             { label: "Grade" },
@@ -285,9 +359,10 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "Emergency contact name" }, h("input", { className: inputCls, value: form.emergencyName, onChange: (e) => set("emergencyName", e.target.value) })),
-          h(FormField, { label: "Emergency contact phone" }, h("input", { type: "tel", className: inputCls, value: form.emergencyPhone, onChange: (e) => set("emergencyPhone", e.target.value) }))
+          h(FormField, { label: "Emergency contact name *" }, h("input", { className: inputCls, value: form.emergencyName, onChange: (e) => set("emergencyName", e.target.value) })),
+          h(FormField, { label: "Emergency contact phone *" }, h("input", { type: "tel", className: inputCls, value: form.emergencyPhone, onChange: (e) => set("emergencyPhone", e.target.value) }))
         ),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — an emergency contact is needed poolside, and date of birth is what unlocks the adults-only Members Forum."),
 
         h(
           "div",

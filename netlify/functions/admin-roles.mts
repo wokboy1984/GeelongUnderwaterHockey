@@ -41,13 +41,18 @@ export default async (req: Request, context: Context) => {
   try {
     if (req.method === "GET") {
       const q = new URL(req.url).searchParams.get("q")?.trim() || "";
+      // Walk-in players added via the coordinator's "Add Player" (no
+      // account, no email) feature are placeholder members that can never
+      // log in — they get a synthetic *@no-login.guwh email and have no
+      // real identity to grant a role to, so they're excluded here.
       const rows = q
         ? await db.sql`
             select m.id, m.email, m.first_name, m.last_name, m.date_of_birth,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
-            where m.email ilike ${"%" + q + "%"} or m.first_name ilike ${"%" + q + "%"} or m.last_name ilike ${"%" + q + "%"}
+            where m.email not like '%@no-login.guwh'
+              and (m.email ilike ${"%" + q + "%"} or m.first_name ilike ${"%" + q + "%"} or m.last_name ilike ${"%" + q + "%"})
             group by m.id
             order by m.created_at desc
             limit 25
@@ -57,6 +62,7 @@ export default async (req: Request, context: Context) => {
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
+            where m.email not like '%@no-login.guwh'
             group by m.id
             order by m.created_at desc
             limit 25
@@ -79,7 +85,7 @@ export default async (req: Request, context: Context) => {
     }
 
     const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth from members where email = ${memberEmail}`;
-    if (!target) {
+    if (!target || target.email.endsWith("@no-login.guwh")) {
       return new Response(
         JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
         { status: 404, headers: { "content-type": "application/json" } }

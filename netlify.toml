@@ -6,6 +6,16 @@
 # refresh on a path other than "/" needs to fall back to index.html.
 # Netlify Functions (registered via their own `config.path`) are matched
 # before redirects, so /api/* is unaffected by this catch-all.
+#
+# LOCAL DEV NOTE: if you're running `netlify dev` locally, the current
+# Netlify CLI has a bug where it 403s any static asset in a subdirectory
+# (js/*, images/*, etc) when this catch-all is active — static files fail
+# to take precedence over the redirect locally, even though they do
+# correctly in production. The app uses hash-based routing
+# (js/router.js) so this redirect is never actually needed for in-app
+# navigation; it only matters for a direct/bookmarked hit on a non-hash
+# path in production. If you comment it out for local testing, always
+# restore it (uncomment) before committing/pushing.
 [[redirects]]
   from = "/*"
   to = "/index.html"

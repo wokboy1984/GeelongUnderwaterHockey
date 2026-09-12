@@ -5,11 +5,13 @@
   const { Container, Button, Icon, Pill } = GUWH.UI;
   const { navigate, useRoute } = GUWH.Router;
 
+  // "Try UWH" is deliberately not in this list — it's the highlighted CTA
+  // button in the nav bar instead (see NavBar), not a plain text link.
   const PUBLIC_NAV = [
     { label: "Home", path: "/" },
-    { label: "Try Underwater Hockey", path: "/new-player" },
     { label: "About Us", path: "/about" },
     { label: "News & Community", path: "/news" },
+    { label: "Member portal", path: "/portal" },
   ];
 
   const PLAYER_NAV = [
@@ -26,18 +28,32 @@
     { label: "Publish", path: "/organiser/publish" },
   ];
 
-  // Real workspaces (live site) — each one only appears in nav for a member
-  // who actually holds the role it needs, and each route re-checks the same
-  // role server-side isn't enough on its own, so the page behind it also
-  // bounces anyone without the role. Every registered member is implicitly
-  // a "Member" — these are the roles stacked on top.
-  function realNavFor(roles) {
+  // Real workspaces (live site) — split into two groups so a member who
+  // also holds a staff role (game_coordinator, community_moderator,
+  // treasurer, administrator) sees BOTH: their ordinary member nav, and a
+  // separate, clearly-labelled staff nav underneath it. Every registered
+  // member is implicitly a "Member" — memberNavFor is what every logged-in
+  // member sees regardless of roles; adminNavFor is only the roles stacked
+  // on top, and is empty for a plain member. Real enforcement happens
+  // server-side on every route/endpoint regardless — these two lists only
+  // control what shows up to click.
+  function memberNavFor(showForum) {
     const items = [
       { label: "Dashboard", path: "/portal/dashboard" },
       { label: "This Week's Game", path: "/portal/board" },
       { label: "Bring a Mate", path: "/portal/bring-a-mate" },
-      { label: "My Profile", path: "/portal/profile" },
     ];
+    // Members Forum only ever appears for adult members — juniors get zero
+    // trace of it, not just a locked door. Real enforcement happens
+    // server-side on every forum endpoint regardless; this just keeps
+    // juniors from seeing it exists.
+    if (showForum) items.push({ label: "Members Forum", path: "/portal/forum" });
+    items.push({ label: "My Profile", path: "/portal/profile" });
+    return items;
+  }
+
+  function adminNavFor(roles) {
+    const items = [];
     if (roles.includes("game_coordinator") || roles.includes("administrator")) {
       items.push({ label: "Game Coordination", path: "/coordinator" });
     }
@@ -63,16 +79,42 @@
     const identityUser = GUWH.Identity ? GUWH.Identity.currentUser() : null;
     const loggedIn = GUWH.Identity ? !!identityUser : auth.loggedIn;
     const role = GUWH.Identity ? "player" : auth.role; // demo-only concept preview has no real roles
-    const items = loggedIn
+    // The member portal nav is now a SECOND row underneath the main site
+    // nav, not a replacement for it — logged-in members still need Home /
+    // Try Underwater Hockey / About Us / News & Community one click away.
+    const identityMember = GUWH.Identity ? GUWH.Identity.currentMember() : null;
+    const showForum = !!(identityMember && identityMember.age !== null && identityMember.age !== undefined && identityMember.age >= 18);
+    // Member Functions: what every logged-in member sees. Admin Functions:
+    // only the staff-role workspaces stacked on top — empty for a plain
+    // member, so an administrator (who holds every staff role at once) sees
+    // both rows while everyone else only ever sees the first.
+    const portalItems = loggedIn
       ? GUWH.Identity
-        ? realNavFor(GUWH.Identity.currentRoles())
+        ? memberNavFor(showForum)
         : role === "organiser" ? ORGANISER_NAV : PLAYER_NAV
-      : PUBLIC_NAV;
+      : [];
+    const adminItems = loggedIn && GUWH.Identity ? adminNavFor(GUWH.Identity.currentRoles()) : [];
     const homeHref = loggedIn ? (role === "organiser" ? "/organiser/attendance" : "/portal/dashboard") : "/";
     function doLogout() {
       if (GUWH.Identity) GUWH.Identity.logout();
       else GUWH.Store.logout();
       navigate("/");
+    }
+
+    function navButton(item, { onClick, active, small }) {
+      return h(
+        "button",
+        {
+          key: item.path,
+          onClick,
+          className: cx(
+            "rounded-full font-semibold transition",
+            small ? "px-3 py-1.5 text-xs" : "px-3 py-2 text-sm",
+            active ? "bg-white/15 text-white" : "text-white/70 hover:text-white"
+          ),
+        },
+        item.label
+      );
     }
 
     return h(
@@ -90,22 +132,12 @@
         h(
           "nav",
           { className: "hidden lg:flex items-center gap-1" },
-          items.map((item) =>
-            h(
-              "button",
-              {
-                key: item.path,
-                onClick: () => navigate(item.path),
-                className: cx("px-3 py-2 rounded-full text-sm font-semibold transition", path === item.path ? "bg-white/15 text-white" : "text-white/70 hover:text-white"),
-              },
-              item.label
-            )
-          )
+          PUBLIC_NAV.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path }))
         ),
         h(
           "div",
           { className: "hidden lg:flex items-center gap-2" },
-          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/portal") }, "Member portal"),
+          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/new-player") }, "Try UWH"),
           loggedIn && h(Button, { size: "sm", variant: "secondary", className: "!bg-white/10 !text-white !border-white/25", onClick: doLogout }, "Log out")
         ),
         h(
@@ -114,6 +146,27 @@
           h(Icon, { name: open ? "x" : "menu", size: 22 })
         )
       ),
+      loggedIn && portalItems.length > 0 &&
+        h(
+          "div",
+          { className: "hidden lg:block border-t border-white/10 bg-black/15" },
+          h(
+            Container,
+            { className: "flex items-center gap-1 h-11" },
+            portalItems.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path, small: true }))
+          )
+        ),
+      loggedIn && adminItems.length > 0 &&
+        h(
+          "div",
+          { className: "hidden lg:block border-t border-white/10 bg-black/30" },
+          h(
+            Container,
+            { className: "flex items-center gap-3 h-11" },
+            h("span", { className: "font-mono text-[10px] uppercase tracking-wide text-white/40 shrink-0" }, "Admin functions"),
+            adminItems.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path, small: true }))
+          )
+        ),
       open &&
         h(
           "div",
@@ -121,15 +174,37 @@
           h(
             Container,
             { className: "flex flex-col py-3 gap-1" },
-            items.map((item) =>
+            PUBLIC_NAV.map((item) =>
               h(
                 "button",
                 { key: item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
                 item.label
               )
             ),
+            loggedIn && portalItems.length > 0 &&
+              h("div", { className: "h-px bg-white/10 my-2" }),
+            loggedIn &&
+              portalItems.map((item) =>
+                h(
+                  "button",
+                  { key: item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                  item.label
+                )
+              ),
+            loggedIn && adminItems.length > 0 &&
+              h("div", { className: "h-px bg-white/10 my-2" }),
+            loggedIn && adminItems.length > 0 &&
+              h("span", { className: "font-mono text-[10px] uppercase tracking-wide text-white/40 px-3 pb-1" }, "Admin functions"),
+            loggedIn &&
+              adminItems.map((item) =>
+                h(
+                  "button",
+                  { key: item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                  item.label
+                )
+              ),
             !loggedIn
-              ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/portal"); setOpen(false); } }, "Member portal")
+              ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/new-player"); setOpen(false); } }, "Try UWH")
               : h(Button, { size: "sm", variant: "secondary", className: "mt-2 w-fit !bg-white/10 !text-white !border-white/25", onClick: () => { doLogout(); setOpen(false); } }, "Log out")
           )
         )
@@ -226,6 +301,20 @@
         return h(GUWH.Pages.Profile);
       }
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Profile);
+    }
+    if (path === "/portal/forum" || path.indexOf("/portal/forum/topic/") === 0) {
+      // Members Forum — real backend only. Adult-members-only is enforced
+      // server-side on every forum endpoint; the page itself also checks
+      // eligibility/opt-in before showing anything, so a junior or an
+      // opted-out member who lands here directly just sees a gate, not
+      // forum content.
+      if (!GUWH.Identity) {
+        return h(Container, { className: "py-24 text-center text-[var(--ink-soft)]" }, "Not available in this preview.");
+      }
+      if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      if (path === "/portal/forum") return h(GUWH.Pages.Forum);
+      const topicId = Number(path.slice("/portal/forum/topic/".length));
+      return h(GUWH.Pages.Forum, { topicId: Number.isFinite(topicId) ? topicId : null });
     }
 
     if (path === "/organiser/attendance") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "attendance" }); }

@@ -1,18 +1,26 @@
 // Game Coordinator attendance tools: see who's confirmed for this
-// Wednesday, and add or cancel a real member's attendance on their behalf
-// (e.g. someone calls in sick, or asks to be added at the pool). Scoped to
-// registered members only for now — walk-in guests with no account aren't
-// covered here yet (Bring a Mate invites exist, but there's no attendance
-// record for a guest until they have their own login).
+// Wednesday, add or cancel a real member's attendance on their behalf
+// (e.g. someone calls in sick, or asks to be added at the pool), or add a
+// walk-in player who has never logged in by name alone.
 //
 // GET  /api/coordinator/attendance -> { ok, sessionDate, players: [...] }
 // POST /api/coordinator/attendance { memberEmail, in } -> same shape
+// POST /api/coordinator/attendance { guestName } -> adds a name-only walk-in
+//   player (no account, no email) as confirmed for this session. Gives them
+//   a real `members` row with a synthetic, unguessable placeholder email so
+//   no schema change is needed and they behave like any other player for
+//   Teams/Timetable — they just never log in.
 //
 // Requires the caller to hold 'game_coordinator' or 'administrator'.
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, isGrade, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/);
+  return { firstName: parts[0] || fullName.trim(), lastName: parts.slice(1).join(" ") };
+}
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -57,6 +65,36 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
+      const guestName = String(body.guestName || "").trim();
+
+      if (guestName) {
+        const { firstName, lastName } = splitName(guestName);
+        const guestId = `guest_${crypto.randomUUID()}`;
+        const guestEmail = `${guestId}@no-login.guwh`;
+        const [guest] = await db.sql`
+          insert into members (id, email, first_name, last_name, is_new)
+          values (${guestId}, ${guestEmail}, ${firstName}, ${lastName}, false)
+          returning id, email
+        `;
+        await db.sql`
+          insert into bookings (session_id, member_id, status)
+          values (${sessionId}, ${guest.id}, 'in')
+          on conflict (session_id, member_id) do update set status = excluded.status
+        `;
+        await logAudit(db, {
+          actorId: caller.id,
+          actorEmail: caller.email,
+          action: "guest_player_added",
+          resourceType: "booking",
+          resourceId: guest.id,
+          newValue: { sessionDate, name: guestName },
+          note: `${caller.email} added walk-in player "${guestName}" for ${sessionDate}`,
+        });
+        return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId) }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       const memberEmail = String(body.memberEmail || "").trim();
       const [target] = await db.sql`select id, email from members where email = ${memberEmail}`;
       if (!target) {

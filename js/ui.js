@@ -88,6 +88,44 @@ window.GUWH = window.GUWH || {};
     );
   }
 
+  // Real-member equivalent of Avatar (which only ever draws a demo emoji).
+  // Fetches a member's uploaded photo through the authenticated endpoint (a
+  // plain <img src> can't carry the login token) and shows it as a circle,
+  // or a generic placeholder if there isn't one yet. Shared by the Profile
+  // page and the Dashboard's profile summary card.
+  function MemberPhoto({ memberId, version, size }) {
+    const [url, setUrl] = React.useState(null);
+    const dim = size || 88;
+
+    React.useEffect(() => {
+      let objectUrl = null;
+      let cancelled = false;
+      setUrl(null);
+      if (!memberId || !version) return undefined;
+      GUWH.Identity.authFetch("/api/profile-photo?memberId=" + encodeURIComponent(memberId) + "&v=" + version)
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => {
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setUrl(objectUrl);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
+    }, [memberId, version]);
+
+    if (url) {
+      return h("img", { src: url, className: "rounded-full object-cover", style: { width: dim, height: dim } });
+    }
+    return h(
+      "div",
+      { className: "rounded-full bg-[var(--sand)] flex items-center justify-center text-[var(--ink-soft)]", style: { width: dim, height: dim } },
+      h(Icon, { name: "users", size: Math.round(dim / 2.5) })
+    );
+  }
+
   function PlayerChip({ player, showTeamLast = false }) {
     if (!player) return null;
     return h(
@@ -252,7 +290,7 @@ window.GUWH = window.GUWH || {};
     "w-full rounded-xl border-2 border-black/10 bg-white px-3.5 py-2.5 text-[15px] text-[var(--ink)] placeholder:text-[var(--ink-soft-70)] focus:border-[var(--accent)] focus:outline-none transition";
 
   GUWH.UI = {
-    Icon, Container, Button, Pill, SectionHeading, Avatar, PlayerChip,
+    Icon, Container, Button, Pill, SectionHeading, Avatar, PlayerChip, MemberPhoto,
     MilestoneCard, AttendanceCounter, EventCard, TeamBoard, ScheduleList,
     ShareCard, FormField, inputCls,
   };

@@ -202,3 +202,22 @@ GUWH.nextWednesday = function (from) {
 GUWH.formatDate = function (date) {
   return date.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
 };
+
+// "2 hours ago" / "3 days ago" style relative time, for forum posts,
+// notifications and anything else that wants a recency-feel timestamp
+// instead of a full date. Falls back to a short date once it's old enough
+// that "X days ago" stops being useful.
+GUWH.formatRelativeTime = function (value) {
+  const then = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(then.getTime())) return "";
+  const seconds = Math.round((Date.now() - then.getTime()) / 1000);
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return minutes + (minutes === 1 ? " minute ago" : " minutes ago");
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours + (hours === 1 ? " hour ago" : " hours ago");
+  const days = Math.round(hours / 24);
+  if (days < 7) return days + (days === 1 ? " day ago" : " days ago");
+  if (days < 30) { const weeks = Math.round(days / 7); return weeks + (weeks === 1 ? " week ago" : " weeks ago"); }
+  return then.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: then.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+};

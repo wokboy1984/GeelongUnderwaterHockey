@@ -5,7 +5,7 @@ window.GUWH = window.GUWH || {};
 GUWH.Pages = GUWH.Pages || {};
 
 (function () {
-  const { Container, Button, Pill, SectionHeading, Icon, EventCard, MilestoneCard, PlayerChip } = GUWH.UI;
+  const { Container, Button, Pill, SectionHeading, Icon, MilestoneCard, PlayerChip } = GUWH.UI;
   const { navigate } = GUWH.Router;
 
   const FIRST_NIGHT_STEPS = [
@@ -24,7 +24,19 @@ GUWH.Pages = GUWH.Pages || {};
 
   function HomePage() {
     const wed = GUWH.nextWednesday();
-    const confirmed = GUWH.Store.confirmedPlayerIds().length;
+    // Live booking count for the upcoming Wednesday, from the public,
+    // unauthenticated /api/public-stats endpoint — not the concept's fake
+    // demo store. Stays null (number hidden) until it loads or if the
+    // request fails, rather than showing a stale placeholder as if live.
+    const [liveStats, setLiveStats] = React.useState(null);
+    React.useEffect(() => {
+      fetch("/api/public-stats")
+        .then((r) => r.json())
+        .then((d) => { if (d.ok) setLiveStats(d); })
+        .catch(() => {});
+    }, []);
+    const confirmed = liveStats ? liveStats.confirmedCount : null;
+    const sessionDateLabel = liveStats ? GUWH.formatDate(new Date(liveStats.sessionDate + "T00:00:00")) : GUWH.formatDate(wed);
 
     return h(
       React.Fragment,
@@ -110,12 +122,13 @@ GUWH.Pages = GUWH.Pages || {};
                     { className: "mt-2 text-sm text-white/70 leading-relaxed max-w-xs" },
                     "Get on the list, see who else is coming, and check in when you get to the pool."
                   ),
-                  h(
-                    "p",
-                    { className: "mt-3 text-sm" },
-                    h("span", { className: "font-display font-bold text-white tabular-nums" }, confirmed),
-                    h("span", { className: "text-white/60" }, " booked for " + GUWH.formatDate(wed))
-                  ),
+                  confirmed !== null &&
+                    h(
+                      "p",
+                      { className: "mt-3 text-sm" },
+                      h("span", { className: "font-display font-bold text-white tabular-nums" }, confirmed),
+                      h("span", { className: "text-white/60" }, " booked for " + sessionDateLabel)
+                    ),
                   h("span", { className: "mt-3 inline-flex items-center gap-1.5 text-sm font-bold text-[var(--accent-light)]" }, "Book this week", h(Icon, { name: "arrowRight", size: 15 }))
                 )
               )
@@ -149,6 +162,11 @@ GUWH.Pages = GUWH.Pages || {};
                 h("p", { className: "mt-1.5 text-sm text-[var(--ink-soft)] leading-relaxed" }, b.body)
               )
             )
+          ),
+          h(
+            "div",
+            { className: "mt-8 flex justify-center" },
+            h(Button, { variant: "cta", size: "lg", onClick: () => navigate("/new-player") }, "Try Underwater Hockey")
           )
         )
       ),
@@ -189,27 +207,20 @@ GUWH.Pages = GUWH.Pages || {};
         )
       ),
 
-      // ---------------- NEXT SESSION STRIP ----------------
+      // ---------------- FINAL CTA ----------------
       h(
         "section",
-        { className: "py-14 bg-[var(--sand)]" },
+        { className: "py-20 bg-[var(--accent)] text-white text-center" },
         h(
           Container,
-          { className: "grid md:grid-cols-[1fr_auto] gap-6 items-center" },
+          { className: "max-w-2xl" },
+          h("h2", { className: "font-display text-4xl sm:text-5xl font-bold text-balance" }, "Three free sessions. We'll even lend you the gear."),
+          h("p", { className: "mt-4 text-white/90 text-lg" }, "Come give it a crack this Wednesday. Worst case, you've had a weird, excellent workout."),
           h(
             "div",
-            null,
-            h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)] mb-2" }, "This week"),
-            h("h2", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, GUWH.formatDate(wed)),
-            h("p", { className: "mt-2 text-[var(--ink-soft)]" }, "Bring a mate — first three sessions are free for them too."),
-            h(
-              "div",
-              { className: "mt-4 flex flex-wrap gap-3" },
-              h(Button, { onClick: () => navigate("/new-player") }, "Bring a mate"),
-              h(Button, { variant: "secondary", onClick: () => navigate("/portal") }, "See this week's board")
-            )
-          ),
-          h(EventCard, null)
+            { className: "mt-8 flex flex-wrap justify-center gap-3" },
+            h(Button, { size: "lg", variant: "dark", onClick: () => navigate("/new-player") }, "Book your first session")
+          )
         )
       ),
 
@@ -297,23 +308,6 @@ GUWH.Pages = GUWH.Pages || {};
             h("p", { className: "mt-2 text-[var(--ink-soft)] max-w-md" }, GUWH.socialPlan)
           ),
           h(Button, { variant: "dark", onClick: () => navigate("/portal") }, "See the full board", h(Icon, { name: "chevronRight", size: 16 }))
-        )
-      ),
-
-      // ---------------- FINAL CTA ----------------
-      h(
-        "section",
-        { className: "py-20 bg-[var(--accent)] text-white text-center" },
-        h(
-          Container,
-          { className: "max-w-2xl" },
-          h("h2", { className: "font-display text-4xl sm:text-5xl font-bold text-balance" }, "Three free sessions. We'll even lend you the gear."),
-          h("p", { className: "mt-4 text-white/90 text-lg" }, "Come give it a crack this Wednesday. Worst case, you've had a weird, excellent workout."),
-          h(
-            "div",
-            { className: "mt-8 flex flex-wrap justify-center gap-3" },
-            h(Button, { size: "lg", variant: "dark", onClick: () => navigate("/new-player") }, "Book your first session")
-          )
         )
       )
     );

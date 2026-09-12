@@ -20,6 +20,7 @@ export function isRole(value: string): value is Role {
 // backend behind them yet — the mapping exists now so the structure is
 // ready when that feature gets built, without a future migration.
 export const PERMISSIONS = {
+  mark_actual_attendance: ["game_coordinator", "treasurer", "community_moderator", "administrator"],
   manage_others_attendance: ["game_coordinator", "administrator"],
   arrange_teams: ["game_coordinator", "administrator"],
   manage_grades: ["game_coordinator", "administrator"],

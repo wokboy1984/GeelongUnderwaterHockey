@@ -88,15 +88,25 @@ async function loadSnapshot(db: any, sessionId: number) {
   });
 
   const teams: Record<number, TeamInfo> = {};
-  const teamMeta: Record<number, { id: number; name: string; playerCount: number; grades: string[] }> = {};
+  const teamMeta: Record<number, { id: number; name: string; playerCount: number; gradeCounts: { grade: string; count: number }[]; ungraded: number }> = {};
   teamRows.forEach((t: any) => {
     const players = teamPlayers[t.id] || [];
     teams[t.id] = { id: t.id, name: t.name, playerIds: players.map((p) => p.id) };
+    // A count per grade (not just which grades are present) so the
+    // coordinator can actually see whether a team is balanced — e.g. "2 A,
+    // 1 B" rather than just "A/B".
+    const counts: Record<string, number> = {};
+    let ungraded = 0;
+    players.forEach((p) => {
+      if (p.grade) counts[p.grade] = (counts[p.grade] || 0) + 1;
+      else ungraded++;
+    });
     teamMeta[t.id] = {
       id: t.id,
       name: t.name,
       playerCount: players.length,
-      grades: Array.from(new Set(players.map((p) => p.grade).filter(Boolean))) as string[],
+      gradeCounts: Object.keys(counts).sort().map((grade) => ({ grade, count: counts[grade] })),
+      ungraded,
     };
   });
 
@@ -185,6 +195,26 @@ async function ensurePoolGamesExist(db: any, rowId: number) {
 
 async function touchRow(db: any, rowId: number, sessionId: number, callerId: string) {
   await db.sql`update timetable_rows set updated_by = ${callerId}, updated_at = now() where id = ${rowId} and session_id = ${sessionId}`;
+}
+
+// Auto-orders the timetable by start time — a row with a known time sorts
+// itself into the right place (nulls last) the moment it's added or its
+// time changes, so the coordinator doesn't have to drag a new game into
+// position. Rows sharing a time (or with no time at all) keep their
+// existing relative order as a tiebreak, which is exactly what a manual
+// drag-reorder (reorder_rows) is still for.
+async function resequenceRows(db: any, sessionId: number) {
+  await db.sql`
+    with ranked as (
+      select id, row_number() over (
+        order by start_min nulls last, row_order asc, id asc
+      ) as rn
+      from timetable_rows
+      where session_id = ${sessionId} and archived_at is null
+    )
+    update timetable_rows t set row_order = ranked.rn
+    from ranked where ranked.id = t.id
+  `;
 }
 
 async function buildResponse(db: any, sessionId: number, sessionDate: string) {
@@ -319,6 +349,7 @@ export default async (req: Request, context: Context) => {
           returning id
         `;
         if (rowType === "game") await ensurePoolGamesExist(db, row.id);
+        await resequenceRows(db, sessionId);
 
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "timetable_row_added",
@@ -345,6 +376,7 @@ export default async (req: Request, context: Context) => {
           where id = ${rowId} and session_id = ${sessionId}
         `;
         if (rowType === "game") await ensurePoolGamesExist(db, rowId);
+        await resequenceRows(db, sessionId);
 
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "timetable_row_edited",
@@ -381,6 +413,7 @@ export default async (req: Request, context: Context) => {
             }
           }
         }
+        await resequenceRows(db, sessionId);
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "timetable_row_added",
           resourceType: "timetable_row", resourceId: String(copy.id),
@@ -412,6 +445,7 @@ export default async (req: Request, context: Context) => {
           select coalesce(max(row_order), 0) + 1 as next from timetable_rows where session_id = ${sessionId} and archived_at is null
         `;
         await db.sql`update timetable_rows set archived_at = null, row_order = ${next}, updated_by = ${caller.id}, updated_at = now() where id = ${rowId} and session_id = ${sessionId}`;
+        await resequenceRows(db, sessionId);
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "timetable_row_edited",
           resourceType: "timetable_row", resourceId: String(rowId), note: `${caller.email} restored an archived timetable row`,

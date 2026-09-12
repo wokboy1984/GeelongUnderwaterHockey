@@ -47,6 +47,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
     const [addEmail, setAddEmail] = React.useState("");
+    const [addName, setAddName] = React.useState("");
 
     function load() {
       setLoading(true);
@@ -93,6 +94,21 @@ GUWH.Pages = GUWH.Pages || {};
       setAttendance(addEmail.trim(), true);
     }
 
+    async function addGuestPlayer(ev) {
+      ev.preventDefault();
+      const name = addName.trim();
+      if (!name) return;
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ guestName: name }) });
+        const data = await res.json();
+        if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); setAddName(""); }
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+
     return h(
       React.Fragment,
       null,
@@ -103,6 +119,12 @@ GUWH.Pages = GUWH.Pages || {};
         { onSubmit: addByEmail, className: "mt-6 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex gap-3 items-end" },
         h(FormField, { label: "Add a member by email" }, h("input", { className: inputCls, value: addEmail, onChange: (e) => setAddEmail(e.target.value), placeholder: "name@example.com" })),
         h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Add as confirmed")
+      ),
+      h(
+        "form",
+        { onSubmit: addGuestPlayer, className: "mt-3 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex gap-3 items-end" },
+        h(FormField, { label: "Add a player (no account needed)" }, h("input", { className: inputCls, value: addName, onChange: (e) => setAddName(e.target.value), placeholder: "Name" })),
+        h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), "Add Player")
       ),
       h(
         "div",
@@ -122,8 +144,8 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "div",
                     null,
-                    h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent" }, "New")),
-                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.email)
+                    h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, (p.firstName + " " + p.lastName).trim(), p.isNew && h(Pill, { tone: "accent" }, "New")),
+                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.email && p.email.endsWith("@no-login.guwh") ? "Walk-in — no account" : p.email)
                   ),
                   h(
                     "div",
@@ -147,8 +169,15 @@ GUWH.Pages = GUWH.Pages || {};
   function PlayerRow({ player, action }) {
     return h(
       "div",
-      { className: "flex items-center justify-between bg-white rounded-xl px-3 py-2" },
-      h("span", { className: "text-sm text-[var(--ink)]" }, player.firstName + " " + player.lastName, player.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")),
+      { className: "flex items-center justify-between bg-white rounded-xl px-3 py-2 gap-3" },
+      h(
+        "div",
+        { className: "flex items-center gap-2 flex-wrap min-w-0" },
+        h("span", { className: "text-sm text-[var(--ink)]" }, player.firstName + " " + player.lastName),
+        player.isNew && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, "New"),
+        player.grade && h(Pill, { tone: "dark", className: "!py-0.5 !px-2 !text-[10px]" }, "Grade " + player.grade),
+        player.position && h("span", { className: "text-xs text-[var(--ink-soft)]" }, player.position)
+      ),
       action
     );
   }
@@ -355,8 +384,18 @@ GUWH.Pages = GUWH.Pages || {};
                 h(
                   "p",
                   { className: "text-[10px] text-[var(--ink-soft)]" },
-                  t.playerCount + " player" + (t.playerCount === 1 ? "" : "s") + (t.grades && t.grades.length ? " · " + t.grades.join("/") : "")
-                )
+                  t.playerCount + " player" + (t.playerCount === 1 ? "" : "s")
+                ),
+                (t.gradeCounts && t.gradeCounts.length > 0 || t.ungraded > 0) &&
+                  h(
+                    "p",
+                    { className: "text-[10px] text-[var(--ink-soft)]" },
+                    // Balance, not just which grades are present — e.g. "2×A, 1×B".
+                    [
+                      ...(t.gradeCounts || []).map((g) => g.count + "×" + g.grade),
+                      ...(t.ungraded > 0 ? [t.ungraded + "× ungraded"] : []),
+                    ].join(", ")
+                  )
               )
             )
           )
@@ -944,7 +983,7 @@ GUWH.Pages = GUWH.Pages || {};
     const activeTab = tab || "attendance";
     return h(
       Container,
-      { className: "py-10 sm:py-14 max-w-3xl" },
+      { className: "py-10 sm:py-14 max-w-4xl" },
       h(SectionHeading, { eyebrow: "Game Coordination", title: "This Wednesday", sub: "Real bookings, teams and a real timetable, editable on a player's behalf." }),
       h(CoordinatorTabs, { active: activeTab }),
       activeTab === "attendance" && h(AttendanceTab),

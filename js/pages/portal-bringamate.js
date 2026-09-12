@@ -73,7 +73,7 @@ GUWH.Pages = GUWH.Pages || {};
 
     return h(
       Container,
-      { className: "py-10 sm:py-14 max-w-3xl" },
+      { className: "py-10 sm:py-14 max-w-4xl" },
       h(SectionHeading, { eyebrow: "Bring a mate", title: "Grow the game, one Wednesday at a time.", sub: "Their first three sessions are free too — same as yours were." }),
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),

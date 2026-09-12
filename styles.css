@@ -107,3 +107,21 @@ input, select, textarea { font-family: inherit; }
 .overflow-x-auto { -webkit-overflow-scrolling: touch; }
 
 ::selection { background: var(--accent-light); color: var(--ink); }
+
+/* Members Forum post/reply content — rendered from _shared/forum.mts's
+   hand-rolled safe-markup renderer (a small fixed set of tags: p, h4,
+   blockquote, ul/li, strong, em, a, .forum-mention span). Tailwind's
+   preflight strips all default spacing/list-style from these, and there's
+   no typography plugin loaded, so they need their own minimal rules here
+   to read as actual formatted text instead of a run-on wall of words. */
+.forum-body p { margin: 0 0 0.6em; }
+.forum-body p:last-child { margin-bottom: 0; }
+.forum-body h4 { font-weight: 700; margin: 0.8em 0 0.3em; color: var(--ink); }
+.forum-body h4:first-child { margin-top: 0; }
+.forum-body ul { list-style: disc; padding-left: 1.25em; margin: 0 0 0.6em; }
+.forum-body li { margin: 0.15em 0; }
+.forum-body blockquote { border-left: 3px solid var(--accent-30); padding-left: 0.75em; margin: 0 0 0.6em; color: var(--ink-soft); }
+.forum-body strong { font-weight: 700; }
+.forum-body em { font-style: italic; }
+.forum-body a { color: var(--accent-dark); text-decoration: underline; word-break: break-word; }
+.forum-body .forum-mention { color: var(--accent-dark); font-weight: 600; }
