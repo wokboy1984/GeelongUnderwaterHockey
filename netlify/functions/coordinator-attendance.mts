@@ -12,7 +12,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, getVerifiedUser, hasPermission, isGrade, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -26,13 +26,13 @@ function nextWednesdayISO(): string {
 
 async function playerList(db: any, sessionId: number) {
   const rows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new
+    select m.id, m.email, m.first_name, m.last_name, m.is_new, m.grade
     from bookings b
     join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'in'
     order by b.created_at asc
   `;
-  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new }));
+  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new, grade: r.grade }));
 }
 
 export default async (req: Request, context: Context) => {
@@ -58,7 +58,6 @@ export default async (req: Request, context: Context) => {
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       const memberEmail = String(body.memberEmail || "").trim();
-      const wantsIn = !!body.in;
       const [target] = await db.sql`select id, email from members where email = ${memberEmail}`;
       if (!target) {
         return new Response(
@@ -66,20 +65,45 @@ export default async (req: Request, context: Context) => {
           { status: 404, headers: { "content-type": "application/json" } }
         );
       }
-      await db.sql`
-        insert into bookings (session_id, member_id, status)
-        values (${sessionId}, ${target.id}, ${wantsIn ? "in" : "out"})
-        on conflict (session_id, member_id) do update set status = excluded.status
-      `;
-      await logAudit(db, {
-        actorId: caller.id,
-        actorEmail: caller.email,
-        action: "attendance_changed_by_coordinator",
-        resourceType: "booking",
-        resourceId: target.id,
-        newValue: { sessionDate, in: wantsIn },
-        note: `${caller.email} set ${target.email} to ${wantsIn ? "in" : "out"} for ${sessionDate}`,
-      });
+
+      if (body.grade !== undefined) {
+        // Grade override — a coordinator/admin correcting or setting a
+        // player's grade after seeing them play, separate from attendance.
+        const rawGrade = String(body.grade || "").trim();
+        if (rawGrade && !isGrade(rawGrade)) {
+          return new Response(JSON.stringify({ ok: false, error: "Not a valid grade" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        const grade = rawGrade || null;
+        await db.sql`update members set grade = ${grade} where id = ${target.id}`;
+        await logAudit(db, {
+          actorId: caller.id,
+          actorEmail: caller.email,
+          action: "grade_overridden",
+          resourceType: "member",
+          resourceId: target.id,
+          newValue: { grade },
+          note: `${caller.email} set ${target.email}'s grade to ${grade || "(unset)"}`,
+        });
+      } else {
+        const wantsIn = !!body.in;
+        await db.sql`
+          insert into bookings (session_id, member_id, status)
+          values (${sessionId}, ${target.id}, ${wantsIn ? "in" : "out"})
+          on conflict (session_id, member_id) do update set status = excluded.status
+        `;
+        await logAudit(db, {
+          actorId: caller.id,
+          actorEmail: caller.email,
+          action: "attendance_changed_by_coordinator",
+          resourceType: "booking",
+          resourceId: target.id,
+          newValue: { sessionDate, in: wantsIn },
+          note: `${caller.email} set ${target.email} to ${wantsIn ? "in" : "out"} for ${sessionDate}`,
+        });
+      }
     }
 
     return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId) }), {

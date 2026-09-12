@@ -10,6 +10,8 @@ GUWH.Pages = GUWH.Pages || {};
   const { Container, Button, Pill, Icon, SectionHeading, FormField, inputCls } = GUWH.UI;
   const { navigate } = GUWH.Router;
 
+  const GRADES = ["A", "B", "Casual", "Junior"];
+
   const TABS = [
     { key: "attendance", label: "Attendance", path: "/coordinator" },
     { key: "teams", label: "Teams", path: "/coordinator/teams" },
@@ -73,6 +75,18 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    async function setGrade(memberEmail, grade) {
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ memberEmail, grade }) });
+        const data = await res.json();
+        if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); }
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+
     function addByEmail(ev) {
       ev.preventDefault();
       if (!addEmail.trim()) return;
@@ -104,14 +118,24 @@ GUWH.Pages = GUWH.Pages || {};
               players.map((p) =>
                 h(
                   "div",
-                  { key: p.id, className: "flex items-center justify-between px-5 py-3" },
+                  { key: p.id, className: "flex items-center justify-between px-5 py-3 gap-3" },
                   h(
                     "div",
                     null,
                     h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent" }, "New")),
                     h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.email)
                   ),
-                  h(Button, { size: "sm", variant: "ghost", onClick: () => setAttendance(p.email, false) }, "Cancel")
+                  h(
+                    "div",
+                    { className: "flex items-center gap-2" },
+                    h(
+                      "select",
+                      { className: inputCls + " !w-auto !py-1.5 text-xs", value: p.grade || "", onChange: (e) => setGrade(p.email, e.target.value), title: "Grade" },
+                      h("option", { value: "" }, "No grade"),
+                      GRADES.map((g) => h("option", { key: g, value: g }, g))
+                    ),
+                    h(Button, { size: "sm", variant: "ghost", onClick: () => setAttendance(p.email, false) }, "Cancel")
+                  )
                 )
               )
             )

@@ -36,6 +36,7 @@
       { label: "Dashboard", path: "/portal/dashboard" },
       { label: "This Week's Game", path: "/portal/board" },
       { label: "Bring a Mate", path: "/portal/bring-a-mate" },
+      { label: "My Profile", path: "/portal/profile" },
     ];
     if (roles.includes("game_coordinator") || roles.includes("administrator")) {
       items.push({ label: "Game Coordination", path: "/coordinator" });
@@ -219,7 +220,13 @@
       }
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate);
     }
-    if (path === "/portal/profile") { const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Profile); }
+    if (path === "/portal/profile") {
+      if (GUWH.Identity) {
+        if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+        return h(GUWH.Pages.Profile);
+      }
+      const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Profile);
+    }
 
     if (path === "/organiser/attendance") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "attendance" }); }
     if (path === "/organiser/teams") { const r = requireAuth(path, "organiser"); if (r) { navigate(r); return null; } return h(GUWH.Pages.Organiser, { tab: "teams" }); }

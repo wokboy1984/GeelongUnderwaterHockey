@@ -13,7 +13,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasRole, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ageFromDOB, ensureMember, getVerifiedUser, hasRole, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -23,7 +23,7 @@ function shapeMember(row: any) {
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
-    age: row.age,
+    age: ageFromDOB(row.date_of_birth),
     roles: (row.roles || []).filter(Boolean),
   };
 }
@@ -43,7 +43,7 @@ export default async (req: Request, context: Context) => {
       const q = new URL(req.url).searchParams.get("q")?.trim() || "";
       const rows = q
         ? await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.age,
+            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -53,7 +53,7 @@ export default async (req: Request, context: Context) => {
             limit 25
           `
         : await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.age,
+            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -78,7 +78,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const [target] = await db.sql`select id, email, first_name, last_name, age from members where email = ${memberEmail}`;
+    const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth from members where email = ${memberEmail}`;
     if (!target) {
       return new Response(
         JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
@@ -86,8 +86,9 @@ export default async (req: Request, context: Context) => {
       );
     }
 
+    const targetAge = ageFromDOB(target.date_of_birth);
     if (req.method === "POST") {
-      if (RESTRICTED_FOR_JUNIORS.has(role) && typeof target.age === "number" && target.age < 18) {
+      if (RESTRICTED_FOR_JUNIORS.has(role) && typeof targetAge === "number" && targetAge < 18) {
         return new Response(JSON.stringify({ ok: false, error: "This role can't be assigned to a junior member" }), {
           status: 400,
           headers: { "content-type": "application/json" },

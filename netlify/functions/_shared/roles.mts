@@ -22,6 +22,7 @@ export function isRole(value: string): value is Role {
 export const PERMISSIONS = {
   manage_others_attendance: ["game_coordinator", "administrator"],
   arrange_teams: ["game_coordinator", "administrator"],
+  manage_grades: ["game_coordinator", "administrator"],
   record_scores: ["game_coordinator", "administrator"],
   moderate_community: ["community_moderator", "administrator"],
   publish_news: ["community_moderator", "administrator"],
@@ -29,6 +30,35 @@ export const PERMISSIONS = {
   assign_roles: ["administrator"],
   manage_platform_settings: ["administrator"],
 } as const satisfies Record<string, Role[]>;
+
+// Playing position and grade are fixed lists shared by the Profile page (self
+// set) and Game Coordinators/Administrators (can override grade after
+// seeing someone play).
+export const POSITIONS = ["Forward", "Back", "Wing", "Goalie", "Centre", "Unknown"] as const;
+export type Position = (typeof POSITIONS)[number];
+export function isPosition(value: string): value is Position {
+  return (POSITIONS as readonly string[]).includes(value);
+}
+
+export const GRADES = ["A", "B", "Casual", "Junior"] as const;
+export type Grade = (typeof GRADES)[number];
+export function isGrade(value: string): value is Grade {
+  return (GRADES as readonly string[]).includes(value);
+}
+
+// Age is always computed from date_of_birth, never stored — a typed-in
+// number goes stale the moment a birthday passes. Returns null if no DOB
+// is on file yet.
+export function ageFromDOB(dob: string | Date | null | undefined): number | null {
+  if (!dob) return null;
+  const d = typeof dob === "string" ? new Date(dob + (dob.length <= 10 ? "T00:00:00" : "")) : dob;
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const monthDiff = now.getMonth() - d.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < d.getDate())) age--;
+  return age;
+}
 
 export type Permission = keyof typeof PERMISSIONS;
 
@@ -73,7 +103,7 @@ export async function ensureMember(db: any, user: any): Promise<Member> {
     insert into members (id, email, first_name, last_name)
     values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
     on conflict (id) do update set email = excluded.email
-    returning id, email, first_name, last_name, age
+    returning id, email, first_name, last_name, date_of_birth
   `;
 
   if (email === SUPER_ADMIN_EMAIL) {
@@ -92,7 +122,7 @@ export async function ensureMember(db: any, user: any): Promise<Member> {
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
-    age: row.age,
+    age: ageFromDOB(row.date_of_birth),
     roles,
   };
 }
