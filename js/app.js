@@ -5,13 +5,16 @@
   const { Container, Button, Icon, Pill } = GUWH.UI;
   const { navigate, useRoute } = GUWH.Router;
 
-  // "Try UWH" is deliberately not in this list — it's the highlighted CTA
-  // button in the nav bar instead (see NavBar), not a plain text link.
+  // "Try It Free" is deliberately not in this list — it's the highlighted
+  // CTA button in the nav bar instead (see NavBar), not a plain text link.
+  // No separate "Home" link — the logo already goes there. "Play" reuses
+  // the existing /about route (its "How it works" section — rules, kit,
+  // positions — is the first thing on that page) rather than a new page.
   const PUBLIC_NAV = [
-    { label: "Home", path: "/" },
-    { label: "About Us", path: "/about" },
-    { label: "News & Community", path: "/news" },
-    { label: "Member portal", path: "/portal" },
+    { label: "About", path: "/about" },
+    { label: "News", path: "/news" },
+    { label: "Play", path: "/about" },
+    { label: "Members", path: "/portal" },
   ];
 
   const PLAYER_NAV = [
@@ -80,8 +83,8 @@
     const loggedIn = GUWH.Identity ? !!identityUser : auth.loggedIn;
     const role = GUWH.Identity ? "player" : auth.role; // demo-only concept preview has no real roles
     // The member portal nav is now a SECOND row underneath the main site
-    // nav, not a replacement for it — logged-in members still need Home /
-    // Try Underwater Hockey / About Us / News & Community one click away.
+    // nav, not a replacement for it — logged-in members still need About /
+    // News / Play one click away (the logo covers Home).
     const identityMember = GUWH.Identity ? GUWH.Identity.currentMember() : null;
     const showForum = !!(identityMember && identityMember.age !== null && identityMember.age !== undefined && identityMember.age >= 18);
     // Member Functions: what every logged-in member sees. Admin Functions:
@@ -137,7 +140,7 @@
         h(
           "div",
           { className: "hidden lg:flex items-center gap-2" },
-          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/new-player") }, "Try UWH"),
+          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/new-player") }, "Try It Free"),
           loggedIn && h(Button, { size: "sm", variant: "secondary", className: "!bg-white/10 !text-white !border-white/25", onClick: doLogout }, "Log out")
         ),
         h(
@@ -204,7 +207,7 @@
                 )
               ),
             !loggedIn
-              ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/new-player"); setOpen(false); } }, "Try UWH")
+              ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/new-player"); setOpen(false); } }, "Try It Free")
               : h(Button, { size: "sm", variant: "secondary", className: "mt-2 w-fit !bg-white/10 !text-white !border-white/25", onClick: () => { doLogout(); setOpen(false); } }, "Log out")
           )
         )
