@@ -258,11 +258,6 @@
     if (path === "/wednesday-games") { const r = requireAuth(path); navigate(r || "/portal/board"); return null; }
     if (path === "/about") return h(GUWH.Pages.About);
     if (path === "/news") return h(GUWH.Pages.News);
-    if (path === "/live/attendance") {
-      return GUWH.Pages.LiveAttendance
-        ? h(GUWH.Pages.LiveAttendance)
-        : h(Container, { className: "py-24 text-center text-[var(--ink-soft)]" }, "Not available in this preview.");
-    }
 
     if (path === "/portal") {
       if (GUWH.Identity) {
