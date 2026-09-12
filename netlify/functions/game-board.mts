@@ -53,29 +53,32 @@ export default async (req: Request, context: Context) => {
     });
     const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
 
-    const confirmedRows = await db.sql`
-      select m.id, m.first_name, m.last_name, m.is_new, ta.team_id
-      from bookings b
-      join members m on m.id = b.member_id
-      left join team_assignments ta on ta.member_id = m.id and ta.session_id = b.session_id
-      where b.session_id = ${session.id} and b.status = 'in'
-    `;
-
     const slotRows = await db.sql`
-      select id, slot_order, label, start_min, duration_min, team_a_id, team_b_id
+      select id, slot_order, label, start_min, duration_min, team_a_id, team_b_id, pool
       from game_slots where session_id = ${session.id} order by slot_order asc
     `;
+
+    const refRows = await db.sql`
+      select gsr.slot_id, m.id, m.first_name, m.last_name, m.is_new
+      from game_slot_referees gsr join members m on m.id = gsr.member_id
+      where gsr.slot_id in (select id from game_slots where session_id = ${session.id})
+    `;
+    const refsBySlot: Record<number, any[]> = {};
+    refRows.forEach((r: any) => {
+      if (!refsBySlot[r.slot_id]) refsBySlot[r.slot_id] = [];
+      refsBySlot[r.slot_id].push(shapePlayer(r));
+    });
+
     const teamName = (id: number | null) => (id ? (teams.find((t: any) => t.id === id) || {}).name || null : null);
     const slots = slotRows.map((s: any) => ({
       id: s.id,
       label: s.label,
       startMin: s.start_min,
       durationMin: s.duration_min,
+      pool: s.pool,
       teamAName: teamName(s.team_a_id),
       teamBName: teamName(s.team_b_id),
-      referees: confirmedRows
-        .filter((p: any) => p.team_id !== s.team_a_id && p.team_id !== s.team_b_id)
-        .map(shapePlayer),
+      referees: refsBySlot[s.id] || [],
     }));
 
     return new Response(JSON.stringify({ ok: true, sessionDate, published: true, teams, slots }), {

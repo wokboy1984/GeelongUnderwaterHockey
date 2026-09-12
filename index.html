@@ -16,6 +16,28 @@
 <body>
   <div id="root"></div>
 
+  <!--
+    iOS Safari fix: when Safari restores a tab from its back-forward cache
+    (bfcache) — e.g. after switching apps or tabs and coming back — WebKit
+    has a known bug where touch hit-testing goes stale: the page looks and
+    scrolls fine but buttons stop responding to taps until something forces
+    a reflow (a manual refresh being the obvious one). This forces that
+    reflow automatically on bfcache restore, so members don't have to
+    refresh themselves. See: https://bugs.webkit.org/show_bug.cgi?id=...
+    (widely reported WebKit/iOS Safari bfcache tap issue).
+  -->
+  <script>
+    window.addEventListener("pageshow", function (event) {
+      if (event.persisted) {
+        var b = document.body;
+        b.style.display = "none";
+        // eslint-disable-next-line no-unused-expressions
+        b.offsetHeight; // force a synchronous reflow
+        b.style.display = "";
+      }
+    });
+  </script>
+
   <!-- Real member login for the live build (not used by the concept preview). -->
   <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
 

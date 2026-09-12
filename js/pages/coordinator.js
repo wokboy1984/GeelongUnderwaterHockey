@@ -321,11 +321,14 @@ GUWH.Pages = GUWH.Pages || {};
     return hr + ":" + String(m).padStart(2, "0") + suffix;
   }
 
+  const SLOT_POOLS = ["Pool A", "Pool B"];
+
   function ScheduleTab() {
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
-    const [newSlot, setNewSlot] = React.useState({ label: "", time: "", durationMin: "20" });
+    const [newSlot, setNewSlot] = React.useState({ label: "", time: "", durationMin: "20", pool: "" });
+    const [refPick, setRefPick] = React.useState({}); // slotId -> memberId pending selection
 
     function load() {
       setLoading(true);
@@ -351,11 +354,41 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // update_slot always overwrites every field server-side, so every call
+    // resends the slot's full current state plus whatever changed — this is
+    // what stops picking a team from silently wiping the time that was set.
+    function updateSlot(slot, patch) {
+      call(Object.assign(
+        {
+          action: "update_slot",
+          slotId: slot.id,
+          label: slot.label,
+          startMin: slot.startMin,
+          durationMin: slot.durationMin,
+          teamAId: slot.teamAId,
+          teamBId: slot.teamBId,
+          pool: slot.pool,
+        },
+        patch
+      ));
+    }
+
+    function assignRef(slot) {
+      const memberId = refPick[slot.id] || (slot.eligible[0] && slot.eligible[0].id);
+      if (!memberId) return;
+      call({ action: "assign_referee", slotId: slot.id, memberId });
+      setRefPick((prev) => Object.assign({}, prev, { [slot.id]: undefined }));
+    }
+
+    function unassignRef(slot, memberId) {
+      call({ action: "unassign_referee", slotId: slot.id, memberId });
+    }
+
     function addSlot(ev) {
       ev.preventDefault();
       if (!newSlot.label.trim()) return;
-      call({ action: "add_slot", label: newSlot.label.trim(), startMin: timeInputToMin(newSlot.time), durationMin: newSlot.durationMin ? Number(newSlot.durationMin) : null });
-      setNewSlot({ label: "", time: "", durationMin: "20" });
+      call({ action: "add_slot", label: newSlot.label.trim(), startMin: timeInputToMin(newSlot.time), durationMin: newSlot.durationMin ? Number(newSlot.durationMin) : null, pool: newSlot.pool || null });
+      setNewSlot({ label: "", time: "", durationMin: "20", pool: "" });
     }
 
     if (loading) return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…");
@@ -376,6 +409,16 @@ GUWH.Pages = GUWH.Pages || {};
         h(FormField, { label: "Label" }, h("input", { className: inputCls + " !w-40", value: newSlot.label, onChange: (e) => setNewSlot((s) => Object.assign({}, s, { label: e.target.value })), placeholder: "Game 1" })),
         h(FormField, { label: "Start time" }, h("input", { type: "time", className: inputCls + " !w-36", value: newSlot.time, onChange: (e) => setNewSlot((s) => Object.assign({}, s, { time: e.target.value })) })),
         h(FormField, { label: "Minutes" }, h("input", { type: "number", min: "0", className: inputCls + " !w-24", value: newSlot.durationMin, onChange: (e) => setNewSlot((s) => Object.assign({}, s, { durationMin: e.target.value })) })),
+        h(
+          FormField,
+          { label: "Pool" },
+          h(
+            "select",
+            { className: inputCls + " !w-32", value: newSlot.pool, onChange: (e) => setNewSlot((s) => Object.assign({}, s, { pool: e.target.value })) },
+            h("option", { value: "" }, "No pool"),
+            SLOT_POOLS.map((p) => h("option", { key: p, value: p }, p))
+          )
+        ),
         h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Add game")
       ),
 
@@ -393,42 +436,116 @@ GUWH.Pages = GUWH.Pages || {};
                   { className: "flex items-center justify-between gap-2" },
                   h(
                     "div",
-                    { className: "flex items-center gap-3" },
+                    { className: "flex items-center gap-2" },
                     h("span", { className: "font-display font-bold text-[var(--ink)]" }, slot.label),
-                    slot.startMin != null && h(Pill, { tone: "dark", className: "!py-0.5" }, minToClock(slot.startMin) + (slot.durationMin ? " · " + slot.durationMin + " min" : ""))
+                    slot.pool && h(Pill, { tone: "accent", className: "!py-0.5" }, slot.pool)
                   ),
                   h(Button, { size: "sm", variant: "ghost", onClick: () => call({ action: "remove_slot", slotId: slot.id }) }, "Remove")
                 ),
                 h(
+                  "p",
+                  { className: "text-xs font-semibold text-[var(--ink)]" },
+                  slot.startMin != null
+                    ? "Starts at " + minToClock(slot.startMin) + (slot.durationMin ? " · " + slot.durationMin + " min" : "")
+                    : "No time set yet"
+                ),
+                h(
                   "div",
                   { className: "flex flex-wrap items-center gap-3" },
+                  h("input", {
+                    type: "time",
+                    className: inputCls + " !w-auto !py-1.5 text-sm",
+                    value: minToTimeInput(slot.startMin),
+                    onChange: (e) => updateSlot(slot, { startMin: timeInputToMin(e.target.value) }),
+                  }),
+                  h("input", {
+                    type: "number",
+                    min: "0",
+                    placeholder: "min",
+                    className: inputCls + " !w-20 !py-1.5 text-sm",
+                    value: slot.durationMin == null ? "" : slot.durationMin,
+                    onChange: (e) => updateSlot(slot, { durationMin: e.target.value === "" ? null : Number(e.target.value) }),
+                  }),
                   h(
                     "select",
-                    {
-                      className: inputCls + " !w-auto !py-1.5 text-sm",
-                      value: slot.teamAId || "",
-                      onChange: (e) => call({ action: "update_slot", slotId: slot.id, teamAId: e.target.value || null, teamBId: slot.teamBId }),
-                    },
-                    h("option", { value: "" }, "— team —"),
-                    data.teams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
-                  ),
-                  h("span", { className: "text-sm text-[var(--ink-soft)]" }, "vs"),
-                  h(
-                    "select",
-                    {
-                      className: inputCls + " !w-auto !py-1.5 text-sm",
-                      value: slot.teamBId || "",
-                      onChange: (e) => call({ action: "update_slot", slotId: slot.id, teamAId: slot.teamAId, teamBId: e.target.value || null }),
-                    },
-                    h("option", { value: "" }, "— team —"),
-                    data.teams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
+                    { className: inputCls + " !w-auto !py-1.5 text-sm", value: slot.pool || "", onChange: (e) => updateSlot(slot, { pool: e.target.value || null }) },
+                    h("option", { value: "" }, "No pool"),
+                    SLOT_POOLS.map((p) => h("option", { key: p, value: p }, p))
                   )
                 ),
                 h(
-                  "p",
-                  { className: "text-xs text-[var(--ink-soft)]" },
-                  "Refs: ",
-                  slot.referees.length === 0 ? "—" : slot.referees.map((p) => p.firstName + " " + p.lastName).join(", ")
+                  "div",
+                  { className: "flex flex-wrap items-end gap-3" },
+                  h(
+                    "div",
+                    { className: "flex flex-col gap-1" },
+                    h("label", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Black sticks"),
+                    h(
+                      "select",
+                      {
+                        className: inputCls + " !w-auto !py-1.5 text-sm",
+                        value: slot.teamAId || "",
+                        onChange: (e) => updateSlot(slot, { teamAId: e.target.value || null }),
+                      },
+                      h("option", { value: "" }, "— team —"),
+                      data.teams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
+                    )
+                  ),
+                  h("span", { className: "text-sm text-[var(--ink-soft)] pb-2" }, "vs"),
+                  h(
+                    "div",
+                    { className: "flex flex-col gap-1" },
+                    h("label", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "White sticks"),
+                    h(
+                      "select",
+                      {
+                        className: inputCls + " !w-auto !py-1.5 text-sm",
+                        value: slot.teamBId || "",
+                        onChange: (e) => updateSlot(slot, { teamBId: e.target.value || null }),
+                      },
+                      h("option", { value: "" }, "— team —"),
+                      data.teams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
+                    )
+                  )
+                ),
+                h(
+                  "div",
+                  { className: "flex flex-col gap-1.5" },
+                  h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Referees"),
+                  slot.referees.length === 0
+                    ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "None picked yet.")
+                    : h(
+                        "div",
+                        { className: "flex flex-wrap gap-2" },
+                        slot.referees.map((p) =>
+                          h(
+                            Pill,
+                            { key: p.id, tone: "dark", className: "!py-1 flex items-center gap-1.5" },
+                            p.firstName + " " + p.lastName,
+                            h(
+                              "button",
+                              { type: "button", onClick: () => unassignRef(slot, p.id), className: "opacity-70 hover:opacity-100", title: "Remove" },
+                              h(Icon, { name: "x", size: 11 })
+                            )
+                          )
+                        )
+                      ),
+                  slot.eligible.length === 0
+                    ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Everyone confirmed is already playing or refereeing this game.")
+                    : h(
+                        "div",
+                        { className: "flex items-center gap-2" },
+                        h(
+                          "select",
+                          {
+                            className: inputCls + " !w-auto !py-1.5 text-sm",
+                            value: refPick[slot.id] || slot.eligible[0].id,
+                            onChange: (e) => setRefPick((prev) => Object.assign({}, prev, { [slot.id]: e.target.value })),
+                          },
+                          slot.eligible.map((p) => h("option", { key: p.id, value: p.id }, p.firstName + " " + p.lastName))
+                        ),
+                        h(Button, { type: "button", size: "sm", variant: "secondary", onClick: () => assignRef(slot) }, "Add ref")
+                      )
                 )
               )
             )

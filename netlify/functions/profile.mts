@@ -3,7 +3,11 @@
 // sessions that have already happened), so it can't drift out of sync.
 //
 // GET  /api/profile -> { ok, member }
-// POST /api/profile { dateOfBirth, emergencyName, emergencyPhone, position, grade } -> { ok, member }
+// POST /api/profile { dateOfBirth, emergencyName, emergencyPhone, position, grade, phone } -> { ok, member }
+//
+// Email is deliberately NOT editable here — it's the Netlify Identity login
+// itself, changed via the widget's own update() call from the frontend
+// (which Netlify emails a confirmation link for), not through this table.
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
@@ -21,7 +25,7 @@ function lastNameFrom(fullName: string | undefined): string {
 
 async function shapeProfile(db: any, memberId: string) {
   const [row] = await db.sql`
-    select id, email, first_name, last_name, date_of_birth, emergency_name, emergency_phone, position, grade, is_new
+    select id, email, first_name, last_name, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new
     from members where id = ${memberId}
   `;
   const [{ count }] = await db.sql`
@@ -38,8 +42,10 @@ async function shapeProfile(db: any, memberId: string) {
     age: ageFromDOB(row.date_of_birth),
     emergencyName: row.emergency_name,
     emergencyPhone: row.emergency_phone,
+    phone: row.phone,
     position: row.position || "Unknown",
     grade: row.grade,
+    photoVersion: row.photo_version || 0,
     gamesPlayed: count,
     isNew: row.is_new,
   };
@@ -78,6 +84,7 @@ export default async (req: Request, context: Context) => {
 
       const emergencyName = String(body.emergencyName || "").trim() || null;
       const emergencyPhone = String(body.emergencyPhone || "").trim() || null;
+      const phone = String(body.phone || "").trim() || null;
 
       const rawPosition = String(body.position || "").trim();
       if (rawPosition && !isPosition(rawPosition)) {
@@ -102,6 +109,7 @@ export default async (req: Request, context: Context) => {
           date_of_birth = ${dateOfBirth},
           emergency_name = ${emergencyName},
           emergency_phone = ${emergencyPhone},
+          phone = ${phone},
           position = ${position},
           grade = ${grade}
         where id = ${memberId}

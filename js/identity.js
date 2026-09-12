@@ -74,6 +74,16 @@ window.GUWH = window.GUWH || {};
     ready() && window.netlifyIdentity.logout();
   }
 
+  // Changes the logged-in user's login email via Netlify Identity itself
+  // (not the members table — that's just a cache of it). Netlify emails a
+  // confirmation link to the new address by default; the change only takes
+  // effect once that's clicked.
+  function updateEmail(newEmail) {
+    const user = currentUser();
+    if (!user) return Promise.reject(new Error("Not logged in"));
+    return user.update({ email: newEmail });
+  }
+
   // Attaches the current user's token to a fetch call. Netlify Identity's
   // jwt() refreshes the token if it's stale, so callers never see an
   // expired-token error under normal use.
@@ -88,5 +98,5 @@ window.GUWH = window.GUWH || {};
     return fetch(url, Object.assign({}, options, { headers }));
   }
 
-  GUWH.Identity = { init, onChange, currentUser, login, signup, logout, authFetch, currentMember, currentRoles, hasRole, refreshMember };
+  GUWH.Identity = { init, onChange, currentUser, login, signup, logout, updateEmail, authFetch, currentMember, currentRoles, hasRole, refreshMember };
 })();

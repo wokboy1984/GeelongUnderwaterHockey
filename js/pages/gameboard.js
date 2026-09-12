@@ -158,13 +158,29 @@ GUWH.Pages = GUWH.Pages || {};
                       "div",
                       { className: "flex items-center gap-4 mb-1" },
                       slot.startMin != null && h("span", { className: "font-mono text-sm font-bold text-[var(--accent-dark)] w-20 shrink-0 tabular-nums" }, minToClockReal(slot.startMin)),
-                      h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.label)
+                      h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.label),
+                      slot.pool && h(Pill, { tone: "dark", className: "!py-0.5" }, slot.pool)
                     ),
                     h(
                       "div",
-                      { className: cx("flex flex-col gap-1", slot.startMin != null ? "sm:pl-[5.5rem]" : "") },
+                      { className: cx("flex flex-col gap-2", slot.startMin != null ? "sm:pl-[5.5rem]" : "") },
                       (slot.teamAName || slot.teamBName) &&
-                        h("p", { className: "text-sm text-[var(--ink)]" }, (slot.teamAName || "TBC") + " vs " + (slot.teamBName || "TBC")),
+                        h(
+                          "div",
+                          { className: "grid grid-cols-2 gap-3" },
+                          h(
+                            "div",
+                            null,
+                            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Black sticks"),
+                            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.teamAName || "TBC")
+                          ),
+                          h(
+                            "div",
+                            { className: "text-right" },
+                            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "White sticks"),
+                            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.teamBName || "TBC")
+                          )
+                        ),
                       slot.referees.length > 0 &&
                         h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Ref: " + slot.referees.map((p) => p.firstName + " " + p.lastName).join(" & "))
                     )
