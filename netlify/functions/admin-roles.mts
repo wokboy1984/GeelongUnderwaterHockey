@@ -13,7 +13,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, hasRole, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, getVerifiedUser, hasRole, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -29,7 +29,7 @@ function shapeMember(row: any) {
 }
 
 export default async (req: Request, context: Context) => {
-  const user = context.clientContext?.user;
+  const user = await getVerifiedUser(req);
   if (!user) return unauthorized();
 
   const db = getDatabase();

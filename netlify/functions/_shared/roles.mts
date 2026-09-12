@@ -125,6 +125,35 @@ export async function logAudit(
   `;
 }
 
+// Verifies the caller's Netlify Identity JWT by asking Netlify's own
+// Identity endpoint (GoTrue), rather than trusting context.clientContext.user
+// — which is not reliably populated for functions declared with a custom
+// config.path (every function in this project uses one). Returns the same
+// shape (sub, email, user_metadata) the rest of this codebase already
+// expects from context.clientContext.user, so callers don't need to change.
+export async function getVerifiedUser(
+  req: Request
+): Promise<{ sub: string; email: string; user_metadata?: { full_name?: string } } | null> {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader) return null;
+  try {
+    const origin = new URL(req.url).origin;
+    const res = await fetch(origin + "/.netlify/identity/user", {
+      headers: { authorization: authHeader },
+    });
+    if (!res.ok) return null;
+    const gotrueUser: any = await res.json();
+    if (!gotrueUser || !gotrueUser.id) return null;
+    return {
+      sub: gotrueUser.id,
+      email: gotrueUser.email,
+      user_metadata: gotrueUser.user_metadata,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function unauthorized(message = "Not logged in") {
   return new Response(JSON.stringify({ ok: false, error: message }), {
     status: 401,

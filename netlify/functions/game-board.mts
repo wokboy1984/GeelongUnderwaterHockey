@@ -7,7 +7,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, unauthorized } from "./_shared/roles.mts";
+import { ensureMember, getVerifiedUser, unauthorized } from "./_shared/roles.mts";
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -24,7 +24,7 @@ function shapePlayer(r: any) {
 }
 
 export default async (req: Request, context: Context) => {
-  const user = context.clientContext?.user;
+  const user = await getVerifiedUser(req);
   if (!user) return unauthorized();
 
   try {

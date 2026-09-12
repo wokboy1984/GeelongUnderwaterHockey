@@ -11,6 +11,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
+import { getVerifiedUser } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -33,7 +34,7 @@ function shape(row: any) {
 }
 
 export default async (req: Request, context: Context) => {
-  const user = context.clientContext?.user;
+  const user = await getVerifiedUser(req);
   if (!user) {
     return new Response(JSON.stringify({ ok: false, error: "Not logged in" }), {
       status: 401,

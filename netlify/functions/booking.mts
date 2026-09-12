@@ -10,6 +10,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
+import { getVerifiedUser } from "./_shared/roles.mts";
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -32,7 +33,7 @@ function lastNameFrom(fullName: string | undefined): string {
 }
 
 export default async (req: Request, context: Context) => {
-  const user = context.clientContext?.user;
+  const user = await getVerifiedUser(req);
   if (!user) {
     return new Response(JSON.stringify({ ok: false, error: "Not logged in" }), {
       status: 401,

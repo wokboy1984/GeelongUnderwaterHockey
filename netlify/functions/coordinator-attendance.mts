@@ -12,7 +12,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -36,7 +36,7 @@ async function playerList(db: any, sessionId: number) {
 }
 
 export default async (req: Request, context: Context) => {
-  const user = context.clientContext?.user;
+  const user = await getVerifiedUser(req);
   if (!user) return unauthorized();
 
   const db = getDatabase();
