@@ -1,13 +1,19 @@
 // Read-only "This Week's Game" for any logged-in member — shows the
-// published teams and timetable, or nothing if the Game Coordinator hasn't
-// published yet. No permission beyond being a registered member is needed
-// to view this.
+// published timetable, or nothing if the Game Coordinator hasn't published
+// yet. No permission beyond being a registered member is needed to view.
 //
-// GET /api/game-board -> { ok, sessionDate, published, teams?, slots? }
+// GET /api/game-board -> { ok, sessionDate, published, rows? }
+//
+// Each row is either a non-game activity or a 'game' row with up to two
+// simultaneous pool games (Pool A / Pool B), each carrying its own
+// black-stick/white-stick teams and referees — the five-column public shape
+// (Time, Pool A Black, Pool A White, Pool B Black, Pool B White) is built
+// from this on the frontend; this endpoint just serves the ordered rows.
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, unauthorized } from "./_shared/roles.mts";
+import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -41,6 +47,9 @@ export default async (req: Request, context: Context) => {
     }
 
     const teamRows = await db.sql`select id, name from game_teams where session_id = ${session.id} order by created_at asc`;
+    const teamNames: Record<number, string> = {};
+    teamRows.forEach((t: any) => { teamNames[t.id] = t.name; });
+
     const assignedRows = await db.sql`
       select m.id, m.first_name, m.last_name, m.is_new, ta.team_id
       from team_assignments ta join members m on m.id = ta.member_id
@@ -53,35 +62,60 @@ export default async (req: Request, context: Context) => {
     });
     const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
 
-    const slotRows = await db.sql`
-      select id, slot_order, label, start_min, duration_min, team_a_id, team_b_id, pool
-      from game_slots where session_id = ${session.id} order by slot_order asc
+    const rowRows = await db.sql`
+      select id, row_order, row_type, label, start_min, duration_min, notes
+      from timetable_rows
+      where session_id = ${session.id} and archived_at is null
+      order by row_order asc, id asc
     `;
-
-    const refRows = await db.sql`
-      select gsr.slot_id, m.id, m.first_name, m.last_name, m.is_new
-      from game_slot_referees gsr join members m on m.id = gsr.member_id
-      where gsr.slot_id in (select id from game_slots where session_id = ${session.id})
-    `;
-    const refsBySlot: Record<number, any[]> = {};
+    const rowIds = rowRows.map((r: any) => r.id);
+    const poolGameRows = rowIds.length
+      ? await db.sql`select id, row_id, pool, black_team_id, white_team_id from timetable_pool_games where row_id = any(${rowIds})`
+      : [];
+    const poolGameIds = poolGameRows.map((r: any) => r.id);
+    const refRows = poolGameIds.length
+      ? await db.sql`
+          select tpr.pool_game_id, m.id, m.first_name, m.last_name, m.is_new
+          from timetable_pool_referees tpr join members m on m.id = tpr.member_id
+          where tpr.pool_game_id = any(${poolGameIds})
+        `
+      : [];
+    const refsByPG: Record<number, any[]> = {};
     refRows.forEach((r: any) => {
-      if (!refsBySlot[r.slot_id]) refsBySlot[r.slot_id] = [];
-      refsBySlot[r.slot_id].push(shapePlayer(r));
+      if (!refsByPG[r.pool_game_id]) refsByPG[r.pool_game_id] = [];
+      refsByPG[r.pool_game_id].push(shapePlayer(r));
+    });
+    const pgsByRow: Record<number, any[]> = {};
+    poolGameRows.forEach((pg: any) => {
+      if (!pgsByRow[pg.row_id]) pgsByRow[pg.row_id] = [];
+      pgsByRow[pg.row_id].push(pg);
     });
 
-    const teamName = (id: number | null) => (id ? (teams.find((t: any) => t.id === id) || {}).name || null : null);
-    const slots = slotRows.map((s: any) => ({
-      id: s.id,
-      label: s.label,
-      startMin: s.start_min,
-      durationMin: s.duration_min,
-      pool: s.pool,
-      teamAName: teamName(s.team_a_id),
-      teamBName: teamName(s.team_b_id),
-      referees: refsBySlot[s.id] || [],
-    }));
+    const rows = rowRows.map((r: any) => {
+      const pgs = pgsByRow[r.id] || [];
+      const poolGames = POOLS.map((pool) => {
+        const pg = pgs.find((x: any) => x.pool === pool);
+        return {
+          pool,
+          blackTeamName: pg && pg.black_team_id != null ? teamNames[pg.black_team_id] || null : null,
+          whiteTeamName: pg && pg.white_team_id != null ? teamNames[pg.white_team_id] || null : null,
+          referees: pg ? refsByPG[pg.id] || [] : [],
+        };
+      });
+      return {
+        id: r.id,
+        rowType: r.row_type,
+        rowTypeLabel: ROW_TYPE_LABELS[r.row_type as keyof typeof ROW_TYPE_LABELS] || r.row_type,
+        label: r.label,
+        startMin: r.start_min,
+        durationMin: r.duration_min,
+        notes: r.notes,
+        isGame: r.row_type === "game",
+        poolGames,
+      };
+    });
 
-    return new Response(JSON.stringify({ ok: true, sessionDate, published: true, teams, slots }), {
+    return new Response(JSON.stringify({ ok: true, sessionDate, published: true, teams, rows }), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

@@ -88,6 +88,131 @@ GUWH.Pages = GUWH.Pages || {};
     return hr + ":" + String(m).padStart(2, "0") + suffix;
   }
 
+  function refNames(list) {
+    return (list || []).map((p) => p.firstName + " " + p.lastName).join(", ");
+  }
+
+  // Shared five-column public timetable — used by the real Game Board page
+  // below AND by the Game Coordinator's "Preview the public timetable"
+  // toggle in the Timetable builder (same component, fed live draft rows
+  // instead of the published ones, so a preview is the real render, not a
+  // mockup of it). Time / Pool A — Black / Pool A — White / Pool B — Black /
+  // Pool B — White, in that order, with non-game rows spanning the four
+  // pool columns. Never relies on colour alone — every cell is labelled.
+  function PublicTimetable({ rows }) {
+    if (!rows || rows.length === 0) {
+      return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No timetable rows yet.");
+    }
+    return h(
+      React.Fragment,
+      null,
+      // ---- Desktop: true 5-column grid, so every row lines up. ----
+      h(
+        "div",
+        { className: "hidden md:grid gap-x-3 gap-y-0", style: { gridTemplateColumns: "88px repeat(4, 1fr)" } },
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Time"),
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool A — Black Stick"),
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool A — White Stick"),
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool B — Black Stick"),
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool B — White Stick"),
+        rows.map((row) => {
+          const poolA = row.poolGames && row.poolGames.find((p) => p.pool === "Pool A");
+          const poolB = row.poolGames && row.poolGames.find((p) => p.pool === "Pool B");
+          const showRefLine = row.isGame && (((poolA && poolA.referees) || []).length > 0 || ((poolB && poolB.referees) || []).length > 0);
+          const timeCell = h(
+            "div",
+            { key: row.id + "-time", className: "py-2.5 border-b border-black/5 font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" },
+            minToClockReal(row.startMin) || "—"
+          );
+          if (!row.isGame) {
+            return h(
+              React.Fragment,
+              { key: row.id },
+              timeCell,
+              h(
+                "div",
+                { className: "py-2.5 border-b border-black/5 col-span-4" },
+                h("span", { className: "text-sm font-bold text-[var(--ink)]" }, row.label),
+                row.notes && h("span", { className: "text-xs text-[var(--ink-soft)] ml-2" }, row.notes)
+              )
+            );
+          }
+          return h(
+            React.Fragment,
+            { key: row.id },
+            timeCell,
+            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolA && poolA.blackTeamName) || "—"),
+            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolA && poolA.whiteTeamName) || "—"),
+            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolB && poolB.blackTeamName) || "—"),
+            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolB && poolB.whiteTeamName) || "—"),
+            showRefLine &&
+              h(
+                React.Fragment,
+                null,
+                h("div", { className: "pb-2.5 border-b border-black/5" }),
+                h(
+                  "div",
+                  { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" },
+                  poolA && poolA.referees && poolA.referees.length > 0 ? "Referees: " + refNames(poolA.referees) : ""
+                ),
+                h(
+                  "div",
+                  { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" },
+                  poolB && poolB.referees && poolB.referees.length > 0 ? "Referees: " + refNames(poolB.referees) : ""
+                )
+              )
+          );
+        })
+      ),
+      // ---- Mobile: one card per time slot, pools stacked, clearly labelled. ----
+      h(
+        "div",
+        { className: "md:hidden flex flex-col gap-3" },
+        rows.map((row) => {
+          const poolA = row.poolGames && row.poolGames.find((p) => p.pool === "Pool A");
+          const poolB = row.poolGames && row.poolGames.find((p) => p.pool === "Pool B");
+          return h(
+            "div",
+            { key: row.id, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+            h(
+              "div",
+              { className: "flex items-center gap-2 mb-2" },
+              h("span", { className: "font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" }, minToClockReal(row.startMin) || "—"),
+              h("span", { className: "text-sm font-bold text-[var(--ink)]" }, row.label)
+            ),
+            !row.isGame
+              ? row.notes && h("p", { className: "text-xs text-[var(--ink-soft)]" }, row.notes)
+              : h(
+                  "div",
+                  { className: "flex flex-col gap-2.5" },
+                  [
+                    { key: "Pool A", data: poolA },
+                    { key: "Pool B", data: poolB },
+                  ].map(
+                    ({ key, data }) =>
+                      (data && (data.blackTeamName || data.whiteTeamName)) &&
+                      h(
+                        "div",
+                        { key },
+                        h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, key),
+                        h(
+                          "p",
+                          { className: "text-sm text-[var(--ink)]" },
+                          h("span", { className: "text-[var(--ink-soft)]" }, "Black: "),
+                          data.blackTeamName || "TBC",
+                          h("span", { className: "text-[var(--ink-soft)] ml-3" }, "White: "),
+                          data.whiteTeamName || "TBC"
+                        ),
+                        data.referees && data.referees.length > 0 && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(data.referees))
+                      )
+                  )
+                )
+          );
+        })
+      )
+    );
+  }
+
   // Real Game Board (live site) — read-only, shows the published teams and
   // timetable from /api/game-board, or a "not yet finalised" state.
   function RealGameBoardPage() {
@@ -105,7 +230,7 @@ GUWH.Pages = GUWH.Pages || {};
 
     return h(
       Container,
-      { className: "py-12 sm:py-16 max-w-3xl" },
+      { className: "py-12 sm:py-16 max-w-4xl" },
       h(SectionHeading, { eyebrow: "This week's game", title: data ? GUWH.formatDate(new Date(data.sessionDate + "T00:00:00")) : "" }),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
       loading && h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"),
@@ -148,44 +273,7 @@ GUWH.Pages = GUWH.Pages || {};
             "div",
             { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" },
             h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "The night's timetable"),
-            data.slots.length === 0
-              ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No games set yet.")
-              : data.slots.map((slot) =>
-                  h(
-                    "div",
-                    { key: slot.id, className: "py-3 border-b border-black/5 last:border-0" },
-                    h(
-                      "div",
-                      { className: "flex items-center gap-4 mb-1" },
-                      slot.startMin != null && h("span", { className: "font-mono text-sm font-bold text-[var(--accent-dark)] w-20 shrink-0 tabular-nums" }, minToClockReal(slot.startMin)),
-                      h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.label),
-                      slot.pool && h(Pill, { tone: "dark", className: "!py-0.5" }, slot.pool)
-                    ),
-                    h(
-                      "div",
-                      { className: cx("flex flex-col gap-2", slot.startMin != null ? "sm:pl-[5.5rem]" : "") },
-                      (slot.teamAName || slot.teamBName) &&
-                        h(
-                          "div",
-                          { className: "grid grid-cols-2 gap-3" },
-                          h(
-                            "div",
-                            null,
-                            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Black sticks"),
-                            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.teamAName || "TBC")
-                          ),
-                          h(
-                            "div",
-                            { className: "text-right" },
-                            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "White sticks"),
-                            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.teamBName || "TBC")
-                          )
-                        ),
-                      slot.referees.length > 0 &&
-                        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Ref: " + slot.referees.map((p) => p.firstName + " " + p.lastName).join(" & "))
-                    )
-                  )
-                )
+            h(PublicTimetable, { rows: data.rows })
           )
         )
     );
@@ -270,4 +358,8 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   GUWH.Pages.GameBoard = GameBoardPage;
+  // Exposed so the Game Coordinator's Timetable builder can render an exact
+  // "Preview the public timetable" using live draft rows, rather than a
+  // separate mockup of the public page.
+  GUWH.Pages.PublicTimetable = PublicTimetable;
 })();

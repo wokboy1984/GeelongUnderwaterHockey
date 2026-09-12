@@ -15,6 +15,56 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
+
+// Loads just enough of the timetable to validate it before publishing —
+// this deliberately mirrors coordinator-schedule.mts's own snapshot/shape
+// logic rather than importing it, since that file's loader also builds the
+// full UI response (eligibility lists, team panel, etc.) this check doesn't
+// need; validateTimetable() itself is the single shared source of truth for
+// "is this publishable", imported from _shared/timetable.mts.
+async function loadRowSnapsForValidation(db: any, sessionId: number): Promise<{ rows: RowSnap[]; teams: Record<number, TeamInfo>; confirmedIds: Set<string> }> {
+  const teamRows = await db.sql`select id, name from game_teams where session_id = ${sessionId}`;
+  const assignmentRows = await db.sql`select team_id, member_id from team_assignments where session_id = ${sessionId}`;
+  const teams: Record<number, TeamInfo> = {};
+  teamRows.forEach((t: any) => { teams[t.id] = { id: t.id, name: t.name, playerIds: [] }; });
+  assignmentRows.forEach((a: any) => { if (teams[a.team_id]) teams[a.team_id].playerIds.push(a.member_id); });
+
+  const confirmedRows = await db.sql`select member_id from bookings where session_id = ${sessionId} and status = 'in'`;
+  const confirmedIds = new Set<string>(confirmedRows.map((r: any) => r.member_id));
+
+  const rowRows = await db.sql`
+    select id, row_type, label, start_min, duration_min, archived_at
+    from timetable_rows where session_id = ${sessionId}
+  `;
+  const rowIds = rowRows.map((r: any) => r.id);
+  const poolGameRows = rowIds.length
+    ? await db.sql`select id, row_id, pool, black_team_id, white_team_id from timetable_pool_games where row_id = any(${rowIds})`
+    : [];
+  const poolGameIds = poolGameRows.map((r: any) => r.id);
+  const refRows = poolGameIds.length
+    ? await db.sql`select pool_game_id, member_id from timetable_pool_referees where pool_game_id = any(${poolGameIds})`
+    : [];
+  const refsByPG: Record<number, string[]> = {};
+  refRows.forEach((r: any) => { (refsByPG[r.pool_game_id] = refsByPG[r.pool_game_id] || []).push(r.member_id); });
+  const pgsByRow: Record<number, any[]> = {};
+  poolGameRows.forEach((pg: any) => { (pgsByRow[pg.row_id] = pgsByRow[pg.row_id] || []).push(pg); });
+
+  const rows: RowSnap[] = rowRows.map((r: any) => ({
+    id: r.id,
+    rowType: r.row_type,
+    label: r.label,
+    startMin: r.start_min,
+    durationMin: r.duration_min,
+    archived: !!r.archived_at,
+    poolGames: (pgsByRow[r.id] || []).map((pg: any): PoolGameSnap => ({
+      id: pg.id, pool: pg.pool, blackTeamId: pg.black_team_id, whiteTeamId: pg.white_team_id,
+      refereeIds: refsByPG[pg.id] || [],
+    })),
+  }));
+
+  return { rows, teams, confirmedIds };
+}
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -161,6 +211,24 @@ export default async (req: Request, context: Context) => {
         }
       } else if (action === "publish") {
         const published = !!body.published;
+
+        if (published) {
+          const { rows, teams, confirmedIds } = await loadRowSnapsForValidation(db, sessionId);
+          const errors = validateTimetable(rows, teams, confirmedIds);
+          if (errors.length > 0) {
+            return new Response(JSON.stringify({ ok: false, error: "The timetable has unresolved issues and can't be published yet.", validation: errors }), {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          await db.sql`update timetable_rows set published_at = now() where session_id = ${sessionId} and archived_at is null and published_at is null`;
+          await logAudit(db, {
+            actorId: caller.id, actorEmail: caller.email, action: "timetable_published",
+            resourceType: "session", resourceId: String(sessionId),
+            newValue: { sessionDate }, note: `${caller.email} published the timetable for ${sessionDate}`,
+          });
+        }
+
         await db.sql`update sessions set published = ${published} where id = ${sessionId}`;
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email,
