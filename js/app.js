@@ -230,11 +230,11 @@
     // endpoints that re-check the same role against the database, so a
     // direct URL visit without the role gets a 403 from the server, not
     // just a redirect here.
-    if (path === "/coordinator" || path === "/coordinator/teams" || path === "/coordinator/publish") {
+    if (path === "/coordinator" || path === "/coordinator/teams" || path === "/coordinator/schedule" || path === "/coordinator/publish") {
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
       const roles = GUWH.Identity.currentRoles();
       if (!roles.includes("game_coordinator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
-      const tab = path === "/coordinator/teams" ? "teams" : path === "/coordinator/publish" ? "publish" : "attendance";
+      const tab = path === "/coordinator/teams" ? "teams" : path === "/coordinator/schedule" ? "schedule" : path === "/coordinator/publish" ? "publish" : "attendance";
       return h(GUWH.Pages.Coordinator, { tab });
     }
     if (path === "/community") {

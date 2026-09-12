@@ -1,11 +1,12 @@
-// Game Coordinator team builder + publish — real data, backed by
-// team_assignments and sessions.published. Deliberately simple (assign one
-// member to one pool/cap via a dropdown-driven call from the frontend)
-// rather than drag-and-drop; the real value here is real, persisted,
-// server-enforced team assignment, not the interaction style.
+// Game Coordinator team builder — coordinator creates any number of named
+// teams for the night, assigns confirmed players to them, and publishes.
+// Real data, backed by game_teams + team_assignments.
 //
-// GET  /api/coordinator/teams -> full draft board (confirmed, assignments, unassigned, published)
-// POST /api/coordinator/teams { action: "assign", memberEmail, pool, cap }
+// GET  /api/coordinator/teams -> { ok, sessionDate, published, confirmed, teams, unassigned }
+// POST /api/coordinator/teams { action: "create_team", name }
+// POST /api/coordinator/teams { action: "rename_team", teamId, name }
+// POST /api/coordinator/teams { action: "delete_team", teamId }
+// POST /api/coordinator/teams { action: "assign", memberEmail, teamId }
 // POST /api/coordinator/teams { action: "unassign", memberEmail }
 // POST /api/coordinator/teams { action: "publish", published }
 //
@@ -14,9 +15,6 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
-
-const POOLS = ["Pool A", "Pool B"];
-const CAPS = ["White", "Black"];
 
 function nextWednesdayISO(): string {
   const d = new Date();
@@ -41,27 +39,27 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   `;
   const confirmed = confirmedRows.map(shapePlayer);
 
+  const teamRows = await db.sql`
+    select id, name from game_teams where session_id = ${sessionId} order by created_at asc
+  `;
+
   const assignedRows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new, ta.pool, ta.cap_colour
+    select m.id, m.email, m.first_name, m.last_name, m.is_new, ta.team_id
     from team_assignments ta join members m on m.id = ta.member_id
     where ta.session_id = ${sessionId}
   `;
-
-  const assignments: Record<string, Record<string, any[]>> = {
-    "Pool A": { White: [], Black: [] },
-    "Pool B": { White: [], Black: [] },
-  };
+  const byTeam: Record<number, any[]> = {};
   const assignedIds = new Set<string>();
   assignedRows.forEach((r: any) => {
-    if (assignments[r.pool] && assignments[r.pool][r.cap_colour]) {
-      assignments[r.pool][r.cap_colour].push(shapePlayer(r));
-      assignedIds.add(r.id);
-    }
+    if (!byTeam[r.team_id]) byTeam[r.team_id] = [];
+    byTeam[r.team_id].push(shapePlayer(r));
+    assignedIds.add(r.id);
   });
 
+  const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
   const unassigned = confirmed.filter((p: any) => !assignedIds.has(p.id));
 
-  return { ok: true, sessionDate, published, confirmed, assignments, unassigned };
+  return { ok: true, sessionDate, published, confirmed, teams, unassigned };
 }
 
 export default async (req: Request, context: Context) => {
@@ -88,15 +86,45 @@ export default async (req: Request, context: Context) => {
       const body = await req.json().catch(() => ({}));
       const action = String(body.action || "");
 
-      if (action === "assign") {
-        const pool = String(body.pool || "");
-        const cap = String(body.cap || "");
-        if (!POOLS.includes(pool) || !CAPS.includes(cap)) {
-          return new Response(JSON.stringify({ ok: false, error: "Invalid pool or cap colour" }), {
+      if (action === "create_team") {
+        const name = String(body.name || "").trim();
+        if (!name) {
+          return new Response(JSON.stringify({ ok: false, error: "Team name is required" }), {
             status: 400,
             headers: { "content-type": "application/json" },
           });
         }
+        const [team] = await db.sql`
+          insert into game_teams (session_id, name) values (${sessionId}, ${name}) returning id
+        `;
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: "team_created",
+          resourceType: "game_team", resourceId: String(team.id),
+          newValue: { sessionDate, name }, note: `${caller.email} created team "${name}"`,
+        });
+      } else if (action === "rename_team") {
+        const teamId = Number(body.teamId);
+        const name = String(body.name || "").trim();
+        if (teamId && name) {
+          await db.sql`update game_teams set name = ${name} where id = ${teamId} and session_id = ${sessionId}`;
+          await logAudit(db, {
+            actorId: caller.id, actorEmail: caller.email, action: "team_renamed",
+            resourceType: "game_team", resourceId: String(teamId),
+            newValue: { name }, note: `${caller.email} renamed a team to "${name}"`,
+          });
+        }
+      } else if (action === "delete_team") {
+        const teamId = Number(body.teamId);
+        if (teamId) {
+          await db.sql`delete from game_teams where id = ${teamId} and session_id = ${sessionId}`;
+          await logAudit(db, {
+            actorId: caller.id, actorEmail: caller.email, action: "team_deleted",
+            resourceType: "game_team", resourceId: String(teamId),
+            note: `${caller.email} deleted a team`,
+          });
+        }
+      } else if (action === "assign") {
+        const teamId = Number(body.teamId);
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;
         if (!target) {
           return new Response(JSON.stringify({ ok: false, error: "No member found with that email" }), {
@@ -104,15 +132,22 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
+        const [team] = await db.sql`select id from game_teams where id = ${teamId} and session_id = ${sessionId}`;
+        if (!team) {
+          return new Response(JSON.stringify({ ok: false, error: "That team doesn't exist for this session" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
         await db.sql`
-          insert into team_assignments (session_id, pool, cap_colour, member_id)
-          values (${sessionId}, ${pool}, ${cap}, ${target.id})
-          on conflict (session_id, member_id) do update set pool = excluded.pool, cap_colour = excluded.cap_colour
+          insert into team_assignments (session_id, team_id, member_id)
+          values (${sessionId}, ${teamId}, ${target.id})
+          on conflict (session_id, member_id) do update set team_id = excluded.team_id
         `;
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "team_assignment_changed",
           resourceType: "team_assignment", resourceId: target.id,
-          newValue: { sessionDate, pool, cap }, note: `${caller.email} assigned ${target.email} to ${pool} ${cap}`,
+          newValue: { sessionDate, teamId }, note: `${caller.email} assigned ${target.email} to a team`,
         });
       } else if (action === "unassign") {
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;

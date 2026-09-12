@@ -1,9 +1,9 @@
 // Read-only "This Week's Game" for any logged-in member — shows the
-// published team assignments, or nothing if the Game Coordinator hasn't
-// published yet (mirrors the concept's "not yet finalised" behaviour).
-// No permission beyond being a registered member is needed to view this.
+// published teams and timetable, or nothing if the Game Coordinator hasn't
+// published yet. No permission beyond being a registered member is needed
+// to view this.
 //
-// GET /api/game-board -> { ok, sessionDate, published, assignments? }
+// GET /api/game-board -> { ok, sessionDate, published, teams?, slots? }
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
@@ -40,20 +40,45 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const rows = await db.sql`
-      select m.id, m.first_name, m.last_name, m.is_new, ta.pool, ta.cap_colour
+    const teamRows = await db.sql`select id, name from game_teams where session_id = ${session.id} order by created_at asc`;
+    const assignedRows = await db.sql`
+      select m.id, m.first_name, m.last_name, m.is_new, ta.team_id
       from team_assignments ta join members m on m.id = ta.member_id
       where ta.session_id = ${session.id}
     `;
-    const assignments: Record<string, Record<string, any[]>> = {
-      "Pool A": { White: [], Black: [] },
-      "Pool B": { White: [], Black: [] },
-    };
-    rows.forEach((r: any) => {
-      if (assignments[r.pool] && assignments[r.pool][r.cap_colour]) assignments[r.pool][r.cap_colour].push(shapePlayer(r));
+    const byTeam: Record<number, any[]> = {};
+    assignedRows.forEach((r: any) => {
+      if (!byTeam[r.team_id]) byTeam[r.team_id] = [];
+      byTeam[r.team_id].push(shapePlayer(r));
     });
+    const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
 
-    return new Response(JSON.stringify({ ok: true, sessionDate, published: true, assignments }), {
+    const confirmedRows = await db.sql`
+      select m.id, m.first_name, m.last_name, m.is_new, ta.team_id
+      from bookings b
+      join members m on m.id = b.member_id
+      left join team_assignments ta on ta.member_id = m.id and ta.session_id = b.session_id
+      where b.session_id = ${session.id} and b.status = 'in'
+    `;
+
+    const slotRows = await db.sql`
+      select id, slot_order, label, start_min, duration_min, team_a_id, team_b_id
+      from game_slots where session_id = ${session.id} order by slot_order asc
+    `;
+    const teamName = (id: number | null) => (id ? (teams.find((t: any) => t.id === id) || {}).name || null : null);
+    const slots = slotRows.map((s: any) => ({
+      id: s.id,
+      label: s.label,
+      startMin: s.start_min,
+      durationMin: s.duration_min,
+      teamAName: teamName(s.team_a_id),
+      teamBName: teamName(s.team_b_id),
+      referees: confirmedRows
+        .filter((p: any) => p.team_id !== s.team_a_id && p.team_id !== s.team_b_id)
+        .map(shapePlayer),
+    }));
+
+    return new Response(JSON.stringify({ ok: true, sessionDate, published: true, teams, slots }), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

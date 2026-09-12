@@ -77,10 +77,19 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // Real Game Board (live site) — read-only, shows published team
-  // assignments from /api/game-board, or a "not yet finalised" state.
-  // No run sheet / milestones yet since those are demo-only fixtures not
-  // tied to real data.
+  function minToClockReal(min) {
+    if (min == null) return null;
+    const base = new Date(2000, 0, 1, 18, 0, 0);
+    base.setMinutes(base.getMinutes() + min);
+    let hr = base.getHours();
+    const m = base.getMinutes();
+    const suffix = hr >= 12 ? "pm" : "am";
+    hr = hr % 12 || 12;
+    return hr + ":" + String(m).padStart(2, "0") + suffix;
+  }
+
+  // Real Game Board (live site) — read-only, shows the published teams and
+  // timetable from /api/game-board, or a "not yet finalised" state.
   function RealGameBoardPage() {
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -108,28 +117,59 @@ GUWH.Pages = GUWH.Pages || {};
         ),
       data && data.published &&
         h(
-          "div",
-          { className: "grid sm:grid-cols-2 gap-6" },
-          ["Pool A", "Pool B"].map((pool) =>
-            h(
-              "div",
-              { key: pool, className: "flex flex-col gap-3" },
-              h("h3", { className: "font-display font-bold text-[var(--ink)]" }, pool),
-              ["White", "Black"].map((cap) =>
-                h(
+          React.Fragment,
+          null,
+          h(
+            "div",
+            { className: "mb-10" },
+            h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Teams"),
+            data.teams.length === 0
+              ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No teams yet.")
+              : h(
                   "div",
-                  { key: cap, className: "rounded-2xl bg-[var(--sand)] p-4" },
-                  h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-2" }, cap + " caps"),
-                  data.assignments[pool][cap].length === 0
-                    ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "—")
-                    : h(
-                        "div",
-                        { className: "flex flex-col gap-1.5" },
-                        data.assignments[pool][cap].map((p) => h("p", { key: p.id, className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")))
-                      )
+                  { className: "grid sm:grid-cols-2 gap-4" },
+                  data.teams.map((team) =>
+                    h(
+                      "div",
+                      { key: team.id, className: "rounded-2xl bg-[var(--sand)] p-4" },
+                      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-2" }, team.name),
+                      team.players.length === 0
+                        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "—")
+                        : h(
+                            "div",
+                            { className: "flex flex-col gap-1.5" },
+                            team.players.map((p) => h("p", { key: p.id, className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")))
+                          )
+                    )
+                  )
                 )
-              )
-            )
+          ),
+          h(
+            "div",
+            { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" },
+            h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "The night's timetable"),
+            data.slots.length === 0
+              ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No games set yet.")
+              : data.slots.map((slot) =>
+                  h(
+                    "div",
+                    { key: slot.id, className: "py-3 border-b border-black/5 last:border-0" },
+                    h(
+                      "div",
+                      { className: "flex items-center gap-4 mb-1" },
+                      slot.startMin != null && h("span", { className: "font-mono text-sm font-bold text-[var(--accent-dark)] w-20 shrink-0 tabular-nums" }, minToClockReal(slot.startMin)),
+                      h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, slot.label)
+                    ),
+                    h(
+                      "div",
+                      { className: cx("flex flex-col gap-1", slot.startMin != null ? "sm:pl-[5.5rem]" : "") },
+                      (slot.teamAName || slot.teamBName) &&
+                        h("p", { className: "text-sm text-[var(--ink)]" }, (slot.teamAName || "TBC") + " vs " + (slot.teamBName || "TBC")),
+                      slot.referees.length > 0 &&
+                        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Ref: " + slot.referees.map((p) => p.firstName + " " + p.lastName).join(" & "))
+                    )
+                  )
+                )
           )
         )
     );
