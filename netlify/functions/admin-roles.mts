@@ -13,7 +13,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ageFromDOB, ensureMember, getVerifiedUser, hasRole, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ageFromDOB, ensureMember, getVerifiedUser, hasRole, isGrade, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -24,6 +24,7 @@ function shapeMember(row: any) {
     firstName: row.first_name,
     lastName: row.last_name,
     age: ageFromDOB(row.date_of_birth),
+    grade: row.grade,
     roles: (row.roles || []).filter(Boolean),
   };
 }
@@ -47,7 +48,7 @@ export default async (req: Request, context: Context) => {
       // real identity to grant a role to, so they're excluded here.
       const rows = q
         ? await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth,
+            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -58,7 +59,7 @@ export default async (req: Request, context: Context) => {
             limit 25
           `
         : await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth,
+            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -74,8 +75,38 @@ export default async (req: Request, context: Context) => {
 
     const body = await req.json().catch(() => ({}));
     const memberEmail = String(body.memberEmail || "").trim();
-    const role = String(body.role || "").trim();
     const note = body.note ? String(body.note).trim() : null;
+
+    if (req.method === "POST" && body.action === "grade") {
+      if (!memberEmail) {
+        return new Response(JSON.stringify({ ok: false, error: "memberEmail is required" }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const rawGrade = String(body.grade || "").trim();
+      if (rawGrade && !isGrade(rawGrade)) {
+        return new Response(JSON.stringify({ ok: false, error: "Not a valid grade" }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const grade = rawGrade || null;
+      const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth from members where email = ${memberEmail}`;
+      if (!target || target.email.endsWith("@no-login.guwh")) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
+          { status: 404, headers: { "content-type": "application/json" } }
+        );
+      }
+      await db.sql`update members set grade = ${grade} where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "grade_overridden",
+        resourceType: "member", resourceId: target.id, newValue: { grade },
+        note: `${caller.email} set ${target.email}'s grade to ${grade || "(unset)"}`,
+      });
+      const roleRows = await db.sql`select role from member_roles where member_id = ${target.id}`;
+      return new Response(
+        JSON.stringify({ ok: true, member: shapeMember({ ...target, grade, roles: roleRows.map((r: any) => r.role) }) }),
+        { headers: { "content-type": "application/json" } }
+      );
+    }
+
+    const role = String(body.role || "").trim();
 
     if (!memberEmail || !isRole(role)) {
       return new Response(JSON.stringify({ ok: false, error: "memberEmail and a valid role are required" }), {
@@ -84,7 +115,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth from members where email = ${memberEmail}`;
+    const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, grade from members where email = ${memberEmail}`;
     if (!target || target.email.endsWith("@no-login.guwh")) {
       return new Response(
         JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),

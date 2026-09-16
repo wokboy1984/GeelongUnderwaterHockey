@@ -15,21 +15,12 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, isGrade, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
   const parts = fullName.trim().split(/\s+/);
   return { firstName: parts[0] || fullName.trim(), lastName: parts.slice(1).join(" ") };
-}
-
-function nextWednesdayISO(): string {
-  const d = new Date();
-  const day = d.getDay();
-  let add = (3 - day + 7) % 7;
-  if (add === 0) add = 7;
-  d.setDate(d.getDate() + add);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
 }
 
 async function playerList(db: any, sessionId: number) {
@@ -54,7 +45,29 @@ export default async (req: Request, context: Context) => {
   }
 
   try {
-    const sessionDate = nextWednesdayISO();
+    // Name-search typeahead for "add an existing member" — separate from
+    // the rest of this endpoint (no session needed), so it can return fast
+    // as the coordinator types. Walk-ins with a synthetic *@no-login.guwh
+    // email are excluded — they're added by name via guestName instead.
+    const q = new URL(req.url).searchParams.get("q");
+    if (req.method === "GET" && q !== null) {
+      const query = q.trim();
+      if (query.length < 2) return new Response(JSON.stringify({ ok: true, matches: [] }), { headers: { "content-type": "application/json" } });
+      const rows = await db.sql`
+        select id, email, first_name, last_name
+        from members
+        where email not like '%@no-login.guwh'
+          and (first_name ilike ${"%" + query + "%"} or last_name ilike ${"%" + query + "%"} or (first_name || ' ' || last_name) ilike ${"%" + query + "%"})
+        order by first_name, last_name
+        limit 8
+      `;
+      return new Response(
+        JSON.stringify({ ok: true, matches: rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name })) }),
+        { headers: { "content-type": "application/json" } }
+      );
+    }
+
+    const sessionDate = nextSessionDateISO();
     const [session] = await db.sql`
       insert into sessions (session_date)
       values (${sessionDate})
@@ -104,44 +117,23 @@ export default async (req: Request, context: Context) => {
         );
       }
 
-      if (body.grade !== undefined) {
-        // Grade override — a coordinator/admin correcting or setting a
-        // player's grade after seeing them play, separate from attendance.
-        const rawGrade = String(body.grade || "").trim();
-        if (rawGrade && !isGrade(rawGrade)) {
-          return new Response(JSON.stringify({ ok: false, error: "Not a valid grade" }), {
-            status: 400,
-            headers: { "content-type": "application/json" },
-          });
-        }
-        const grade = rawGrade || null;
-        await db.sql`update members set grade = ${grade} where id = ${target.id}`;
-        await logAudit(db, {
-          actorId: caller.id,
-          actorEmail: caller.email,
-          action: "grade_overridden",
-          resourceType: "member",
-          resourceId: target.id,
-          newValue: { grade },
-          note: `${caller.email} set ${target.email}'s grade to ${grade || "(unset)"}`,
-        });
-      } else {
-        const wantsIn = !!body.in;
-        await db.sql`
-          insert into bookings (session_id, member_id, status)
-          values (${sessionId}, ${target.id}, ${wantsIn ? "in" : "out"})
-          on conflict (session_id, member_id) do update set status = excluded.status
-        `;
-        await logAudit(db, {
-          actorId: caller.id,
-          actorEmail: caller.email,
-          action: "attendance_changed_by_coordinator",
-          resourceType: "booking",
-          resourceId: target.id,
-          newValue: { sessionDate, in: wantsIn },
-          note: `${caller.email} set ${target.email} to ${wantsIn ? "in" : "out"} for ${sessionDate}`,
-        });
-      }
+      // Grade is set on the Administrator's member page now, not here —
+      // this endpoint only ever changes attendance.
+      const wantsIn = !!body.in;
+      await db.sql`
+        insert into bookings (session_id, member_id, status)
+        values (${sessionId}, ${target.id}, ${wantsIn ? "in" : "out"})
+        on conflict (session_id, member_id) do update set status = excluded.status
+      `;
+      await logAudit(db, {
+        actorId: caller.id,
+        actorEmail: caller.email,
+        action: "attendance_changed_by_coordinator",
+        resourceType: "booking",
+        resourceId: target.id,
+        newValue: { sessionDate, in: wantsIn },
+        note: `${caller.email} set ${target.email} to ${wantsIn ? "in" : "out"} for ${sessionDate}`,
+      });
     }
 
     return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId) }), {

@@ -15,6 +15,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
 
 // Loads just enough of the timetable to validate it before publishing —
@@ -66,15 +67,13 @@ async function loadRowSnapsForValidation(db: any, sessionId: number): Promise<{ 
   return { rows, teams, confirmedIds };
 }
 
-function nextWednesdayISO(): string {
-  const d = new Date();
-  const day = d.getDay();
-  let add = (3 - day + 7) % 7;
-  if (add === 0) add = 7;
-  d.setDate(d.getDate() + add);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+// Was its own local copy here (raw server `new Date()` — UTC, not
+// Melbourne — plus the "roll forward even on Wednesday itself" bug).
+// Switched to the shared, Melbourne-correct helper (16 Sept 2026) — see
+// the matching note in coordinator-schedule.mts. This is the function
+// that decides which `sessions` row Publish flips `published` on, so
+// this exact bug is why a published game wasn't showing up anywhere.
+const nextWednesdayISO = nextSessionDateISO;
 
 function shapePlayer(r: any) {
   return { id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new, grade: r.grade || null, position: r.position || null };

@@ -2,16 +2,18 @@
 // `invites` table instead of the concept's localStorage demo data.
 //
 // GET   /api/invites              -> { ok, invites: [{ id, guestName, guestEmail, status, createdAt }] }
+// GET   /api/invites?scope=all    -> club-wide, registered guests from the last 10 days only,
+//                                     with inviterName — for the coordinator's "New Players Today".
+//                                     Requires 'manage_others_attendance' (game_coordinator/administrator).
 // POST  /api/invites   { guestName, guestEmail } -> same shape, invite added
 // PATCH /api/invites   { id, status: "registered" } -> same shape, one invite updated
 //
-// All three require a logged-in Netlify Identity user (JWT in the
-// Authorization header — the widget's user.jwt() handles this on the
-// frontend).
+// All require a logged-in Netlify Identity user (JWT in the Authorization
+// header — the widget's user.jwt() handles this on the frontend).
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { getVerifiedUser } from "./_shared/roles.mts";
+import { ensureMember, getVerifiedUser, hasPermission } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -54,6 +56,41 @@ export default async (req: Request, context: Context) => {
       values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
       on conflict (id) do nothing
     `;
+
+    // Club-wide view for the Attendance tab's "New Players Today" —
+    // recently registered Bring a Mate guests, regardless of who invited
+    // them. Read-only, separate from the per-member GET below, and gated
+    // to the same permission as managing attendance.
+    if (req.method === "GET" && new URL(req.url).searchParams.get("scope") === "all") {
+      const caller = await ensureMember(db, user);
+      if (!hasPermission(caller.roles, "manage_others_attendance")) {
+        return new Response(JSON.stringify({ ok: false, error: "Only Game Coordinators and Administrators can see this" }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const rows = await db.sql`
+        select i.id, i.guest_name, i.guest_email, i.status, i.created_at, m.first_name as inviter_first_name, m.last_name as inviter_last_name
+        from invites i join members m on m.id = i.inviter_id
+        where i.status = 'registered' and i.created_at > now() - interval '10 days'
+        order by i.created_at desc
+        limit 25
+      `;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          invites: rows.map((r: any) => ({
+            id: r.id,
+            guestName: r.guest_name,
+            guestEmail: r.guest_email,
+            status: r.status,
+            createdAt: r.created_at,
+            inviterName: (r.inviter_first_name + " " + r.inviter_last_name).trim(),
+          })),
+        }),
+        { headers: { "content-type": "application/json" } }
+      );
+    }
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));

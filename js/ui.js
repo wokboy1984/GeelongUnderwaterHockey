@@ -289,9 +289,94 @@ window.GUWH = window.GUWH || {};
   const inputCls =
     "w-full rounded-xl border-2 border-black/10 bg-white px-3.5 py-2.5 text-[15px] text-[var(--ink)] placeholder:text-[var(--ink-soft-70)] focus:border-[var(--accent)] focus:outline-none transition";
 
+  // Small, dependency-free accessible dialog — used for the dashboard's
+  // "Bring a Mate" overlay (and anything else that needs a modal later).
+  // Traps focus inside itself, closes on Escape or a click on the dimmed
+  // backdrop, restores focus to whatever opened it, and is labelled via
+  // aria-modal + aria-labelledby so it reads correctly on a screen reader.
+  let modalIdSeq = 0;
+  function Modal({ open, onClose, title, children }) {
+    const dialogRef = React.useRef(null);
+    const titleIdRef = React.useRef(null);
+    if (!titleIdRef.current) titleIdRef.current = "modal-title-" + ++modalIdSeq;
+    const titleId = titleIdRef.current;
+
+    React.useEffect(() => {
+      if (!open) return undefined;
+      const previouslyFocused = document.activeElement;
+      const node = dialogRef.current;
+      if (node) node.focus();
+
+      function focusableEls() {
+        if (!node) return [];
+        return Array.prototype.slice.call(
+          node.querySelectorAll('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')
+        );
+      }
+
+      function onKeyDown(e) {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose && onClose();
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = focusableEls();
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+
+      document.addEventListener("keydown", onKeyDown, true);
+      return () => {
+        document.removeEventListener("keydown", onKeyDown, true);
+        if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+      };
+    }, [open, onClose]);
+
+    if (!open) return null;
+
+    return h(
+      "div",
+      {
+        className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+        onMouseDown: (e) => { if (e.target === e.currentTarget) onClose && onClose(); },
+      },
+      h("div", { className: "absolute inset-0 bg-black/40", "aria-hidden": "true" }),
+      h(
+        "div",
+        {
+          ref: dialogRef,
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": title ? titleId : undefined,
+          tabIndex: -1,
+          className: "relative bg-white rounded-3xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 sm:p-7 focus:outline-none",
+        },
+        h(
+          "div",
+          { className: "flex items-start justify-between gap-4 mb-4" },
+          title && h("h3", { id: titleId, className: "font-display text-xl font-bold text-[var(--ink)]" }, title),
+          h(
+            Button,
+            { variant: "ghost", size: "sm", className: "!p-2 -mr-2 -mt-1 ml-auto shrink-0", onClick: onClose, "aria-label": "Close" },
+            h(Icon, { name: "x", size: 18 })
+          )
+        ),
+        children
+      )
+    );
+  }
+
   GUWH.UI = {
     Icon, Container, Button, Pill, SectionHeading, Avatar, PlayerChip, MemberPhoto,
     MilestoneCard, AttendanceCounter, EventCard, TeamBoard, ScheduleList,
-    ShareCard, FormField, inputCls,
+    ShareCard, FormField, inputCls, Modal,
   };
 })();

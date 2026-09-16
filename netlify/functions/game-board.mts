@@ -14,16 +14,7 @@ import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, unauthorized } from "./_shared/roles.mts";
 import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
-
-function nextWednesdayISO(): string {
-  const d = new Date();
-  const day = d.getDay();
-  let add = (3 - day + 7) % 7;
-  if (add === 0) add = 7;
-  d.setDate(d.getDate() + add);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
   return { id: r.id, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };
@@ -37,7 +28,7 @@ export default async (req: Request, context: Context) => {
     const db = getDatabase();
     await ensureMember(db, user); // any registered member can view
 
-    const sessionDate = nextWednesdayISO();
+    const sessionDate = nextSessionDateISO();
     const [session] = await db.sql`select id, published from sessions where session_date = ${sessionDate}`;
 
     if (!session || !session.published) {

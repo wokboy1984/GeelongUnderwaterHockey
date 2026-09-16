@@ -14,6 +14,7 @@ GUWH.Pages = GUWH.Pages || {};
     joining: "Joining fee",
     annual: "Yearly membership",
     payment: "Payment received",
+    custom: "Custom charge",
   };
 
   function money(cents) {
@@ -274,12 +275,30 @@ GUWH.Pages = GUWH.Pages || {};
                     { className: inputCls, value: form.kind, onChange: (event) => setField("kind", event.target.value) },
                     h("option", { value: "payment" }, "Payment received — full or partial"),
                     h("option", { value: "joining" }, "Joining fee"),
-                    h("option", { value: "annual" }, "Yearly membership")
+                    h("option", { value: "annual" }, "Yearly membership"),
+                    h("option", { value: "game" }, "Game fee — retrospective entry"),
+                    h("option", { value: "custom" }, "Custom charge")
                   )),
-                  h(FormField, { label: "Date", required: true }, h("input", { type: "date", required: true, max: today, className: inputCls, value: form.date, onChange: (event) => setField("date", event.target.value) })),
-                  form.kind === "payment" && h(FormField, { label: "Amount received (AUD)", required: true }, h("input", { type: "number", min: "0.01", step: "0.01", required: true, className: inputCls, value: form.amount, onChange: (event) => setField("amount", event.target.value), placeholder: "0.00" })),
-                  h(FormField, { label: "Reference or notes", hint: form.kind === "payment" ? "For example: bank reference, cash, or payer name." : "Optional" }, h("input", { className: inputCls, value: form.note, onChange: (event) => setField("note", event.target.value) })),
-                  h("p", { className: "text-sm text-[var(--ink-soft)] sm:col-span-2" }, "Game fees appear automatically from the Game Coordination Attendance tab; bookings alone never create a charge."),
+                  h(FormField, {
+                    label: "Date",
+                    required: true,
+                    hint: form.kind === "game" ? "The date the game was actually played." : undefined,
+                  }, h("input", { type: "date", required: true, max: today, className: inputCls, value: form.date, onChange: (event) => setField("date", event.target.value) })),
+                  (form.kind === "payment" || form.kind === "custom") && h(FormField, { label: "Amount (AUD)", required: true }, h("input", { type: "number", min: "0.01", step: "0.01", required: true, className: inputCls, value: form.amount, onChange: (event) => setField("amount", event.target.value), placeholder: "0.00" })),
+                  (form.kind === "game" || form.kind === "custom") && h("p", { className: "text-sm text-[var(--ink-soft)] sm:col-span-2" },
+                    form.kind === "game"
+                      ? "Charged at the player's usual per-game rate (" + (selected.category === "waged" ? "$20.00" : "$10.00") + "). Only use this for a game that was never checked in on the Attendance tab — a checked-in date is refused here."
+                      : "Charged at the exact amount you enter below."
+                  ),
+                  h(FormField, {
+                    label: "Reference or notes",
+                    required: form.kind === "custom" || form.kind === "game",
+                    hint: form.kind === "payment" ? "For example: bank reference, cash, or payer name."
+                      : form.kind === "custom" ? "What this charge is for — required."
+                      : form.kind === "game" ? "Why it's being entered manually — required."
+                      : "Optional",
+                  }, h("input", { className: inputCls, required: form.kind === "custom" || form.kind === "game", value: form.note, onChange: (event) => setField("note", event.target.value) })),
+                  h("p", { className: "text-sm text-[var(--ink-soft)] sm:col-span-2" }, "Regular game fees appear automatically from the Game Coordination Attendance tab as players are checked in; bookings alone never create a charge."),
                   h("div", { className: "sm:col-span-2" }, h(Button, { type: "submit", disabled: saving }, saving ? "Saving…" : "Save record"))
                 ),
                 h("div", { className: "mt-8" },

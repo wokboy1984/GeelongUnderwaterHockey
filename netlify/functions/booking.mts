@@ -11,16 +11,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { getVerifiedUser } from "./_shared/roles.mts";
-
-function nextWednesdayISO(): string {
-  const d = new Date();
-  const day = d.getDay(); // 0 Sun ... 3 Wed ... 6 Sat
-  let add = (3 - day + 7) % 7;
-  if (add === 0) add = 7; // mirrors the concept's rule: on Wednesday itself, roll to next week
-  d.setDate(d.getDate() + add);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -46,7 +37,7 @@ export default async (req: Request, context: Context) => {
     const memberId: string = user.sub;
     const email: string = user.email;
     const fullName: string | undefined = user.user_metadata?.full_name;
-    const sessionDate = nextWednesdayISO();
+    const sessionDate = nextSessionDateISO();
 
     // Make sure this member and this week's session both exist.
     await db.sql`

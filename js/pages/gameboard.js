@@ -99,7 +99,34 @@ GUWH.Pages = GUWH.Pages || {};
   // mockup of it). Time / Pool A — Black / Pool A — White / Pool B — Black /
   // Pool B — White, in that order, with non-game rows spanning the four
   // pool columns. Never relies on colour alone — every cell is labelled.
-  function PublicTimetable({ rows }) {
+  // teamCell renders one team-name cell in the desktop grid, highlighting it
+  // when it's the logged-in member's own team (see highlightTeamName below)
+  // — an accent border/background plus a "YOUR TEAM" label, never colour
+  // alone, so it still reads under colour-blindness or on a bad screen.
+  function teamCell(name, highlightTeamName) {
+    const mine = !!(name && highlightTeamName && name === highlightTeamName);
+    return h(
+      "div",
+      { className: cx("py-2.5 border-b border-black/5 text-sm font-semibold", mine ? "text-[var(--accent-dark)]" : "text-[var(--ink)]") },
+      mine && h("span", { className: "block text-[9px] font-bold uppercase tracking-wide text-[var(--accent-dark)]" }, "Your team"),
+      h("span", { className: mine ? "underline decoration-2 decoration-[var(--accent)] underline-offset-2" : "" }, name || "—")
+    );
+  }
+
+  // Mobile equivalent of teamCell — inline text (not a block cell), so "your
+  // team" is shown with a bold accent colour plus a "(you)" word, never
+  // colour alone.
+  function teamNameInline(name, highlightTeamName) {
+    const mine = !!(name && highlightTeamName && name === highlightTeamName);
+    return h(
+      "span",
+      { className: mine ? "font-bold text-[var(--accent-dark)]" : undefined },
+      name || "TBC",
+      mine && " (you)"
+    );
+  }
+
+  function PublicTimetable({ rows, highlightTeamName }) {
     if (!rows || rows.length === 0) {
       return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No timetable rows yet.");
     }
@@ -141,10 +168,10 @@ GUWH.Pages = GUWH.Pages || {};
             React.Fragment,
             { key: row.id },
             timeCell,
-            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolA && poolA.blackTeamName) || "—"),
-            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolA && poolA.whiteTeamName) || "—"),
-            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolB && poolB.blackTeamName) || "—"),
-            h("div", { className: "py-2.5 border-b border-black/5 text-sm font-semibold text-[var(--ink)]" }, (poolB && poolB.whiteTeamName) || "—"),
+            teamCell(poolA && poolA.blackTeamName, highlightTeamName),
+            teamCell(poolA && poolA.whiteTeamName, highlightTeamName),
+            teamCell(poolB && poolB.blackTeamName, highlightTeamName),
+            teamCell(poolB && poolB.whiteTeamName, highlightTeamName),
             showRefLine &&
               h(
                 React.Fragment,
@@ -199,9 +226,9 @@ GUWH.Pages = GUWH.Pages || {};
                           "p",
                           { className: "text-sm text-[var(--ink)]" },
                           h("span", { className: "text-[var(--ink-soft)]" }, "Black: "),
-                          data.blackTeamName || "TBC",
+                          teamNameInline(data.blackTeamName, highlightTeamName),
                           h("span", { className: "text-[var(--ink-soft)] ml-3" }, "White: "),
-                          data.whiteTeamName || "TBC"
+                          teamNameInline(data.whiteTeamName, highlightTeamName)
                         ),
                         data.referees && data.referees.length > 0 && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(data.referees))
                       )
@@ -217,6 +244,7 @@ GUWH.Pages = GUWH.Pages || {};
   // timetable from /api/game-board, or a "not yet finalised" state.
   function RealGameBoardPage() {
     const [data, setData] = React.useState(null);
+    const [myId, setMyId] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
@@ -226,7 +254,13 @@ GUWH.Pages = GUWH.Pages || {};
         .then((d) => (d.ok ? setData(d) : setError(d.error || "Something went wrong")))
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
+      // Just for "your team" highlighting below — failure here is harmless,
+      // the page still works without it.
+      GUWH.Identity.authFetch("/api/profile").then((r) => r.json()).then((d) => { if (d.ok) setMyId(d.member.id); }).catch(() => {});
     }, []);
+
+    const myTeam = data && data.published && myId ? (data.teams || []).find((t) => (t.players || []).some((p) => p.id === myId)) : null;
+    const myTeamName = myTeam ? myTeam.name : null;
 
     return h(
       Container,
@@ -253,11 +287,17 @@ GUWH.Pages = GUWH.Pages || {};
               : h(
                   "div",
                   { className: "grid sm:grid-cols-2 gap-4" },
-                  data.teams.map((team) =>
-                    h(
+                  data.teams.map((team) => {
+                    const mine = team.name === myTeamName;
+                    return h(
                       "div",
-                      { key: team.id, className: "rounded-2xl bg-[var(--sand)] p-4" },
-                      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-2" }, team.name),
+                      { key: team.id, className: cx("rounded-2xl p-4", mine ? "bg-[var(--accent-12)] ring-2 ring-[var(--accent)]" : "bg-[var(--sand)]") },
+                      h(
+                        "div",
+                        { className: "flex items-center justify-between mb-2" },
+                        h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, team.name),
+                        mine && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, "Your team")
+                      ),
                       team.players.length === 0
                         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "—")
                         : h(
@@ -265,15 +305,15 @@ GUWH.Pages = GUWH.Pages || {};
                             { className: "flex flex-col gap-1.5" },
                             team.players.map((p) => h("p", { key: p.id, className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")))
                           )
-                    )
-                  )
+                    );
+                  })
                 )
           ),
           h(
             "div",
             { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" },
             h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "The night's timetable"),
-            h(PublicTimetable, { rows: data.rows })
+            h(PublicTimetable, { rows: data.rows, highlightTeamName: myTeamName })
           )
         )
     );

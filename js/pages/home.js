@@ -5,21 +5,28 @@ window.GUWH = window.GUWH || {};
 GUWH.Pages = GUWH.Pages || {};
 
 (function () {
-  const { Container, Button, Pill, SectionHeading, Icon, MilestoneCard, PlayerChip } = GUWH.UI;
+  const { Container, Button, Pill, SectionHeading, Icon } = GUWH.UI;
   const { navigate } = GUWH.Router;
 
-  const FIRST_NIGHT_STEPS = [
-    { title: "Arrive & meet a member", body: "Someone from the club will be watching for you at the Handbury Centre from 5:50pm — you won't be standing around wondering where to go." },
-    { title: "Get fitted with gear", body: "Fins, mask, snorkel, glove and stick, all on loan. We've got junior sizes too." },
-    { title: "Learn the basics", body: "Five minutes on safety and how the puck moves. That's genuinely all the theory you need." },
-    { title: "Join the Wednesday session", body: "You play the same session as everyone else, alongside an experienced player who'll call out what's happening." },
-    { title: "Come for the hockey, stay for the people", body: "Help fold the nets, then head down for a BBQ and drinks at Corio Bay with the whole club. Come for that bit too — it's half the reason people stay." },
+  const SPORT_POINTS = [
+    { title: "A proper team sport", body: "Passing, positioning, attacking and defending—just underwater." },
+    { title: "An incredible workout", body: "Short breath-hold efforts combined with swimming, teamwork and recovery." },
+    { title: "A genuinely social club", body: "Mixed experience levels, welcoming members and plenty of opportunities to meet the crew." },
   ];
 
-  const BENEFITS = [
-    { icon: "droplet", title: "Full-body fitness, underwater", body: "Breath-hold sprints, twisting, sculling — it works muscles swimming laps never touches." },
-    { icon: "users", title: "A game for everyone", body: "Ages from teens to fifties, mixed grades, same pool. Nobody's precious about it." },
-    { icon: "trophy", title: "As competitive as you want", body: "Play purely for Wednesday nights, or chase state, national and international selection." },
+  const FIRST_NIGHT_STEPS = [
+    { title: "Meet us at the pool", body: "Arrive from 5:50pm at the Handbury Centre. One of our members will meet you and show you where to go." },
+    { title: "Borrow your equipment", body: "We'll fit you with fins, a mask, snorkel, glove and stick. Just bring bathers and a towel." },
+    { title: "Learn the basics", body: "An experienced player will explain the equipment, safety rules and how to move the puck." },
+    { title: "Get in and have a go", body: "Warm up with an experienced player before joining the Wednesday session at your own pace." },
+    { title: "Meet the crew", body: "Stick around after the game, get to know the players and become part of the local underwater hockey community." },
+  ];
+
+  const CLUB_PHOTOS = [
+    { src: "images/action-contest.jpg", alt: "Two players diving for the puck along the pool floor", caption: "Contesting the puck" },
+    { src: "images/action-reach.jpg", alt: "Players contesting the puck underwater", caption: "Full stretch for every inch" },
+    { src: "images/gear-closeup.jpg", alt: "Player at the pool edge with stick, puck and gloves", caption: "Stick, puck, glove — that's it" },
+    { src: "images/team-group.jpg", alt: "The club surfacing together for a group photo after a session", caption: "The whole crew, every Wednesday" },
   ];
 
   function HomePage() {
@@ -36,13 +43,14 @@ GUWH.Pages = GUWH.Pages || {};
         .catch(() => {});
     }, []);
     const confirmed = liveStats ? liveStats.confirmedCount : null;
-    const sessionDateLabel = liveStats ? GUWH.formatDate(new Date(liveStats.sessionDate + "T00:00:00")) : GUWH.formatDate(wed);
 
     return h(
       React.Fragment,
       null,
 
-      // ---------------- HERO ----------------
+      // ============================================================
+      // 1. HERO + AUDIENCE PATHWAYS
+      // ============================================================
       h(
         "section",
         { className: "relative overflow-hidden bg-[var(--navy)]" },
@@ -63,24 +71,33 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           Container,
           { className: "relative pt-16 sm:pt-24 pb-0" },
-          h(Pill, { tone: "white" }, h(Icon, { name: "droplet", size: 14 }), "Geelong · Every Wednesday"),
+          h(Pill, { tone: "white" }, h(Icon, { name: "droplet", size: 14 }), "Geelong Underwater Hockey · Wednesday Nights"),
           h(
             "h1",
-            { className: "font-display uppercase text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white mt-5 leading-[1.02] tracking-tight max-w-3xl text-balance" },
-            "Turn up Wednesday. We'll lend you ",
-            h("span", { className: "text-[var(--accent-light)]" }, "the rest"),
-            "."
+            { className: "font-display uppercase text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white mt-5 leading-[1.02] tracking-tight text-balance" },
+            "Play hockey at the bottom of a pool."
           ),
           h(
             "p",
-            { className: "mt-5 text-lg text-white/80 max-w-lg leading-relaxed" },
-            "Underwater hockey in Geelong. No experience, no gear, no club to join first — just bring bathers and a towel."
+            { className: "mt-5 text-lg text-white/80 max-w-2xl leading-relaxed" },
+            "Underwater hockey is a fast, social team sport played entirely beneath the surface. Join us in Geelong on Wednesday nights—no experience or equipment needed."
           ),
           h(
             "div",
-            { className: "mt-5 flex items-center gap-2.5 text-white/90 text-sm font-semibold" },
+            { className: "mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-white/85 text-sm font-semibold" },
+            h("span", { className: "flex items-center gap-1.5" }, h(Icon, { name: "clock", size: 16, className: "text-[var(--accent-light)]" }), "Wednesdays, " + GUWH.club.sessionTime),
+            h("span", { className: "flex items-center gap-1.5" }, h(Icon, { name: "mapPin", size: 16, className: "text-[var(--accent-light)]" }), GUWH.club.venue + ", Corio")
+          ),
+          h(
+            "div",
+            { className: "mt-4 flex items-center gap-2.5 text-white/90 text-sm font-semibold" },
             h(Icon, { name: "check", size: 18, className: "text-[var(--accent-light)]" }),
             "Your first three sessions are free."
+          ),
+          h(
+            "p",
+            { className: "mt-3 text-white/50 text-sm italic" },
+            "Turn up Wednesday. We'll lend you the rest."
           )
         ),
 
@@ -98,38 +115,46 @@ GUWH.Pages = GUWH.Pages || {};
               h(
                 "div",
                 { className: "grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/10 bg-[var(--navy-2)]" },
-                // never played
+                // New members — comes first in the DOM so it's also first on mobile.
                 h(
-                  "button",
-                  { onClick: () => navigate("/new-player"), className: "text-left p-6 sm:p-8 hover:bg-white/[0.03] transition" },
-                  h(Pill, { tone: "orange", className: "!bg-transparent !p-0 !text-[var(--accent2)]" }, "Never played"),
-                  h("p", { className: "font-display text-2xl font-bold text-white mt-3" }, "I want to try it"),
+                  "div",
+                  { className: "p-6 sm:p-8 flex flex-col" },
+                  h(Pill, { tone: "orange", className: "!bg-transparent !p-0 !text-[var(--accent2)] w-fit" }, "New members"),
+                  h("p", { className: "font-display text-2xl font-bold text-white mt-3" }, "Try underwater hockey"),
                   h(
                     "p",
                     { className: "mt-2 text-sm text-white/70 leading-relaxed max-w-xs" },
-                    "Three free sessions and all the gear lent to you. Wednesdays, " + GUWH.club.sessionTime + ", " + GUWH.club.venue + " in Corio."
+                    "We'll lend you the equipment and help you through your first session. Just bring bathers and a towel."
                   ),
-                  h("span", { className: "mt-4 inline-flex items-center gap-1.5 text-sm font-bold text-[var(--accent2)]" }, "Start here", h(Icon, { name: "arrowRight", size: 15 }))
+                  h(
+                    Button,
+                    { variant: "cta", size: "md", className: "mt-5 w-fit", onClick: () => navigate("/new-player") },
+                    "Book a Free Session", h(Icon, { name: "arrowRight", size: 16 })
+                  )
                 ),
-                // already play
+                // Existing members
                 h(
-                  "button",
-                  { onClick: () => navigate("/portal"), className: "text-left p-6 sm:p-8 hover:bg-white/[0.03] transition" },
-                  h(Pill, { tone: "accent", className: "!bg-transparent !p-0 !text-[var(--accent-light)]" }, "Already play here"),
-                  h("p", { className: "font-display text-2xl font-bold text-white mt-3" }, "Book me in this week"),
+                  "div",
+                  { className: "p-6 sm:p-8 flex flex-col" },
+                  h(Pill, { tone: "accent", className: "!bg-transparent !p-0 !text-[var(--accent-light)] w-fit" }, "Existing members"),
+                  h("p", { className: "font-display text-2xl font-bold text-white mt-3" }, "Playing this Wednesday?"),
                   h(
                     "p",
                     { className: "mt-2 text-sm text-white/70 leading-relaxed max-w-xs" },
-                    "Get on the list, see who else is coming, and check in when you get to the pool."
+                    "Book in, see who else is coming and get everything you need for this week's game."
                   ),
                   confirmed !== null &&
                     h(
                       "p",
                       { className: "mt-3 text-sm" },
                       h("span", { className: "font-display font-bold text-white tabular-nums" }, confirmed),
-                      h("span", { className: "text-white/60" }, " booked for " + sessionDateLabel)
+                      h("span", { className: "text-white/60" }, " players booked for this Wednesday")
                     ),
-                  h("span", { className: "mt-3 inline-flex items-center gap-1.5 text-sm font-bold text-[var(--accent-light)]" }, "Book this week", h(Icon, { name: "arrowRight", size: 15 }))
+                  h(
+                    Button,
+                    { variant: "secondary", size: "md", className: "mt-5 w-fit !bg-white/10 !text-white !border-white/25", onClick: () => navigate("/portal") },
+                    "Book This Week", h(Icon, { name: "arrowRight", size: 16 })
+                  )
                 )
               )
             )
@@ -138,40 +163,67 @@ GUWH.Pages = GUWH.Pages || {};
         h("div", { className: "h-10 sm:h-14 bg-[var(--navy)]" })
       ),
 
-      // ---------------- HOW IT WORKS (quick) ----------------
+      // ============================================================
+      // 2. WHAT IS UNDERWATER HOCKEY? (+ VIDEO, aligned right)
+      // ============================================================
+      // 13 Sept 2026, Cheongy's request — the video (same one embedded on
+      // the How It Works page) now sits inside this section instead of
+      // its own section below, video on the right on desktop.
       h(
         "section",
         { className: "py-16 sm:py-20 bg-white" },
         h(
           Container,
           null,
-          h(SectionHeading, {
-            eyebrow: "How it works",
-            title: "It's hockey, but underwater.",
-            sub: "2 teams, 6 players, 1 puck. Underwater hockey is the best game you've never heard of. You swim down, push a puck along the pool floor, and try to get it into the other team's goal.",
-          }),
           h(
             "div",
-            { className: "grid sm:grid-cols-3 gap-4" },
-            BENEFITS.map((b) =>
+            { className: "grid lg:grid-cols-2 gap-10 lg:gap-16 items-center" },
+            h(
+              "div",
+              null,
+              h(SectionHeading, {
+                eyebrow: "How it works",
+                title: "Six players. One puck. No oxygen tanks.",
+                sub: "Players wear a mask, snorkel and fins, diving beneath the surface to move a puck across the pool floor and into the opposing team's goal. It's fast, tactical, surprisingly physical—and much easier to try than it looks.",
+              }),
               h(
                 "div",
-                { key: b.title, className: "rounded-2xl bg-[var(--sand)] p-5" },
-                h("div", { className: "text-[var(--accent-dark)] mb-3" }, h(Icon, { name: b.icon, size: 24 })),
-                h("h3", { className: "font-display text-lg font-bold text-[var(--ink)]" }, b.title),
-                h("p", { className: "mt-1.5 text-sm text-[var(--ink-soft)] leading-relaxed" }, b.body)
+                { className: "flex flex-col gap-5" },
+                SPORT_POINTS.map((p) =>
+                  h(
+                    "div",
+                    { key: p.title, className: "flex gap-2.5" },
+                    h(Icon, { name: "check", size: 16, className: "text-[var(--accent-dark)] shrink-0 mt-1" }),
+                    h(
+                      "div",
+                      null,
+                      h("p", { className: "font-display font-bold text-[var(--ink)]" }, p.title),
+                      h("p", { className: "mt-0.5 text-sm text-[var(--ink-soft)] leading-relaxed" }, p.body)
+                    )
+                  )
+                )
               )
+            ),
+            h(
+              "div",
+              { className: "relative w-full rounded-2xl overflow-hidden ring-1 ring-black/5", style: { paddingTop: "56.25%" } },
+              h("iframe", {
+                src: "https://www.youtube-nocookie.com/embed/JoiUTu4emcE",
+                title: "Underwater hockey explained",
+                className: "absolute inset-0 w-full h-full",
+                style: { border: 0 },
+                loading: "lazy",
+                allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+                allowFullScreen: true,
+              })
             )
-          ),
-          h(
-            "div",
-            { className: "mt-8 flex justify-center" },
-            h(Button, { variant: "cta", size: "lg", onClick: () => navigate("/new-player") }, "Try Underwater Hockey")
           )
         )
       ),
 
-      // ---------------- PHOTO STRIP (real club imagery) ----------------
+      // ============================================================
+      // 3. REAL CLUB IMAGERY
+      // ============================================================
       h(
         "section",
         { className: "py-14 sm:py-16 bg-[var(--sand)]" },
@@ -180,58 +232,43 @@ GUWH.Pages = GUWH.Pages || {};
           null,
           h(
             "div",
-            { className: "flex items-end justify-between gap-4 mb-6" },
-            h(
-              "div",
-              null,
-              h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)] mb-2" }, "From the pool"),
-              h("h2", { className: "font-display text-2xl sm:text-3xl font-bold text-[var(--ink)] text-balance" }, "Our people.")
-            )
+            { className: "mb-6" },
+            h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)] mb-2" }, "From the pool"),
+            h("h2", { className: "font-display text-2xl sm:text-3xl font-bold text-[var(--ink)] text-balance" }, "This is Wednesday night.")
           ),
           h(
             "div",
             { className: "grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" },
-            [
-              { src: "images/action-contest.jpg", alt: "Two players diving for the puck along the pool floor" },
-              { src: "images/action-reach.jpg", alt: "Players contesting the puck underwater" },
-              { src: "images/gear-closeup.jpg", alt: "Player at the pool edge with stick, puck and gloves" },
-              { src: "images/team-group.jpg", alt: "The club surfacing together for a group photo after a session" },
-            ].map((img) =>
+            CLUB_PHOTOS.map((img) =>
               h(
                 "div",
-                { key: img.src, className: "aspect-square rounded-2xl overflow-hidden ring-1 ring-black/5" },
-                h("img", { src: img.src, alt: img.alt, loading: "lazy", className: "w-full h-full object-cover" })
+                { key: img.src },
+                h(
+                  "div",
+                  { className: "aspect-square rounded-2xl overflow-hidden ring-1 ring-black/5" },
+                  h("img", { src: img.src, alt: img.alt, loading: "lazy", className: "w-full h-full object-cover" })
+                ),
+                h("p", { className: "mt-2 text-xs text-[var(--ink-soft)]" }, img.caption)
               )
             )
           )
         )
       ),
 
-      // ---------------- FINAL CTA ----------------
-      h(
-        "section",
-        { className: "py-20 bg-[var(--accent)] text-white text-center" },
-        h(
-          Container,
-          { className: "max-w-2xl" },
-          h("h2", { className: "font-display text-4xl sm:text-5xl font-bold text-balance" }, "Three free sessions. We'll even lend you the gear."),
-          h("p", { className: "mt-4 text-white/90 text-lg" }, "Come give it a crack this Wednesday. Worst case, you've had a weird, excellent workout."),
-          h(
-            "div",
-            { className: "mt-8 flex flex-wrap justify-center gap-3" },
-            h(Button, { size: "lg", variant: "dark", onClick: () => navigate("/new-player") }, "Book your first session")
-          )
-        )
-      ),
-
-      // ---------------- YOUR FIRST NIGHT ----------------
+      // ============================================================
+      // 4. WHAT HAPPENS ON YOUR FIRST WEDNESDAY?
+      // ============================================================
       h(
         "section",
         { className: "py-16 sm:py-20 bg-white" },
         h(
           Container,
           null,
-          h(SectionHeading, { eyebrow: "Your first night", title: "Exactly what happens when you show up.", sub: "No separate beginner session — you jump straight into the normal Wednesday crowd, with someone looking out for you." }),
+          h(SectionHeading, {
+            eyebrow: "Your first night",
+            title: "Your first Wednesday, step by step.",
+            sub: "No separate beginner session and no pressure to know what you're doing. Someone from the club will meet you, lend you the equipment and help you get started.",
+          }),
           h(
             "div",
             { className: "grid sm:grid-cols-2 lg:grid-cols-5 gap-4" },
@@ -248,66 +285,47 @@ GUWH.Pages = GUWH.Pages || {};
         )
       ),
 
-      // ---------------- PATHWAY + ACHIEVEMENTS ----------------
+      // ============================================================
+      // 5. SOCIAL AND COMMUNITY REASSURANCE
+      // ============================================================
       h(
         "section",
-        { className: "py-16 sm:py-20 bg-[var(--navy)] text-white" },
+        { className: "py-14 bg-[var(--sand)]" },
         h(
           Container,
-          { className: "grid lg:grid-cols-2 gap-12" },
-          h(
-            "div",
-            null,
-            h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-light)] mb-2" }, "Beginner to competition"),
-            h("h2", { className: "font-display text-3xl font-bold text-balance" }, "Play purely for fun, or chase the green and gold."),
-            h(
-              "ol",
-              { className: "mt-6 flex flex-col gap-4" },
-              ["Wednesday nights — the whole club, every grade", "Club fixtures — Pool A and B, most terms", "Victorian titles — state selection each year", "Nationals & Australian selection — where it's gone before"].map((step, i) =>
-                h(
-                  "li",
-                  { key: step, className: "flex items-center gap-3" },
-                  h("span", { className: "font-display text-lg font-bold text-[var(--accent-light)] w-6" }, i + 1),
-                  h("span", { className: "text-white/85" }, step)
-                )
-              )
-            )
-          ),
-          h(
-            "div",
-            null,
-            h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-light)] mb-2" }, "Club history"),
-            h(
-              "div",
-              { className: "flex flex-col gap-4" },
-              GUWH.club.history.map((item) =>
-                h(
-                  "div",
-                  { key: item.year, className: "flex gap-4 pb-4 border-b border-white/10 last:border-0" },
-                  h("span", { className: "font-display text-2xl font-bold text-[var(--accent-light)] w-16 shrink-0" }, item.year),
-                  h("p", { className: "text-white/80 text-[15px] leading-relaxed" }, item.text)
-                )
-              )
-            )
-          )
-        )
-      ),
-
-      // ---------------- SOCIAL PLAN ----------------
-      h(
-        "section",
-        { className: "py-14 bg-white" },
-        h(
-          Container,
-          { className: "rounded-3xl bg-[var(--sand)] p-8 sm:p-10 flex flex-col sm:flex-row items-start sm:items-center gap-6 justify-between" },
+          { className: "rounded-3xl bg-white p-8 sm:p-10 flex flex-col sm:flex-row items-start sm:items-center gap-6 justify-between ring-1 ring-black/5" },
           h(
             "div",
             null,
             h(Pill, { tone: "accent" }, h(Icon, { name: "heart", size: 14 }), "After the whistle"),
             h("h3", { className: "font-display text-2xl font-bold text-[var(--ink)] mt-3" }, "Wednesday doesn't end at 7:45."),
-            h("p", { className: "mt-2 text-[var(--ink-soft)] max-w-md" }, GUWH.socialPlan)
+            h(
+              "p",
+              { className: "mt-2 text-[var(--ink-soft)] max-w-md" },
+              "Plenty of players stick around after the session for a chat — it's as much a social, welcoming club as it is a competitive one."
+            )
           ),
           h(Button, { variant: "dark", onClick: () => navigate("/portal") }, "See the full board", h(Icon, { name: "chevronRight", size: 16 }))
+        )
+      ),
+
+      // ============================================================
+      // 6. FINAL CTA
+      // ============================================================
+      h(
+        "section",
+        { className: "py-20 bg-[var(--accent)] text-white text-center" },
+        h(
+          Container,
+          { className: "max-w-2xl" },
+          h("h2", { className: "font-display text-4xl sm:text-5xl font-bold text-balance" }, "Ready to try something completely different?"),
+          h("p", { className: "mt-4 text-white/90 text-lg" }, "Your first three sessions are free, and we'll lend you all the equipment you need."),
+          h(
+            "div",
+            { className: "mt-8 flex flex-wrap justify-center gap-3" },
+            h(Button, { size: "lg", variant: "dark", onClick: () => navigate("/new-player") }, "Book a Free Session")
+          ),
+          h("p", { className: "mt-4 text-white/70 text-sm" }, "Wednesday nights at the Handbury Centre for Wellbeing in Corio.")
         )
       )
     );

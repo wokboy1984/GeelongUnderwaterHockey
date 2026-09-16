@@ -18,6 +18,7 @@ GUWH.Pages = GUWH.Pages || {};
     administrator: "Administrator",
   };
   const ROLE_ORDER = ["game_coordinator", "community_moderator", "treasurer", "administrator"];
+  const GRADES = ["A", "B", "Casual", "Junior"];
 
   function AdminRolesPage() {
     const [q, setQ] = React.useState("");
@@ -71,6 +72,25 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    async function setGrade(member, grade) {
+      const key = member.id + ":grade";
+      setBusy(key);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          body: JSON.stringify({ action: "grade", memberEmail: member.email, grade }),
+        });
+        const data = await res.json();
+        if (data.ok) setMembers((prev) => prev.map((m) => (m.id === data.member.id ? data.member : m)));
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(null);
+      }
+    }
+
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
@@ -94,14 +114,14 @@ GUWH.Pages = GUWH.Pages || {};
             { className: "rounded-2xl bg-white ring-1 ring-black/5 overflow-x-auto" },
             h(
               "table",
-              { className: "w-full text-sm min-w-[720px]" },
+              { className: "w-full text-sm min-w-[820px]" },
               h(
                 "thead",
                 null,
                 h(
                   "tr",
                   { className: "text-left text-xs font-mono uppercase tracking-wide text-[var(--ink-soft)] border-b border-black/5" },
-                  ["Member", "Age", "Current roles", "Change role"].map((c) => h("th", { key: c, className: "px-4 py-3 font-semibold" }, c))
+                  ["Member", "Age", "Grade", "Current roles", "Change role"].map((c) => h("th", { key: c, className: "px-4 py-3 font-semibold" }, c))
                 )
               ),
               h(
@@ -121,6 +141,21 @@ GUWH.Pages = GUWH.Pages || {};
                       h("p", { className: "text-xs text-[var(--ink-soft)]" }, m.email)
                     ),
                     h("td", { className: "px-4 py-3 text-[var(--ink-soft)] tabular-nums" }, typeof m.age === "number" ? m.age : "—"),
+                    h(
+                      "td",
+                      { className: "px-4 py-3" },
+                      h(
+                        "select",
+                        {
+                          className: inputCls + " !py-1.5 !text-xs !w-auto",
+                          value: m.grade || "",
+                          disabled: busy === m.id + ":grade",
+                          onChange: (e) => setGrade(m, e.target.value),
+                        },
+                        h("option", { value: "" }, "No grade"),
+                        GRADES.map((g) => h("option", { key: g, value: g }, g))
+                      )
+                    ),
                     h(
                       "td",
                       { className: "px-4 py-3" },

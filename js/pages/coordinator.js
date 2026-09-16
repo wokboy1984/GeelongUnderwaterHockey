@@ -10,10 +10,11 @@ GUWH.Pages = GUWH.Pages || {};
   const { Container, Button, Pill, Icon, SectionHeading, FormField, inputCls } = GUWH.UI;
   const { navigate } = GUWH.Router;
 
-  const GRADES = ["A", "B", "Casual", "Junior"];
-
+  // Attendance (the weekly roll + its closed-out History) moved out to its
+  // own top-level "Attendance" item under Admin Functions (13 Sept 2026,
+  // Cheongy's request) — it's no longer one of these tabs. Game Coordination
+  // is now Teams/Timetable/Publish only.
   const TABS = [
-    { key: "attendance", label: "Attendance", path: "/coordinator" },
     { key: "teams", label: "Teams", path: "/coordinator/teams" },
     { key: "schedule", label: "Timetable", path: "/coordinator/schedule" },
     { key: "publish", label: "Publish", path: "/coordinator/publish" },
@@ -44,19 +45,37 @@ GUWH.Pages = GUWH.Pages || {};
   function AttendanceTab() {
     const [sessionDate, setSessionDate] = React.useState(null);
     const [players, setPlayers] = React.useState([]);
+    const [checkin, setCheckin] = React.useState(null); // { sessionDate, players, closed, closedAt, closedByName }
+    const [newPlayers, setNewPlayers] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
-    const [addEmail, setAddEmail] = React.useState("");
+    const [addQuery, setAddQuery] = React.useState("");
+    const [addResults, setAddResults] = React.useState([]);
     const [addName, setAddName] = React.useState("");
+    const [roll, setRoll] = React.useState({}); // memberId -> ticked, pending edits not yet saved
+    const [savingRoll, setSavingRoll] = React.useState(false);
+    const [closingRoll, setClosingRoll] = React.useState(false);
+    const searchSeq = React.useRef(0);
+    const searchTimer = React.useRef(null);
 
     function load() {
       setLoading(true);
       setError(null);
-      return GUWH.Identity.authFetch("/api/coordinator/attendance")
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); }
-          else setError(data.error || "Something went wrong");
+      return Promise.all([
+        GUWH.Identity.authFetch("/api/coordinator/attendance").then((r) => r.json()),
+        GUWH.Identity.authFetch("/api/coordinator/checkin").then((r) => r.json()),
+        GUWH.Identity.authFetch("/api/invites?scope=all").then((r) => r.json()).catch(() => ({ ok: false })),
+      ])
+        .then(([a, c, i]) => {
+          if (a.ok) { setSessionDate(a.sessionDate); setPlayers(a.players); }
+          else setError(a.error || "Something went wrong");
+          // This used to be silently dropped on failure (no `else`), so a
+          // real DB/permission error here left the roll simply missing with
+          // no explanation — looked like "attendance is broken" rather than
+          // showing what actually went wrong. Surface it now.
+          if (c.ok) setCheckin(c);
+          else setError(c.error || "Could not load today's roll.");
+          if (i.ok) setNewPlayers(i.invites);
         })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
@@ -64,34 +83,34 @@ GUWH.Pages = GUWH.Pages || {};
 
     React.useEffect(() => { load(); }, []);
 
+    // The roll's tick state starts from whatever's already saved for today,
+    // every time a fresh `checkin` comes in (first load, and after Save/Close/Reopen).
+    React.useEffect(() => {
+      if (!checkin) return;
+      const next = {};
+      checkin.players.forEach((p) => { next[p.id] = p.attended; });
+      setRoll(next);
+    }, [checkin]);
+
+    // The roll always records against *today* server-side (see
+    // coordinator-checkin.mts) — the Confirmed list above is for the
+    // upcoming Wednesday, which is only the same date as today on game day
+    // itself. This used to hide the whole roll on any other day; that was
+    // more confusing than useful (13 Sept 2026, Cheongy's request), so the
+    // roll is now always available — just with a note below when today
+    // isn't the scheduled game day, naming the date it's actually for.
+    const isGameDay = !!(checkin && sessionDate && checkin.sessionDate === sessionDate);
+
     async function setAttendance(memberEmail, isIn) {
       setError(null);
       try {
         const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ memberEmail, in: isIn }) });
         const data = await res.json();
-        if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); if (isIn) setAddEmail(""); }
+        if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); setAddQuery(""); setAddResults([]); }
         else setError(data.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
       }
-    }
-
-    async function setGrade(memberEmail, grade) {
-      setError(null);
-      try {
-        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ memberEmail, grade }) });
-        const data = await res.json();
-        if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); }
-        else setError(data.error || "Something went wrong");
-      } catch (e) {
-        setError(String(e));
-      }
-    }
-
-    function addByEmail(ev) {
-      ev.preventDefault();
-      if (!addEmail.trim()) return;
-      setAttendance(addEmail.trim(), true);
     }
 
     async function addGuestPlayer(ev) {
@@ -109,16 +128,94 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    function onSearchChange(value) {
+      setAddQuery(value);
+      const seq = ++searchSeq.current;
+      const query = value.trim();
+      if (query.length < 2) { setAddResults([]); return; }
+      window.clearTimeout(searchTimer.current);
+      searchTimer.current = window.setTimeout(() => {
+        GUWH.Identity.authFetch("/api/coordinator/attendance?q=" + encodeURIComponent(query))
+          .then((r) => r.json())
+          .then((data) => { if (seq === searchSeq.current && data.ok) setAddResults(data.matches); })
+          .catch(() => {});
+      }, 250);
+    }
+
+    function tick(memberId, checked) {
+      setRoll((prev) => Object.assign({}, prev, { [memberId]: checked }));
+    }
+
+    // One request, tick states for every confirmed player at once — this
+    // replaced ticking each box firing its own instant save (13 Sept 2026,
+    // Cheongy's request for a plain "tick, then Save/Close" roll instead).
+    // `close` also closes the day out in the same request, so "Close Roll"
+    // doesn't need a separate Save first.
+    async function submitRoll(close) {
+      if (!checkin) return;
+      close ? setClosingRoll(true) : setSavingRoll(true);
+      setError(null);
+      try {
+        const entries = players.map((p) => ({ memberId: p.id, attended: !!roll[p.id] }));
+        const res = await GUWH.Identity.authFetch("/api/coordinator/checkin", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate: checkin.sessionDate, action: "save", entries, close: !!close }),
+        });
+        const data = await res.json();
+        if (data.ok) setCheckin(data);
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        close ? setClosingRoll(false) : setSavingRoll(false);
+      }
+    }
+
+    async function reopenRoll() {
+      if (!checkin) return;
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/coordinator/checkin", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate: checkin.sessionDate, action: "reopen" }),
+        });
+        const data = await res.json();
+        if (data.ok) setCheckin(data);
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+
     return h(
       React.Fragment,
       null,
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
       sessionDate && h(Pill, { tone: "accent" }, GUWH.formatDate(new Date(sessionDate + "T00:00:00"))),
+
+      // ---- Add an existing member: type-ahead by name, not raw email ----
       h(
-        "form",
-        { onSubmit: addByEmail, className: "mt-6 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex gap-3 items-end" },
-        h(FormField, { label: "Add a member by email" }, h("input", { className: inputCls, value: addEmail, onChange: (e) => setAddEmail(e.target.value), placeholder: "name@example.com" })),
-        h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Add as confirmed")
+        "div",
+        { className: "mt-6 rounded-2xl bg-white ring-1 ring-black/5 p-5 relative" },
+        h(FormField, { label: "Add existing member" }, h("input", { className: inputCls, value: addQuery, onChange: (e) => onSearchChange(e.target.value), placeholder: "Start typing a name…" })),
+        addResults.length > 0 &&
+          h(
+            "div",
+            { className: "absolute left-5 right-5 mt-1 rounded-xl bg-white ring-1 ring-black/10 shadow-lg z-10 overflow-hidden" },
+            addResults.map((m) =>
+              h(
+                "button",
+                {
+                  key: m.id,
+                  type: "button",
+                  onClick: () => setAttendance(m.email, true),
+                  className: "w-full text-left px-4 py-2.5 text-sm hover:bg-[var(--sand)] flex items-center justify-between",
+                },
+                h("span", null, m.firstName + " " + m.lastName),
+                h("span", { className: "text-xs text-[var(--ink-soft)]" }, m.email)
+              )
+            )
+          )
       ),
       h(
         "form",
@@ -126,10 +223,39 @@ GUWH.Pages = GUWH.Pages || {};
         h(FormField, { label: "Add a player (no account needed)" }, h("input", { className: inputCls, value: addName, onChange: (e) => setAddName(e.target.value), placeholder: "Name" })),
         h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), "Add Player")
       ),
+
+      // ---- Confirmed list — tick who showed up, then Save Roll / Close Roll ----
       h(
         "div",
         { className: "mt-8" },
-        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Confirmed (" + players.length + ")"),
+        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, "Confirmed (" + players.length + ")"),
+        checkin
+          ? h(
+              React.Fragment,
+              null,
+              h("p", { className: "text-xs text-[var(--ink-soft)] " + (isGameDay ? "mb-3" : "mb-1") }, "Tick who actually showed up, then Save Roll. Marking someone attended charges their game fee — see Finance."),
+              !isGameDay &&
+                h(
+                  "p",
+                  { className: "text-xs font-semibold text-[var(--bad)] mb-3" },
+                  "Not game day — this records against today (" + GUWH.formatDate(new Date(checkin.sessionDate + "T00:00:00")) + "), not the upcoming Wednesday shown above."
+                ),
+              checkin.closed &&
+                h(
+                  "div",
+                  { className: "flex items-center gap-2 mb-3" },
+                  h(Pill, { tone: "good" }, h(Icon, { name: "check", size: 12 }), "Closed out by " + checkin.closedByName),
+                  h(Button, { size: "sm", variant: "ghost", onClick: reopenRoll }, "Reopen")
+                )
+            )
+          : loading
+          ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Loading today's roll…")
+          : h(
+              "p",
+              { className: "text-xs font-semibold text-[var(--bad)] mb-3 flex items-center gap-2 flex-wrap" },
+              "Couldn't load today's roll.",
+              h("button", { type: "button", className: "underline", onClick: load }, "Retry")
+            ),
         loading
           ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
           : players.length === 0
@@ -149,19 +275,148 @@ GUWH.Pages = GUWH.Pages || {};
                   ),
                   h(
                     "div",
-                    { className: "flex items-center gap-2" },
-                    h(
-                      "select",
-                      { className: inputCls + " !w-auto !py-1.5 text-xs", value: p.grade || "", onChange: (e) => setGrade(p.email, e.target.value), title: "Grade" },
-                      h("option", { value: "" }, "No grade"),
-                      GRADES.map((g) => h("option", { key: g, value: g }, g))
-                    ),
+                    { className: "flex items-center gap-3" },
+                    checkin &&
+                      h(
+                        "label",
+                        { className: "flex items-center gap-1.5 text-xs font-semibold text-[var(--ink)]" },
+                        h("input", {
+                          type: "checkbox",
+                          checked: !!roll[p.id],
+                          disabled: checkin.closed,
+                          onChange: (e) => tick(p.id, e.target.checked),
+                        }),
+                        "Attended"
+                      ),
                     h(Button, { size: "sm", variant: "ghost", onClick: () => setAttendance(p.email, false) }, "Cancel")
                   )
                 )
               )
+            ),
+        checkin &&
+          !checkin.closed &&
+          h(
+            "div",
+            { className: "mt-4 flex flex-wrap gap-3" },
+            h(Button, { variant: "secondary", disabled: savingRoll || closingRoll, onClick: () => submitRoll(false) }, savingRoll ? "Saving…" : "Save Roll"),
+            h(Button, { variant: "dark", disabled: savingRoll || closingRoll, onClick: () => submitRoll(true) }, closingRoll ? "Closing…" : "Close Roll")
+          )
+      ),
+
+      // ---- New Players Today: Free Trial + Bring a Mate only — walk-ins
+      // added above are just visitors and aren't counted here. Free Trial
+      // has no real signup data behind it yet (see /new-player), so this
+      // only ever lists registered Bring a Mate guests for now — the
+      // section is built so a Free Trial source can be added later.
+      h(
+        "div",
+        { className: "mt-8" },
+        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "New Players Today"),
+        newPlayers.length === 0
+          ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No new Bring a Mate or Free Trial players registered recently.")
+          : h(
+              "div",
+              { className: "rounded-2xl bg-[var(--accent-12)] divide-y divide-black/10" },
+              newPlayers.map((inv) =>
+                h(
+                  "div",
+                  { key: inv.id, className: "flex items-center justify-between px-5 py-3" },
+                  h(
+                    "div",
+                    null,
+                    h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, inv.guestName),
+                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Invited by " + inv.inviterName)
+                  ),
+                  h(Pill, { tone: "good" }, "Registered")
+                )
+              )
             )
       )
+    );
+  }
+
+  // ---------------------------------------------------------------- History (Administrator only)
+  function HistoryTab() {
+    const [days, setDays] = React.useState(null);
+    const [selected, setSelected] = React.useState(null);
+    const [detail, setDetail] = React.useState(null);
+    const [error, setError] = React.useState(null);
+
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/coordinator/attendance-history")
+        .then((r) => r.json())
+        .then((data) => (data.ok ? setDays(data.days) : setError(data.error || "Something went wrong")))
+        .catch((e) => setError(String(e)));
+    }, []);
+
+    function open(date) {
+      setSelected(date);
+      setDetail(null);
+      GUWH.Identity.authFetch("/api/coordinator/attendance-history?date=" + encodeURIComponent(date))
+        .then((r) => r.json())
+        .then((data) => (data.ok ? setDetail(data) : setError(data.error || "Something went wrong")))
+        .catch((e) => setError(String(e)));
+    }
+
+    return h(
+      React.Fragment,
+      null,
+      error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
+      !selected &&
+        h(
+          "div",
+          null,
+          h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Closed-out days"),
+          !days
+            ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
+            : days.length === 0
+            ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No days have been closed out yet.")
+            : h(
+                "div",
+                { className: "rounded-2xl bg-[var(--sand)] divide-y divide-black/5" },
+                days.map((d) =>
+                  h(
+                    "button",
+                    { key: d.sessionDate, onClick: () => open(d.sessionDate), className: "w-full text-left flex items-center justify-between px-5 py-3 hover:bg-black/5" },
+                    h(
+                      "div",
+                      null,
+                      h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, GUWH.formatDate(new Date(d.sessionDate + "T00:00:00"))),
+                      h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Closed by " + d.closedByName)
+                    ),
+                    h(Pill, { tone: "dark" }, d.attendedCount + " attended")
+                  )
+                )
+              )
+        ),
+      selected &&
+        h(
+          "div",
+          null,
+          h(Button, { size: "sm", variant: "ghost", className: "mb-4", onClick: () => { setSelected(null); setDetail(null); } }, "← Back to history"),
+          h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, GUWH.formatDate(new Date(selected + "T00:00:00"))),
+          !detail
+            ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
+            : h(
+                React.Fragment,
+                null,
+                h("p", { className: "text-xs text-[var(--ink-soft)] mb-4" }, "Closed by " + detail.closedByName + " · " + new Date(detail.closedAt).toLocaleString("en-AU")),
+                detail.players.length === 0
+                  ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Nobody was marked attended that day.")
+                  : h(
+                      "div",
+                      { className: "rounded-2xl bg-[var(--sand)] divide-y divide-black/5" },
+                      detail.players.map((p, i) =>
+                        h(
+                          "div",
+                          { key: i, className: "px-5 py-3" },
+                          h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, p.firstName + " " + p.lastName),
+                          h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency contact: " + (p.emergencyName ? p.emergencyName + (p.emergencyPhone ? " · " + p.emergencyPhone : "") : "Not on file"))
+                        )
+                      )
+                    )
+              )
+        )
     );
   }
 
@@ -980,18 +1235,62 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   function CoordinatorPage({ tab }) {
-    const activeTab = tab || "attendance";
+    const activeTab = tab || "teams";
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
-      h(SectionHeading, { eyebrow: "Game Coordination", title: "This Wednesday", sub: "Real bookings, teams and a real timetable, editable on a player's behalf." }),
+      h(SectionHeading, { eyebrow: "Game Coordination", title: "This Wednesday", sub: "Real teams and a real timetable, editable on a player's behalf. Taking the roll is under Attendance." }),
       h(CoordinatorTabs, { active: activeTab }),
-      activeTab === "attendance" && h(AttendanceTab),
       activeTab === "teams" && h(TeamsTab),
       activeTab === "schedule" && h(ScheduleTab),
       activeTab === "publish" && h(PublishTab)
     );
   }
 
+  // ---------------------------------------------------------------- Attendance (own top-level page)
+  // Moved out of Game Coordination (13 Sept 2026, Cheongy's request) into
+  // its own Admin Functions menu item — same AttendanceTab/HistoryTab built
+  // earlier, just no longer nested under Teams/Timetable/Publish.
+  const ATTENDANCE_TABS = [
+    { key: "roll", label: "Today's Roll", path: "/attendance" },
+    { key: "history", label: "History", path: "/attendance/history", adminOnly: true },
+  ];
+
+  function AttendanceTabs({ active, isAdmin }) {
+    const tabs = ATTENDANCE_TABS.filter((t) => !t.adminOnly || isAdmin);
+    return h(
+      "div",
+      { className: "flex flex-wrap gap-2 mb-8 border-b border-black/10" },
+      tabs.map((t) =>
+        h(
+          "button",
+          {
+            key: t.key,
+            onClick: () => navigate(t.path),
+            className: cx(
+              "px-4 py-3 text-sm font-semibold border-b-2 -mb-px transition",
+              active === t.key ? "border-[var(--accent)] text-[var(--accent-dark)]" : "border-transparent text-[var(--ink-soft)] hover:text-[var(--ink)]"
+            ),
+          },
+          t.label
+        )
+      )
+    );
+  }
+
+  function AttendancePage({ tab }) {
+    const activeTab = tab || "roll";
+    const isAdmin = !!(GUWH.Identity && GUWH.Identity.hasRole && GUWH.Identity.hasRole("administrator"));
+    return h(
+      Container,
+      { className: "py-10 sm:py-14 max-w-4xl" },
+      h(SectionHeading, { eyebrow: "Attendance", title: "This Wednesday", sub: "Confirmed players, the actual roll, and closed-out history." }),
+      h(AttendanceTabs, { active: activeTab, isAdmin }),
+      activeTab === "roll" && h(AttendanceTab),
+      activeTab === "history" && (isAdmin ? h(HistoryTab) : h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Administrators only."))
+    );
+  }
+
   GUWH.Pages.Coordinator = CoordinatorPage;
+  GUWH.Pages.Attendance = AttendancePage;
 })();

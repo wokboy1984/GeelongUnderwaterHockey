@@ -40,23 +40,36 @@
   // on top, and is empty for a plain member. Real enforcement happens
   // server-side on every route/endpoint regardless — these two lists only
   // control what shows up to click.
+  // "This Week's Game" and "Bring a Mate" were dropped 12 Sept 2026 when the
+  // dashboard briefly embedded the timetable/teams directly and folded
+  // Bring a Mate into a modal. Both are back as their own nav entries
+  // (13 Sept 2026, Cheongy's request) — Teams/Timetable live on their own
+  // page again, and Bring a Mate is its own box on the dashboard rather
+  // than a popup, so a direct link to each is worth having again.
   function memberNavFor(showForum) {
     const items = [
-      { label: "Dashboard", path: "/portal/dashboard" },
+      { label: "Home", path: "/portal/dashboard" },
       { label: "This Week's Game", path: "/portal/board" },
-      { label: "Bring a Mate", path: "/portal/bring-a-mate" },
     ];
     // Members Forum only ever appears for adult members — juniors get zero
     // trace of it, not just a locked door. Real enforcement happens
     // server-side on every forum endpoint regardless; this just keeps
     // juniors from seeing it exists.
-    if (showForum) items.push({ label: "Members Forum", path: "/portal/forum" });
-    items.push({ label: "My Profile", path: "/portal/profile" });
+    if (showForum) items.push({ label: "Forum", path: "/portal/forum" });
+    items.push({ label: "Bring a Mate", path: "/portal/bring-a-mate" });
+    items.push({ label: "Profile", path: "/portal/profile" });
     return items;
   }
 
   function adminNavFor(roles) {
     const items = [];
+    // Attendance moved out from under Game Coordination to its own menu
+    // item (13 Sept 2026, Cheongy's request) — same audience as Game
+    // Coordination (whoever can take the roll could already see it nested
+    // there); it's just no longer a tab.
+    if (roles.includes("game_coordinator") || roles.includes("administrator")) {
+      items.push({ label: "Attendance", path: "/attendance" });
+    }
     if (roles.includes("game_coordinator") || roles.includes("administrator")) {
       items.push({ label: "Game Coordination", path: "/coordinator" });
     }
@@ -97,7 +110,7 @@
         : role === "organiser" ? ORGANISER_NAV : PLAYER_NAV
       : [];
     const adminItems = loggedIn && GUWH.Identity ? adminNavFor(GUWH.Identity.currentRoles()) : [];
-    const homeHref = loggedIn ? (role === "organiser" ? "/organiser/attendance" : "/portal/dashboard") : "/";
+    const homeHref = "/"; // logo always goes to the public homepage, logged in or not
     function doLogout() {
       if (GUWH.Identity) GUWH.Identity.logout();
       else GUWH.Store.logout();
@@ -233,7 +246,24 @@
           null,
           h("p", { className: "font-mono text-xs uppercase tracking-wide text-white/50 mb-2" }, "Governing bodies"),
           h("a", { href: "https://vuhc.org.au/", target: "_blank", rel: "noopener", className: "block text-sm hover:text-white" }, "Victorian Underwater Hockey Commission"),
-          h("a", { href: "https://underwaterhockeyaustralia.org.au", target: "_blank", rel: "noopener", className: "block text-sm hover:text-white mt-1" }, "Underwater Hockey Australia")
+          // Logos moved here from the homepage (13 Sept 2026, Cheongy's
+          // request) — real affiliation logos, each linking to the body's
+          // own site. White chip behind each so they read on the dark
+          // footer background regardless of their own background.
+          h(
+            "div",
+            { className: "flex items-center gap-3 mt-3" },
+            h(
+              "a",
+              { href: "https://underwaterhockeyaustralia.org.au", target: "_blank", rel: "noopener", "aria-label": "Underwater Hockey Australia", className: "opacity-90 hover:opacity-100 transition shrink-0" },
+              h("img", { src: "images/logos/uwh-australia-logo.png", alt: "Underwater Hockey Australia", loading: "lazy", className: "h-11 w-11 rounded-full bg-white p-0.5 object-contain" })
+            ),
+            h(
+              "a",
+              { href: "https://auf.com.au/", target: "_blank", rel: "noopener", "aria-label": "Australian Underwater Federation Inc.", className: "opacity-90 hover:opacity-100 transition shrink-0" },
+              h("img", { src: "images/logos/auf-logo.png", alt: "Australian Underwater Federation Inc.", loading: "lazy", className: "h-11 w-auto rounded bg-white px-1.5 py-1 object-contain" })
+            )
+          )
         ),
         h(
           "div",
@@ -243,7 +273,10 @@
           h("button", { onClick: () => navigate("/new-player"), className: "block text-sm hover:text-white mt-1 text-left" }, "Try three sessions free")
         )
       ),
-      h(Container, { className: "mt-8 pt-6 border-t border-white/10 text-xs text-white/40" }, "Concept redesign — not the live club site.")
+      // Was "Concept redesign — not the live club site." — leftover copy
+      // from the original demo build, wrong for the real live site. Fixed
+      // in passing while in here for the footer logos (13 Sept 2026).
+      h(Container, { className: "mt-8 pt-6 border-t border-white/10 text-xs text-white/40" }, "© " + new Date().getFullYear() + " Geelong Underwater Hockey.")
     );
   }
 
@@ -328,8 +361,19 @@
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
       const roles = GUWH.Identity.currentRoles();
       if (!roles.includes("game_coordinator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
-      const tab = path === "/coordinator/teams" ? "teams" : path === "/coordinator/schedule" ? "schedule" : path === "/coordinator/publish" ? "publish" : "attendance";
+      const tab = path === "/coordinator/schedule" ? "schedule" : path === "/coordinator/publish" ? "publish" : "teams";
       return h(GUWH.Pages.Coordinator, { tab });
+    }
+    // Attendance — its own page now, was a Game Coordination tab (13 Sept
+    // 2026). "/coordinator/history" pre-dates this move and, on checking
+    // just now, was never actually wired up here — history's new home,
+    // "/attendance/history", is its first working route.
+    if (path === "/attendance" || path === "/attendance/history" || path === "/coordinator/history") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      const roles = GUWH.Identity.currentRoles();
+      if (!roles.includes("game_coordinator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
+      const tab = path === "/attendance/history" || path === "/coordinator/history" ? "history" : "roll";
+      return h(GUWH.Pages.Attendance, { tab });
     }
     if (path === "/community") {
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }

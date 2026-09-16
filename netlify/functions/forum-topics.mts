@@ -309,7 +309,11 @@ export default async (req: Request, context: Context) => {
         t.created_at, t.last_activity_at,
         (select count(*)::int from forum_posts p where p.topic_id = t.id and p.is_opening_post = false) as reply_count,
         (select count(*)::int from forum_topic_followers f where f.topic_id = t.id and f.state = 'following') as follower_count,
-        (select p.body_html from forum_posts p where p.topic_id = t.id and p.is_opening_post = true limit 1) as opening_html
+        (select p.body_html from forum_posts p where p.topic_id = t.id and p.is_opening_post = true limit 1) as opening_html,
+        (select lm.first_name from forum_posts lp join members lm on lm.id = lp.author_id
+          where lp.topic_id = t.id order by lp.created_at desc limit 1) as last_poster_first_name,
+        (select lm.last_name from forum_posts lp join members lm on lm.id = lp.author_id
+          where lp.topic_id = t.id order by lp.created_at desc limit 1) as last_poster_last_name
       from forum_topics t
       join forum_categories c on c.id = t.category_id
       left join members m on m.id = t.author_id
@@ -327,6 +331,9 @@ export default async (req: Request, context: Context) => {
           categoryId: t.category_id,
           categoryName: t.category_name,
           authorDisplay: t.first_name ? forumDisplayName(t.first_name, t.last_name) : "Former member",
+          // Falls back to the topic's own author when nobody has replied yet.
+          lastActivityBy: t.last_poster_first_name ? forumDisplayName(t.last_poster_first_name, t.last_poster_last_name)
+            : (t.first_name ? forumDisplayName(t.first_name, t.last_name) : "Former member"),
           pinned: t.pinned,
           locked: t.locked,
           isAnnouncement: t.is_announcement,

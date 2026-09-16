@@ -136,6 +136,72 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // Compact, single-column version of the invite form — used inside the
+  // dashboard's "Bring a Mate" modal. The standalone /portal/bring-a-mate
+  // page above is left exactly as it was; this is a separate, smaller
+  // component so that page's layout and behaviour can't be disturbed by
+  // dashboard changes. Same endpoint, same validation, same real invites.
+  function BringAMateForm({ onSent }) {
+    const wed = GUWH.nextWednesday();
+    const [friendName, setFriendName] = React.useState("");
+    const [contact, setContact] = React.useState("");
+    const [sending, setSending] = React.useState(false);
+    const [justSent, setJustSent] = React.useState(false);
+    const [error, setError] = React.useState(null);
+    const inviteLink = window.location.origin + window.location.pathname + "#/new-player";
+
+    async function send(ev) {
+      ev.preventDefault();
+      if (!friendName.trim() || sending) return;
+      setSending(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/invites", {
+          method: "POST",
+          body: JSON.stringify({ guestName: friendName.trim(), guestEmail: contact.trim() || null }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setJustSent(true);
+          setFriendName("");
+          setContact("");
+          onSent && onSent(data.invites);
+        } else {
+          setError(data.error || "Something went wrong");
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setSending(false);
+      }
+    }
+
+    async function shareLink() {
+      await shareOrCopy({ title: "Come play underwater hockey", text: MESSAGE, url: inviteLink });
+    }
+
+    return h(
+      "div",
+      { className: "flex flex-col gap-4" },
+      h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Their first three sessions are free too — same as yours were. Invite someone for " + GUWH.formatDate(wed) + "."),
+      error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
+      h(
+        "form",
+        { onSubmit: send, className: "flex flex-col gap-4" },
+        h(FormField, { label: "Their name" }, h("input", { className: inputCls, value: friendName, onChange: (e) => setFriendName(e.target.value), disabled: sending, autoFocus: true })),
+        h(FormField, { label: "Phone or email (optional)" }, h("input", { className: inputCls, value: contact, onChange: (e) => setContact(e.target.value), disabled: sending })),
+        h(Button, { type: "submit", disabled: sending || !friendName.trim() }, h(Icon, { name: "plus", size: 16 }), sending ? "Sending…" : "Send invite"),
+        justSent && h("p", { className: "text-sm text-[var(--good-dark)] flex items-center gap-1.5", role: "status" }, h(Icon, { name: "check", size: 14 }), "Invite logged — nudge them to book on Try Underwater Hockey.")
+      ),
+      h(
+        "div",
+        { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-wrap items-center justify-between gap-3" },
+        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Or just share the invite link"),
+        h(Button, { size: "sm", variant: "ghost", onClick: shareLink, type: "button" }, h(Icon, { name: "share", size: 14 }), "Share")
+      )
+    );
+  }
+
   // Concept-preview invites (artifact-entry.html only) — unchanged demo data.
   function DemoBringAMatePage() {
     const [, force] = React.useReducer((x) => x + 1, 0);
@@ -227,4 +293,5 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   GUWH.Pages.BringAMate = BringAMatePage;
+  GUWH.Pages.BringAMateForm = BringAMateForm;
 })();

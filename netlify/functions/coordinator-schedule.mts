@@ -36,6 +36,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 import {
   ROW_TYPES,
   isRowType,
@@ -50,15 +51,13 @@ import {
   type TeamInfo,
 } from "./_shared/timetable.mts";
 
-function nextWednesdayISO(): string {
-  const d = new Date();
-  const day = d.getDay();
-  let add = (3 - day + 7) % 7;
-  if (add === 0) add = 7;
-  d.setDate(d.getDate() + add);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+// Was its own local copy here (raw server `new Date()` — UTC, not
+// Melbourne — plus the "roll forward even on Wednesday itself" bug).
+// Switched to the shared, Melbourne-correct helper (16 Sept 2026) so the
+// timetable builder always targets the same session_date the public
+// Game Board and Dashboard actually read — a real live bug found on an
+// actual Wednesday, when a published game wasn't showing up anywhere.
+const nextWednesdayISO = nextSessionDateISO;
 
 function shapePlayer(r: any) {
   return { id: r.id, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };

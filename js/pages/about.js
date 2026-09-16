@@ -29,6 +29,16 @@ GUWH.Pages = GUWH.Pages || {};
     { name: "Back", body: "Last line before the goal, reads the game and clears the puck out." },
   ];
 
+  // Moved off the homepage (12 Sept 2026) to keep the home page focused on
+  // getting a beginner to their first Wednesday — this is genuinely useful
+  // information, just not part of that conversion journey.
+  const PATHWAY_STEPS = [
+    "Wednesday nights — the whole club, every grade",
+    "Club fixtures — Pool A and B, most terms",
+    "Victorian titles — state selection each year",
+    "Nationals & Australian selection — where it's gone before",
+  ];
+
   function HowItWorksSection() {
     return h(
       "div",
@@ -78,6 +88,28 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "mt-14 rounded-2xl overflow-hidden ring-1 ring-black/5" },
         h("img", { src: "images/gear-closeup.jpg", alt: "A player at the pool edge holding a stick, puck and gloves", loading: "lazy", className: "w-full h-auto object-cover max-h-72" })
+      ),
+
+      // Video embed (13 Sept 2026, Cheongy's request) — a real 16:9
+      // responsive wrapper (padding-top hack) so the iframe scales with
+      // the column instead of a fixed pixel height.
+      h(
+        "div",
+        { className: "mt-8" },
+        h("h3", { className: "font-display text-xl font-bold text-[var(--ink)] mb-4" }, "See it in action"),
+        h(
+          "div",
+          { className: "relative w-full rounded-2xl overflow-hidden ring-1 ring-black/5", style: { paddingTop: "56.25%" } },
+          h("iframe", {
+            src: "https://www.youtube-nocookie.com/embed/JoiUTu4emcE",
+            title: "Underwater hockey explained",
+            className: "absolute inset-0 w-full h-full",
+            style: { border: 0 },
+            loading: "lazy",
+            allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+            allowFullScreen: true,
+          })
+        )
       ),
 
       h(
@@ -167,6 +199,25 @@ GUWH.Pages = GUWH.Pages || {};
             "div",
             { className: "mt-5 rounded-2xl overflow-hidden ring-1 ring-black/5" },
             h("img", { src: "images/team-group.jpg", alt: "The Geelong Underwater Hockey club surfacing together after a Wednesday session", loading: "lazy", className: "w-full h-auto object-cover" })
+          )
+        )
+      ),
+
+      h(
+        "div",
+        { className: "mb-14" },
+        h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)] mb-2" }, "Beginner to competition"),
+        h("h3", { className: "font-display text-xl font-bold text-[var(--ink)] mb-4" }, "Play purely for fun, or chase the green and gold."),
+        h(
+          "ol",
+          { className: "flex flex-col gap-3" },
+          PATHWAY_STEPS.map((step, i) =>
+            h(
+              "li",
+              { key: step, className: "flex items-center gap-3" },
+              h("span", { className: "font-display text-lg font-bold text-[var(--accent-dark)] w-6" }, i + 1),
+              h("span", { className: "text-[var(--ink-soft)]" }, step)
+            )
           )
         )
       ),

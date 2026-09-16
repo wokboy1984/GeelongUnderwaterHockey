@@ -7,21 +7,12 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-
-function nextWednesdayISO(): string {
-  const d = new Date();
-  const day = d.getDay(); // 0 Sun ... 3 Wed ... 6 Sat
-  let add = (3 - day + 7) % 7;
-  if (add === 0) add = 7;
-  d.setDate(d.getDate() + add);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 
 export default async (req: Request, context: Context) => {
   try {
     const db = getDatabase();
-    const sessionDate = nextWednesdayISO();
+    const sessionDate = nextSessionDateISO();
     const [session] = await db.sql`select id from sessions where session_date = ${sessionDate}`;
     const confirmedCount = session
       ? (await db.sql`select count(*)::int as count from bookings where session_id = ${session.id} and status = 'in'`)[0].count
