@@ -16,7 +16,7 @@
 # navigation; it only matters for a direct/bookmarked hit on a non-hash
 # path in production. If you comment it out for local testing, always
 # restore it (uncomment) before committing/pushing.
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+#[[redirects]]
+#  from = "/*"
+#  to = "/index.html"
+#  status = 200

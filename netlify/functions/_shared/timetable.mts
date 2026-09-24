@@ -139,7 +139,16 @@ export function computeEligibility(
   targetPool: Pool,
   rows: RowSnap[],
   teams: Record<number, TeamInfo>,
-  confirmedIds: Set<string>
+  confirmedIds: Set<string>,
+  // Small-club setting (Cheongy, 23 Sept 2026): with few real accounts,
+  // the club currently self-officiates — a player rostered onto a team in
+  // this exact game can still be picked to referee it (they rotate out to
+  // ref in practice; the system just doesn't model sub-game substitution).
+  // Defaults to the strict rule (false) so nothing changes for a caller
+  // that doesn't pass it, and for the unit tests below. Every OTHER
+  // exclusion still applies regardless — nobody can be in two different,
+  // actually-overlapping games at once, club size aside.
+  allowPlayingThisRow = false
 ): { eligibleIds: string[]; unavailable: UnavailablePerson[] } {
   const activeGameRows = rows.filter((r) => r.rowType === "game" && !r.archived);
   const targetRow = activeGameRows.find((r) => r.id === targetRowId);
@@ -178,7 +187,7 @@ export function computeEligibility(
 
   confirmedIds.forEach((memberId) => {
     if (alreadyOnTarget.has(memberId)) return; // already chosen for this exact pool — not part of the picker list
-    if (playingThisRow.has(memberId)) {
+    if (playingThisRow.has(memberId) && !allowPlayingThisRow) {
       unavailable.push({ memberId, reason: "playing_this_row", detail: "Playing in this game" });
       return;
     }
@@ -215,7 +224,8 @@ export function refereeConflict(
   targetPool: Pool,
   rows: RowSnap[],
   teams: Record<number, TeamInfo>,
-  confirmedIds: Set<string>
+  confirmedIds: Set<string>,
+  allowPlayingThisRow = false
 ): ConflictReason | null {
   if (!confirmedIds.has(memberId)) {
     return { reason: "not_confirmed", detail: "No longer confirmed as attending" };
@@ -224,7 +234,7 @@ export function refereeConflict(
   const targetRow = activeGameRows.find((r) => r.id === targetRowId);
   if (!targetRow) return null;
 
-  if (playersInRow(teams, targetRow).has(memberId)) {
+  if (!allowPlayingThisRow && playersInRow(teams, targetRow).has(memberId)) {
     return { reason: "playing_this_row", detail: "Playing in this game" };
   }
 
@@ -265,7 +275,8 @@ export type ValidationError = {
 export function validateTimetable(
   rows: RowSnap[],
   teams: Record<number, TeamInfo>,
-  confirmedIds: Set<string>
+  confirmedIds: Set<string>,
+  allowPlayingThisRow = false
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const activeRows = rows.filter((r) => !r.archived);
@@ -358,7 +369,7 @@ export function validateTimetable(
   activeGameRows.forEach((row) => {
     row.poolGames.forEach((pg) => {
       pg.refereeIds.forEach((memberId) => {
-        const conflict = refereeConflict(memberId, row.id, pg.pool, rows, teams, confirmedIds);
+        const conflict = refereeConflict(memberId, row.id, pg.pool, rows, teams, confirmedIds, allowPlayingThisRow);
         if (conflict) {
           errors.push({ rowId: row.id, pool: pg.pool, field: "referee_conflict", message: conflict.detail + " (" + pg.pool + " in \"" + row.label + "\")" });
         }

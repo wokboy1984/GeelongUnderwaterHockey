@@ -89,6 +89,7 @@ export type Member = {
   lastName: string;
   age: number | null;
   roles: Role[];
+  waiverAccepted: boolean;
 };
 
 // Upserts the member row for whoever just authenticated, bootstraps the
@@ -104,7 +105,7 @@ export async function ensureMember(db: any, user: any): Promise<Member> {
     insert into members (id, email, first_name, last_name)
     values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
     on conflict (id) do update set email = excluded.email
-    returning id, email, first_name, last_name, date_of_birth
+    returning id, email, first_name, last_name, date_of_birth, waiver_accepted_at
   `;
 
   if (email === SUPER_ADMIN_EMAIL) {
@@ -125,6 +126,7 @@ export async function ensureMember(db: any, user: any): Promise<Member> {
     lastName: row.last_name,
     age: ageFromDOB(row.date_of_birth),
     roles,
+    waiverAccepted: !!row.waiver_accepted_at,
   };
 }
 

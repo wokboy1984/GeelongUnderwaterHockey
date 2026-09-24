@@ -14,6 +14,7 @@
     { label: "About", path: "/about" },
     { label: "News", path: "/news" },
     { label: "Play", path: "/about" },
+    { label: "State Titles", path: "/state-titles" },
     { label: "Members", path: "/portal" },
   ];
 
@@ -287,13 +288,43 @@
     return null;
   }
 
+  // Public marketing pages a logged-in-but-unsigned member can still browse
+  // without being bounced to the waiver first — everything else under
+  // /portal, /coordinator, /attendance etc. is gated below.
+  const WAIVER_EXEMPT_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/state-titles", "/portal", "/portal/waiver"];
+
   function Route(path) {
+    // Digital waiver gate (live site only, real backend). Anyone logged in
+    // whose member record shows no waiver_accepted_at gets sent to sign it
+    // before doing anything else in the portal or admin areas. Existing
+    // members were grandfathered as already-accepted when this shipped
+    // (see the migration), so in practice this only ever catches a
+    // genuinely new registration — never re-prompts someone who already
+    // has an account. currentMember() can briefly be null right after
+    // login while /api/me is still loading — skip the check then rather
+    // than bounce on incomplete data; the per-route currentUser() checks
+    // below still apply in the meantime.
+    if (GUWH.Identity && GUWH.Identity.currentUser() && WAIVER_EXEMPT_PATHS.indexOf(path) === -1) {
+      const member = GUWH.Identity.currentMember();
+      if (member && !member.waiverAccepted) { navigate("/portal/waiver"); return null; }
+    }
+
     if (path === "/" ) return h(GUWH.Pages.Home);
     if (path === "/new-player") return h(GUWH.Pages.NewPlayer);
     if (path === "/how-it-works") { navigate("/about"); return null; }
     if (path === "/wednesday-games") { const r = requireAuth(path); navigate(r || "/portal/board"); return null; }
     if (path === "/about") return h(GUWH.Pages.About);
     if (path === "/news") return h(GUWH.Pages.News);
+    // Public — no login required (24 Sept 2026, Cheongy's request: moved out
+    // of the member portal so anyone can register interest). Works whether
+    // or not someone's logged in; the page itself asks the backend, which
+    // treats auth as optional too.
+    if (path === "/state-titles") return h(GUWH.Pages.StateTitles);
+
+    if (path === "/portal/waiver") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      return h(GUWH.Pages.Waiver);
+    }
 
     if (path === "/portal") {
       if (GUWH.Identity) {
@@ -357,11 +388,11 @@
     // endpoints that re-check the same role against the database, so a
     // direct URL visit without the role gets a 403 from the server, not
     // just a redirect here.
-    if (path === "/coordinator" || path === "/coordinator/teams" || path === "/coordinator/schedule" || path === "/coordinator/publish") {
+    if (path === "/coordinator" || path === "/coordinator/teams" || path === "/coordinator/schedule" || path === "/coordinator/scores" || path === "/coordinator/publish") {
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
       const roles = GUWH.Identity.currentRoles();
       if (!roles.includes("game_coordinator") && !roles.includes("administrator")) { navigate("/portal/dashboard"); return null; }
-      const tab = path === "/coordinator/schedule" ? "schedule" : path === "/coordinator/publish" ? "publish" : "teams";
+      const tab = path === "/coordinator/schedule" ? "schedule" : path === "/coordinator/scores" ? "scores" : path === "/coordinator/publish" ? "publish" : "teams";
       return h(GUWH.Pages.Coordinator, { tab });
     }
     // Attendance — its own page now, was a Game Coordination tab (13 Sept

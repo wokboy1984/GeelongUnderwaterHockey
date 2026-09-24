@@ -5,7 +5,7 @@ window.GUWH = window.GUWH || {};
 GUWH.Pages = GUWH.Pages || {};
 
 (function () {
-  const { Container, Button, Pill, SectionHeading, Icon, TeamBoard, MilestoneCard } = GUWH.UI;
+  const { Container, Button, Pill, SectionHeading, Icon, TeamBoard, MilestoneCard, inputCls } = GUWH.UI;
 
   function teamCount(board) {
     return Object.values(board.pools).reduce((n, p) => n + (p.white.length ? 1 : 0) + (p.black.length ? 1 : 0), 0);
@@ -240,11 +240,67 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // MVP nomination card — only ever shown to someone who actually refereed
+  // a pool game in this session's timetable (checked server-side by
+  // /api/mvp, never inferred here). One nomination per referee per night;
+  // submitting again just updates it.
+  function MvpNominationCard({ mvp, onSaved }) {
+    const [nomineeId, setNomineeId] = React.useState((mvp.myNomination && mvp.myNomination.nomineeId) || "");
+    const [note, setNote] = React.useState((mvp.myNomination && mvp.myNomination.note) || "");
+    const [saving, setSaving] = React.useState(false);
+    const [saved, setSaved] = React.useState(false);
+    const [error, setError] = React.useState(null);
+
+    async function submit(ev) {
+      ev.preventDefault();
+      if (!nomineeId) return;
+      setSaving(true);
+      setError(null);
+      setSaved(false);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/mvp", { method: "POST", body: JSON.stringify({ nomineeId, note }) });
+        const d = await res.json();
+        if (d.ok) {
+          setSaved(true);
+          onSaved(d);
+        } else {
+          setError(d.error || "Something went wrong");
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return h(
+      "div",
+      { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6 mt-6" },
+      h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, "Nominate tonight's MVP"),
+      h("p", { className: "text-sm text-[var(--ink-soft)] mb-3" }, "You reffed a game this session — pick who impressed you most."),
+      error && h("p", { className: "text-sm text-[var(--bad)] mb-2" }, error),
+      h(
+        "form",
+        { onSubmit: submit, className: "flex flex-col gap-3 max-w-sm" },
+        h(
+          "select",
+          { className: inputCls, value: nomineeId, onChange: (e) => setNomineeId(e.target.value) },
+          h("option", { value: "" }, "Choose a player…"),
+          mvp.nominees.map((p) => h("option", { key: p.id, value: p.id }, p.firstName + " " + p.lastName))
+        ),
+        h("input", { type: "text", maxLength: 280, placeholder: "Optional note (e.g. why)", className: inputCls, value: note, onChange: (e) => setNote(e.target.value) }),
+        h(Button, { type: "submit", disabled: !nomineeId || saving }, mvp.myNomination ? "Update nomination" : "Submit nomination")
+      ),
+      saved && h("p", { className: "text-xs text-[var(--good-dark)] mt-2" }, "Saved.")
+    );
+  }
+
   // Real Game Board (live site) — read-only, shows the published teams and
   // timetable from /api/game-board, or a "not yet finalised" state.
   function RealGameBoardPage() {
     const [data, setData] = React.useState(null);
     const [myId, setMyId] = React.useState(null);
+    const [mvp, setMvp] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
@@ -257,6 +313,9 @@ GUWH.Pages = GUWH.Pages || {};
       // Just for "your team" highlighting below — failure here is harmless,
       // the page still works without it.
       GUWH.Identity.authFetch("/api/profile").then((r) => r.json()).then((d) => { if (d.ok) setMyId(d.member.id); }).catch(() => {});
+      // Whether I refereed tonight, and if so my current nomination —
+      // harmless if it fails, the rest of the board still works.
+      GUWH.Identity.authFetch("/api/mvp").then((r) => r.json()).then((d) => { if (d.ok && d.published) setMvp(d); }).catch(() => {});
     }, []);
 
     const myTeam = data && data.published && myId ? (data.teams || []).find((t) => (t.players || []).some((p) => p.id === myId)) : null;
@@ -314,7 +373,8 @@ GUWH.Pages = GUWH.Pages || {};
             { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" },
             h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "The night's timetable"),
             h(PublicTimetable, { rows: data.rows, highlightTeamName: myTeamName })
-          )
+          ),
+          mvp && mvp.canNominate && h(MvpNominationCard, { mvp, onSaved: setMvp })
         )
     );
   }

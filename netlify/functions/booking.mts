@@ -56,6 +56,22 @@ export default async (req: Request, context: Context) => {
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       const wantsIn = !!body.in;
+
+      // The client route already gates the whole portal behind the waiver
+      // (see app.js's WAIVER_EXEMPT_PATHS check), but this is the one
+      // self-service write a brand-new member could otherwise reach
+      // directly — re-checked here server-side rather than trusted from
+      // the client. Cancelling ("out") is always allowed regardless.
+      if (wantsIn) {
+        const [waiver] = await db.sql`select waiver_accepted_at from members where id = ${memberId}`;
+        if (!waiver || !waiver.waiver_accepted_at) {
+          return new Response(JSON.stringify({ ok: false, error: "Please sign the club waiver before booking in — it's on your Dashboard." }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+
       await db.sql`
         insert into bookings (session_id, member_id, status)
         values (${sessionId}, ${memberId}, ${wantsIn ? "in" : "out"})

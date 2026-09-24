@@ -110,11 +110,22 @@ async function loadSnapshot(db: any, sessionId: number) {
   });
 
   const confirmedRows = await db.sql`
-    select m.id, m.first_name, m.last_name, m.is_new
+    select m.id, m.email, m.first_name, m.last_name, m.is_new
     from bookings b join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'in'
   `;
   const confirmedIds = new Set<string>(confirmedRows.map((r: any) => r.id));
+  // Walk-in/guest players (added via the Coordinator's "Add Player (no
+  // account needed)" flow, "@no-login.guwh" placeholder email) count as
+  // confirmed for playing/team purposes, but can never actually act as a
+  // referee — they have no account to log in with, so they could never see
+  // an eligibility conflict, be reached to referee, or use anything
+  // referee-only like MVP nominations. Excluded from the referee-eligible
+  // pool specifically, not from confirmedIds generally (Cheongy's report:
+  // "anyone can be picked as a ref" — should be confirmed AND a real account).
+  const refereeEligibleIds = new Set<string>(
+    confirmedRows.filter((r: any) => !String(r.email || "").endsWith("@no-login.guwh")).map((r: any) => r.id)
+  );
   const memberNames: Record<string, { firstName: string; lastName: string; isNew: boolean }> = {};
   confirmedRows.forEach((r: any) => {
     memberNames[r.id] = { firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };
@@ -156,7 +167,7 @@ async function loadSnapshot(db: any, sessionId: number) {
     refereedTonightCount[r.id] = (refereedTonightCount[r.id] || 0) + 1;
   });
 
-  return { teamRows, teams, teamMeta, confirmedIds, memberNames, rowRows, poolGamesByRow, refsByPoolGame, refereedTonightCount };
+  return { teamRows, teams, teamMeta, confirmedIds, refereeEligibleIds, memberNames, rowRows, poolGamesByRow, refsByPoolGame, refereedTonightCount };
 }
 
 // Builds the RowSnap[] the pure logic module needs (ids only) from the raw
@@ -216,10 +227,20 @@ async function resequenceRows(db: any, sessionId: number) {
   `;
 }
 
+// Club-wide "small club mode" setting — see the migration/admin-settings.mts
+// for the full explanation. Read fresh every time rather than cached, since
+// an Administrator can flip it at any moment and the very next request
+// should reflect it.
+async function getAllowPlayerReferees(db: any): Promise<boolean> {
+  const [row] = await db.sql`select allow_player_referees from club_settings where id = true`;
+  return row ? !!row.allow_player_referees : true;
+}
+
 async function buildResponse(db: any, sessionId: number, sessionDate: string) {
   const snap = await loadSnapshot(db, sessionId);
   const rowSnaps = toRowSnaps(snap.rowRows, snap.poolGamesByRow, snap.refsByPoolGame);
-  const validation = validateTimetable(rowSnaps, snap.teams, snap.confirmedIds);
+  const allowPlayerReferees = await getAllowPlayerReferees(db);
+  const validation = validateTimetable(rowSnaps, snap.teams, snap.confirmedIds, allowPlayerReferees);
 
   const seasonYear = new Date(sessionDate + "T00:00:00").getFullYear();
   // Season referee counts — one lightweight aggregate, not attempted per-row.
@@ -245,7 +266,7 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
       let eligible: any[] = [];
       let unavailable: any[] = [];
       if (r.row_type === "game" && !r.archived_at) {
-        const elig = computeEligibility(r.id, pool, rowSnaps, snap.teams, snap.confirmedIds);
+        const elig = computeEligibility(r.id, pool, rowSnaps, snap.teams, snap.refereeEligibleIds, allowPlayerReferees);
         eligible = elig.eligibleIds.map((id) => {
           const m = snap.memberNames[id] || { firstName: "?", lastName: "", isNew: false };
           return {
@@ -538,9 +559,10 @@ export default async (req: Request, context: Context) => {
 
           const snap = await loadSnapshot(db, sessionId);
           const rowSnaps = toRowSnaps(snap.rowRows, snap.poolGamesByRow, snap.refsByPoolGame);
-          const { eligibleIds } = computeEligibility(rowId, pool as any, rowSnaps, snap.teams, snap.confirmedIds);
+          const allowPlayerReferees = await getAllowPlayerReferees(db);
+          const { eligibleIds } = computeEligibility(rowId, pool as any, rowSnaps, snap.teams, snap.refereeEligibleIds, allowPlayerReferees);
           if (!eligibleIds.includes(memberId)) {
-            return badRequest("That person isn't eligible to referee this game right now — they may be playing or already refereeing an overlapping game.");
+            return badRequest("That person isn't eligible to referee this game right now — they may be playing, already refereeing an overlapping game, or a walk-in player without an account.");
           }
           await db.sql`insert into timetable_pool_referees (pool_game_id, member_id) values (${pg.id}, ${memberId}) on conflict do nothing`;
           await logAudit(db, {

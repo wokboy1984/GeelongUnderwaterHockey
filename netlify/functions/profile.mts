@@ -45,6 +45,23 @@ async function shapeProfile(db: any, memberId: string) {
     from bookings b join sessions s on s.id = b.session_id
     where b.member_id = ${memberId} and b.status = 'in' and s.session_date < current_date
   `;
+
+  // Goals: entered by the Game Coordinator after a session (game_goals),
+  // never self-reported. "Season" is the calendar year, same convention
+  // coordinator-schedule.mts already uses for season referee counts.
+  const [{ career }] = await db.sql`
+    select coalesce(sum(goals), 0)::int as career from game_goals where member_id = ${memberId}
+  `;
+  const seasonYear = new Date().getFullYear();
+  const [{ season }] = await db.sql`
+    select coalesce(sum(gg.goals), 0)::int as season
+    from game_goals gg
+    join timetable_pool_games tpg on tpg.id = gg.pool_game_id
+    join timetable_rows tr on tr.id = tpg.row_id
+    join sessions s on s.id = tr.session_id
+    where gg.member_id = ${memberId} and extract(year from s.session_date) = ${seasonYear}
+  `;
+
   return {
     id: row.id,
     email: row.email,
@@ -59,6 +76,8 @@ async function shapeProfile(db: any, memberId: string) {
     grade: row.grade,
     photoVersion: row.photo_version || 0,
     gamesPlayed: count,
+    seasonGoals: season,
+    careerGoals: career,
     isNew: row.is_new,
   };
 }

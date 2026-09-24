@@ -18,6 +18,15 @@ import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, f
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
 
+// Club-wide "small club mode" setting — see coordinator-schedule.mts's copy
+// of this same helper (and the club_settings migration/admin-settings.mts)
+// for the full explanation. Duplicated here rather than imported since this
+// file deliberately doesn't import coordinator-schedule.mts's loader.
+async function getAllowPlayerReferees(db: any): Promise<boolean> {
+  const [row] = await db.sql`select allow_player_referees from club_settings where id = true`;
+  return row ? !!row.allow_player_referees : true;
+}
+
 // Loads just enough of the timetable to validate it before publishing —
 // this deliberately mirrors coordinator-schedule.mts's own snapshot/shape
 // logic rather than importing it, since that file's loader also builds the
@@ -213,7 +222,8 @@ export default async (req: Request, context: Context) => {
 
         if (published) {
           const { rows, teams, confirmedIds } = await loadRowSnapsForValidation(db, sessionId);
-          const errors = validateTimetable(rows, teams, confirmedIds);
+          const allowPlayerReferees = await getAllowPlayerReferees(db);
+          const errors = validateTimetable(rows, teams, confirmedIds, allowPlayerReferees);
           if (errors.length > 0) {
             return new Response(JSON.stringify({ ok: false, error: "The timetable has unresolved issues and can't be published yet.", validation: errors }), {
               status: 400,

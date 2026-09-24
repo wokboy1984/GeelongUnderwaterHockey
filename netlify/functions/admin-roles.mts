@@ -26,6 +26,7 @@ function shapeMember(row: any) {
     age: ageFromDOB(row.date_of_birth),
     grade: row.grade,
     roles: (row.roles || []).filter(Boolean),
+    waiverSigned: !!row.waiver_accepted_at,
   };
 }
 
@@ -48,7 +49,7 @@ export default async (req: Request, context: Context) => {
       // real identity to grant a role to, so they're excluded here.
       const rows = q
         ? await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade,
+            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -59,7 +60,7 @@ export default async (req: Request, context: Context) => {
             limit 25
           `
         : await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade,
+            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id

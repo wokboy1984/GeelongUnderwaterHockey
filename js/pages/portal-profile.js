@@ -321,6 +321,12 @@ GUWH.Pages = GUWH.Pages || {};
           h(FormField, { label: "Phone" }, h("input", { type: "tel", className: inputCls, value: form.phone, onChange: (e) => set("phone", e.target.value) })),
           h(FormField, { label: "Games played" }, h("input", { className: inputCls, value: member.gamesPlayed, disabled: true }))
         ),
+        h(
+          "div",
+          { className: "grid sm:grid-cols-2 gap-4" },
+          h(FormField, { label: "Goals this season", hint: "Recorded by the Game Coordinator after each session" }, h("input", { className: inputCls, value: member.seasonGoals || 0, disabled: true })),
+          h(FormField, { label: "Career goals" }, h("input", { className: inputCls, value: member.careerGoals || 0, disabled: true }))
+        ),
 
         h(
           "div",

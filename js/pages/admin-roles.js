@@ -114,14 +114,14 @@ GUWH.Pages = GUWH.Pages || {};
             { className: "rounded-2xl bg-white ring-1 ring-black/5 overflow-x-auto" },
             h(
               "table",
-              { className: "w-full text-sm min-w-[820px]" },
+              { className: "w-full text-sm min-w-[920px]" },
               h(
                 "thead",
                 null,
                 h(
                   "tr",
                   { className: "text-left text-xs font-mono uppercase tracking-wide text-[var(--ink-soft)] border-b border-black/5" },
-                  ["Member", "Age", "Grade", "Current roles", "Change role"].map((c) => h("th", { key: c, className: "px-4 py-3 font-semibold" }, c))
+                  ["Member", "Age", "Grade", "Waiver", "Current roles", "Change role"].map((c) => h("th", { key: c, className: "px-4 py-3 font-semibold" }, c))
                 )
               ),
               h(
@@ -155,6 +155,13 @@ GUWH.Pages = GUWH.Pages || {};
                         h("option", { value: "" }, "No grade"),
                         GRADES.map((g) => h("option", { key: g, value: g }, g))
                       )
+                    ),
+                    h(
+                      "td",
+                      { className: "px-4 py-3" },
+                      m.waiverSigned
+                        ? h(Pill, { tone: "good", className: "!py-0.5 !px-2 !text-[10px]" }, "Signed")
+                        : h(Pill, { tone: "warn", className: "!py-0.5 !px-2 !text-[10px]" }, "Not signed")
                     ),
                     h(
                       "td",

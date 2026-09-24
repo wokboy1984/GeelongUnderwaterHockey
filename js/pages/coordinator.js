@@ -17,6 +17,7 @@ GUWH.Pages = GUWH.Pages || {};
   const TABS = [
     { key: "teams", label: "Teams", path: "/coordinator/teams" },
     { key: "schedule", label: "Timetable", path: "/coordinator/schedule" },
+    { key: "scores", label: "Scores", path: "/coordinator/scores" },
     { key: "publish", label: "Publish", path: "/coordinator/publish" },
   ];
 
@@ -1163,10 +1164,157 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // ---------------------------------------------------------------- Scores
+  // Entered by the Game Coordinator after the games are done — not live
+  // during play, not self-service for referees (Cheongy's call). Final
+  // score per pool game plus, optionally, how many goals each rostered
+  // player scored in it. Season/career totals are just SUM(goals) — see
+  // game_goals in the DB and the same total surfaced on each member's own
+  // Profile page.
+  function ScoreCard({ pg, rowLabel, onSave }) {
+    const [blackScore, setBlackScore] = React.useState(pg.blackScore == null ? "" : String(pg.blackScore));
+    const [whiteScore, setWhiteScore] = React.useState(pg.whiteScore == null ? "" : String(pg.whiteScore));
+    const [goals, setGoals] = React.useState(() => {
+      const g = {};
+      (pg.black ? pg.black.players : []).concat(pg.white ? pg.white.players : []).forEach((p) => { g[p.id] = p.goals || 0; });
+      return g;
+    });
+    const [saving, setSaving] = React.useState(false);
+    const [saved, setSaved] = React.useState(false);
+
+    async function save() {
+      setSaving(true);
+      setSaved(false);
+      await onSave(pg.id, blackScore === "" ? null : blackScore, whiteScore === "" ? null : whiteScore, goals);
+      setSaving(false);
+      setSaved(true);
+    }
+
+    function TeamGoalsColumn({ team }) {
+      if (!team) return h("div", { className: "text-sm text-[var(--ink-soft)]" }, "No team assigned");
+      return h(
+        "div",
+        { className: "flex flex-col gap-1.5" },
+        team.players.length === 0 && h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No players assigned"),
+        team.players.map((p) =>
+          h(
+            "div",
+            { key: p.id, className: "flex items-center justify-between gap-2" },
+            h("span", { className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName),
+            h("input", {
+              type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center",
+              value: goals[p.id] || 0,
+              onChange: (e) => setGoals((g) => Object.assign({}, g, { [p.id]: Number(e.target.value) })),
+            })
+          )
+        )
+      );
+    }
+
+    return h(
+      "div",
+      { className: "rounded-2xl border-2 border-black/5 p-4 sm:p-5 flex flex-col gap-4" },
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, rowLabel + " · " + pg.pool),
+      h(
+        "div",
+        { className: "grid sm:grid-cols-2 gap-4" },
+        h(
+          "div",
+          null,
+          h("div", { className: "flex items-center justify-between mb-2" },
+            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, pg.black ? pg.black.name : "Black"),
+            h("input", { type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center", value: blackScore, onChange: (e) => setBlackScore(e.target.value) })
+          ),
+          h(TeamGoalsColumn, { team: pg.black })
+        ),
+        h(
+          "div",
+          null,
+          h("div", { className: "flex items-center justify-between mb-2" },
+            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, pg.white ? pg.white.name : "White"),
+            h("input", { type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center", value: whiteScore, onChange: (e) => setWhiteScore(e.target.value) })
+          ),
+          h(TeamGoalsColumn, { team: pg.white })
+        )
+      ),
+      h(
+        "div",
+        { className: "flex items-center gap-3" },
+        h(Button, { size: "sm", onClick: save, disabled: saving }, saving ? "Saving…" : "Save score"),
+        saved && h("span", { className: "text-xs text-[var(--good-dark)]" }, "Saved.")
+      )
+    );
+  }
+
+  function ScoresTab() {
+    const [data, setData] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+
+    function load() {
+      setLoading(true);
+      return GUWH.Identity.authFetch("/api/coordinator/scores")
+        .then((r) => r.json())
+        .then((d) => (d.ok ? setData(d) : setError(d.error || "Something went wrong")))
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+    }
+    React.useEffect(() => { load(); }, []);
+
+    async function saveScore(poolGameId, blackScore, whiteScore, goals) {
+      const res = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+        method: "POST",
+        body: JSON.stringify({ poolGameId, blackScore, whiteScore, goals }),
+      });
+      const d = await res.json();
+      if (d.ok) setData(d);
+      else setError(d.error || "Something went wrong");
+    }
+
+    if (loading) return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…");
+    if (!data) return error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
+
+    const allPoolGames = [];
+    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label })));
+
+    return h(
+      "div",
+      { className: "flex flex-col gap-8" },
+      error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
+      allPoolGames.length === 0
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No games with teams assigned yet — set them up in the Teams and Timetable tabs first.")
+        : h(
+            "div",
+            { className: "flex flex-col gap-4" },
+            allPoolGames.map(({ pg, rowLabel }) => h(ScoreCard, { key: pg.id, pg, rowLabel, onSave: saveScore }))
+          ),
+      h(
+        "div",
+        { className: "rounded-2xl bg-[var(--sand)] p-5 max-w-md" },
+        h("h3", { className: "font-display font-bold text-[var(--ink)] mb-3" }, new Date().getFullYear() + " top scorers"),
+        data.seasonLeaders.length === 0
+          ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No goals recorded yet this season.")
+          : h(
+              "div",
+              { className: "flex flex-col gap-1.5" },
+              data.seasonLeaders.map((l, i) =>
+                h(
+                  "div",
+                  { key: l.memberId, className: "flex items-center justify-between text-sm" },
+                  h("span", { className: "text-[var(--ink)]" }, i + 1 + ". " + l.name),
+                  h("span", { className: "font-bold text-[var(--ink)]" }, l.totalGoals)
+                )
+              )
+            )
+      )
+    );
+  }
+
   // ---------------------------------------------------------------- Publish
   function PublishTab() {
     const [board, setBoard] = React.useState(null);
     const [validation, setValidation] = React.useState([]);
+    const [mvp, setMvp] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
@@ -1175,11 +1323,13 @@ GUWH.Pages = GUWH.Pages || {};
       return Promise.all([
         GUWH.Identity.authFetch("/api/coordinator/teams").then((r) => r.json()),
         GUWH.Identity.authFetch("/api/coordinator/schedule").then((r) => r.json()),
+        GUWH.Identity.authFetch("/api/mvp").then((r) => r.json()),
       ])
-        .then(([teamsData, scheduleData]) => {
+        .then(([teamsData, scheduleData, mvpData]) => {
           if (teamsData.ok) setBoard(teamsData);
           else setError(teamsData.error || "Something went wrong");
           if (scheduleData.ok) setValidation(scheduleData.validation || []);
+          if (mvpData.ok) setMvp(mvpData);
         })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
@@ -1203,6 +1353,9 @@ GUWH.Pages = GUWH.Pages || {};
     const blocked = !board.published && validation.length > 0;
 
     return h(
+      React.Fragment,
+      null,
+      h(
       "div",
       { className: "rounded-2xl bg-[var(--navy)] text-white p-6 flex flex-col gap-4 max-w-md" },
       h("h3", { className: "font-display font-bold" }, "Ready to publish?"),
@@ -1231,6 +1384,46 @@ GUWH.Pages = GUWH.Pages || {};
         board.published ? "Unpublish" : "Publish game board"
       ),
       h("button", { className: "text-sm text-white/60 underline text-left", onClick: () => navigate("/portal/board") }, "Preview this week's game →")
+      ),
+      h(MvpResultsPanel, { mvp })
+    );
+  }
+
+  // MVP nominations — read-only for coordinators/admins (arrange_teams),
+  // filled in by whoever refereed a pool game this session over on the
+  // public Game Board page (see gameboard.js's MvpNominationCard). Just a
+  // tally + who nominated whom, in case the club wants it for the raffle
+  // board or a shout-out at the next session.
+  function MvpResultsPanel({ mvp }) {
+    if (!mvp || !mvp.canViewResults) return null;
+    const results = mvp.results || [];
+    return h(
+      "div",
+      { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6 max-w-md mt-6" },
+      h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "MVP nominations"),
+      results.length === 0
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No nominations yet — referees can nominate from the Game Board page once the board is published.")
+        : h(
+            "div",
+            { className: "flex flex-col gap-3" },
+            results.map((r) =>
+              h(
+                "div",
+                { key: r.nomineeId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+                h(
+                  "div",
+                  { className: "flex items-center justify-between" },
+                  h("p", { className: "text-sm font-bold text-[var(--ink)]" }, r.name),
+                  h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, r.votes + " vote" + (r.votes === 1 ? "" : "s"))
+                ),
+                h(
+                  "div",
+                  { className: "mt-1.5 flex flex-col gap-0.5" },
+                  r.notes.map((n, i) => h("p", { key: i, className: "text-xs text-[var(--ink-soft)]" }, n.by + (n.note ? ': "' + n.note + '"' : "")))
+                )
+              )
+            )
+          )
     );
   }
 
@@ -1243,6 +1436,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(CoordinatorTabs, { active: activeTab }),
       activeTab === "teams" && h(TeamsTab),
       activeTab === "schedule" && h(ScheduleTab),
+      activeTab === "scores" && h(ScoresTab),
       activeTab === "publish" && h(PublishTab)
     );
   }
