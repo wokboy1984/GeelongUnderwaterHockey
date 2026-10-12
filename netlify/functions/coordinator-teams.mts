@@ -16,6 +16,7 @@ import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
 
 // Club-wide "small club mode" setting — see coordinator-schedule.mts's copy
@@ -117,7 +118,15 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
   const unassigned = confirmed.filter((p: any) => !assignedIds.has(p.id));
 
-  return { ok: true, sessionDate, published, confirmed, teams, unassigned };
+  // Carried forward from last week (12 Oct 2026) - for the Teams tab notice.
+  const [carry] = await db.sql`select timetable_copied_from::text as copied_from from sessions where id = ${sessionId}`;
+  const autoRows = await db.sql`select member_id from team_autoplaced where session_id = ${sessionId} and placed_team_id is not null`;
+
+  return {
+    ok: true, sessionDate, published, confirmed, teams, unassigned,
+    copiedFrom: carry ? carry.copied_from : null,
+    autoPlacedIds: autoRows.map((r: any) => r.member_id),
+  };
 }
 
 export default async (req: Request, context: Context) => {
@@ -139,6 +148,10 @@ export default async (req: Request, context: Context) => {
       returning id, published
     `;
     const sessionId = session.id;
+    // Last week's teams + timetable, once per new week; returning players
+    // back into their team until published - see _shared/carry-forward.mts.
+    await copyForwardWeek(db, sessionId, sessionDate, caller.id);
+    await autoPlaceReturningPlayers(db, sessionId, sessionDate);
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));

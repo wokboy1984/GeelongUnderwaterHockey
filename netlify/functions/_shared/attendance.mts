@@ -72,3 +72,19 @@ export function requestedSessionDate(value: unknown, now = new Date()): string {
  if (isWednesdayISO(value) && value <= upcoming) return value;
  return upcoming;
 }
+
+// Which Wednesday the Attendance page opens on (12 Oct 2026). Thursday and
+// Friday open on the game night just gone (catching up on the roll);
+// every other day opens on the upcoming Wednesday (today, on a Wednesday).
+// The page's Prev/Next can still move to any week.
+export function defaultRollDateISO(now = new Date()): string {
+ const [y, m, d] = clubToday(now).split('-').map(Number);
+ const today = Date.UTC(y, m - 1, d, 12);
+ const day = new Date(today).getUTCDay(); // 4 Thu, 5 Fri
+ if (day === 4 || day === 5) {
+  const last = new Date(today - (day - 3) * 86400000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${last.getUTCFullYear()}-${pad(last.getUTCMonth() + 1)}-${pad(last.getUTCDate())}`;
+ }
+ return nextSessionDateISO(now);
+}

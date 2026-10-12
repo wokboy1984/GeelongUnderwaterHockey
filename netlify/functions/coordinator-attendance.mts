@@ -16,7 +16,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
   const parts = fullName.trim().split(/\s+/);
@@ -67,7 +67,12 @@ export default async (req: Request, context: Context) => {
       );
     }
 
-    const sessionDate = nextSessionDateISO();
+    // Which Wednesday (12 Oct 2026): ?date= or body.sessionDate, so the
+    // Attendance page can show and fix any week's confirmed list and roll.
+    // Default matches coordinator-checkin.mts (defaultRollDateISO).
+    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const asked = req.method === "POST" ? body.sessionDate : new URL(req.url).searchParams.get("date");
+    const sessionDate = asked ? requestedSessionDate(asked) : defaultRollDateISO();
     const [session] = await db.sql`
       insert into sessions (session_date)
       values (${sessionDate})
@@ -77,7 +82,6 @@ export default async (req: Request, context: Context) => {
     const sessionId = session.id;
 
     if (req.method === "POST") {
-      const body = await req.json().catch(() => ({}));
       const guestName = String(body.guestName || "").trim();
 
       if (guestName) {

@@ -5,6 +5,9 @@
 // GET    /api/admin/roles?q=<search>        -> { ok, members: [...] }
 // POST   /api/admin/roles  { memberEmail, role, note } -> grant
 // DELETE /api/admin/roles  { memberEmail, role, note } -> revoke
+// POST   /api/admin/roles  { action: "grade", memberEmail, grade }
+// POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
+//        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
 // All three require the caller to already hold the 'administrator' role
 // (checked server-side against the database — never against anything the
@@ -87,7 +90,7 @@ export default async (req: Request, context: Context) => {
         return new Response(JSON.stringify({ ok: false, error: "Not a valid grade" }), { status: 400, headers: { "content-type": "application/json" } });
       }
       const grade = rawGrade || null;
-      const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth from members where email = ${memberEmail}`;
+      const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, waiver_accepted_at from members where email = ${memberEmail}`;
       if (!target || target.email.endsWith("@no-login.guwh")) {
         return new Response(
           JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
@@ -107,6 +110,46 @@ export default async (req: Request, context: Context) => {
       );
     }
 
+    // In-person waiver (12 Oct 2026, Cheongy): the waiver is signed on paper
+    // at the pool for now, so an Administrator records it here. Marking it
+    // signed stamps waiver_accepted_at with now and notes who recorded it;
+    // "Undo" clears it again for a mis-click. Audit-logged either way.
+    if (req.method === "POST" && body.action === "waiver") {
+      if (!memberEmail) {
+        return new Response(JSON.stringify({ ok: false, error: "memberEmail is required" }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const signed = !!body.signed;
+      const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, grade from members where email = ${memberEmail}`;
+      if (!target || target.email.endsWith("@no-login.guwh")) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
+          { status: 404, headers: { "content-type": "application/json" } }
+        );
+      }
+      const recordedBy = "Signed in person - recorded by " + caller.email;
+      const [updated] = signed
+        ? await db.sql`
+            update members set waiver_accepted_at = now(), waiver_signed_name = ${recordedBy}
+            where id = ${target.id}
+            returning waiver_accepted_at
+          `
+        : await db.sql`
+            update members set waiver_accepted_at = null, waiver_signed_name = null
+            where id = ${target.id}
+            returning waiver_accepted_at
+          `;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: signed ? "waiver_recorded_in_person" : "waiver_cleared",
+        resourceType: "member", resourceId: target.id, newValue: { signed },
+        note: `${caller.email} ${signed ? "recorded an in-person waiver for" : "cleared the waiver for"} ${target.email}`,
+      });
+      const roleRows = await db.sql`select role from member_roles where member_id = ${target.id}`;
+      return new Response(
+        JSON.stringify({ ok: true, member: shapeMember({ ...target, waiver_accepted_at: updated.waiver_accepted_at, roles: roleRows.map((r: any) => r.role) }) }),
+        { headers: { "content-type": "application/json" } }
+      );
+    }
+
     const role = String(body.role || "").trim();
 
     if (!memberEmail || !isRole(role)) {
@@ -116,7 +159,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, grade from members where email = ${memberEmail}`;
+    const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, grade, waiver_accepted_at from members where email = ${memberEmail}`;
     if (!target || target.email.endsWith("@no-login.guwh")) {
       return new Response(
         JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),

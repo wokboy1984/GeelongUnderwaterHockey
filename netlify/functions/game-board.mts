@@ -21,7 +21,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, unauthorized } from "./_shared/roles.mts";
+import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, unauthorized } from "./_shared/roles.mts";
 import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
@@ -38,6 +38,7 @@ export default async (req: Request, context: Context) => {
     await ensureMember(db, user); // any registered member can view
 
     await ensureNicknameColumn(db);
+    await ensureGameCountColumn(db);
     const upcoming = nextSessionDateISO();
     const sessionDate = requestedSessionDate(new URL(req.url).searchParams.get("date"));
     const weekRows = await db.sql`
@@ -74,7 +75,7 @@ export default async (req: Request, context: Context) => {
     const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
 
     const rowRows = await db.sql`
-      select id, row_order, row_type, label, start_min, duration_min, notes
+      select id, row_order, row_type, label, start_min, duration_min, notes, game_count
       from timetable_rows
       where session_id = ${session.id} and archived_at is null
       order by row_order asc, id asc
@@ -121,7 +122,9 @@ export default async (req: Request, context: Context) => {
 
     const rows = rowRows.map((r: any) => {
       const pgs = pgsByRow[r.id] || [];
-      const poolGames = POOLS.map((pool) => {
+      // One game or two at once (12 Oct 2026): a one-game row only has Pool A.
+      const gameCount = Number(r.game_count) === 1 ? 1 : 2;
+      const poolGames = POOLS.slice(0, gameCount).map((pool) => {
         const pg = pgs.find((x: any) => x.pool === pool);
         return {
           pool,
@@ -148,6 +151,7 @@ export default async (req: Request, context: Context) => {
         durationMin: r.duration_min,
         notes: r.notes,
         isGame: r.row_type === "game",
+        gameCount,
         poolGames,
       };
     });

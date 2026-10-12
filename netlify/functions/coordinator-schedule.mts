@@ -11,7 +11,12 @@
 //   -> { ok, sessionDate, teams, rows, rowTypes, validation }
 //
 // POST /api/coordinator/schedule { action, ... }
-//   add_row          { rowType, label, startMin, durationMin, notes }
+//   add_row          { rowType, label, startMin, durationMin, notes, gameCount? }
+//   clear_all_rows   {}  -- start this week's timetable from scratch
+//                    (removes never-published rows, archives published ones)
+//   set_game_count   { rowId, gameCount: 1 | 2 }  -- one game, or two at once
+//                    (switching to 1 deletes that row's Pool B game: teams,
+//                    referees and any recorded score) - 12 Oct 2026
 //   update_row       { rowId, rowType?, label, startMin, durationMin, notes }
 //   duplicate_row    { rowId }
 //   remove_row       { rowId }              -- only if never published
@@ -35,8 +40,9 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureGameCountColumn, ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import {
   ROW_TYPES,
   isRowType,
@@ -133,7 +139,7 @@ async function loadSnapshot(db: any, sessionId: number) {
 
   const rowRows = await db.sql`
     select id, row_order, row_type, label, start_min, duration_min, notes, published_at, archived_at,
-           created_by, updated_by, created_at, updated_at
+           created_by, updated_by, created_at, updated_at, game_count
     from timetable_rows where session_id = ${sessionId} order by row_order asc, id asc
   `;
   const rowIds = rowRows.map((r: any) => r.id);
@@ -194,8 +200,12 @@ function toRowSnaps(rowRows: any[], poolGamesByRow: Record<number, any[]>, refsB
   });
 }
 
+// Creates the row's pool game(s): Pool A only for a one-game row, Pool A
+// and Pool B for a two-games-at-once row (game_count, 12 Oct 2026).
 async function ensurePoolGamesExist(db: any, rowId: number) {
-  for (const pool of POOLS) {
+  const [r] = await db.sql`select game_count from timetable_rows where id = ${rowId}`;
+  const count = r && Number(r.game_count) === 1 ? 1 : 2;
+  for (const pool of POOLS.slice(0, count)) {
     await db.sql`
       insert into timetable_pool_games (row_id, pool) values (${rowId}, ${pool})
       on conflict (row_id, pool) do nothing
@@ -260,7 +270,8 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
 
   const rows = snap.rowRows.map((r: any) => {
     const pgs = snap.poolGamesByRow[r.id] || [];
-    const poolGames = POOLS.map((pool) => {
+    const gameCount = Number(r.game_count) === 1 ? 1 : 2;
+    const poolGames = POOLS.slice(0, gameCount).map((pool) => {
       const pg = pgs.find((x: any) => x.pool === pool);
       const referees = pg ? (snap.refsByPoolGame[pg.id] || []) : [];
       let eligible: any[] = [];
@@ -302,6 +313,7 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
       startMin: r.start_min,
       durationMin: r.duration_min,
       notes: r.notes,
+      gameCount,
       published: !!r.published_at,
       archived: !!r.archived_at,
       createdBy: r.created_by,
@@ -334,6 +346,7 @@ export default async (req: Request, context: Context) => {
   }
 
   try {
+    await ensureGameCountColumn(db);
     const sessionDate = nextWednesdayISO();
     const [session] = await db.sql`
       insert into sessions (session_date)
@@ -342,6 +355,10 @@ export default async (req: Request, context: Context) => {
       returning id, published
     `;
     const sessionId = session.id;
+    // Last week's teams + timetable layout, once per new week; returning
+    // players back into their team - see _shared/carry-forward.mts.
+    await copyForwardWeek(db, sessionId, sessionDate, caller.id);
+    await autoPlaceReturningPlayers(db, sessionId, sessionDate);
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
@@ -349,7 +366,15 @@ export default async (req: Request, context: Context) => {
       const MUTATING_ACTIONS = [
         "add_row", "update_row", "duplicate_row", "remove_row", "archive_row", "unarchive_row",
         "reorder_rows", "assign_team", "swap_teams", "clear_row_teams", "assign_referee", "unassign_referee",
+        "set_game_count", "clear_all_rows",
       ];
+
+      // A one-game row has no Pool B - refuse anything aimed at it.
+      if (["assign_team", "assign_referee"].includes(action) && body.pool === "Pool B" ||
+          action === "swap_teams" && (body.poolA === "Pool B" || body.poolB === "Pool B")) {
+        const [gc] = await db.sql`select game_count from timetable_rows where id = ${Number(body.rowId)} and session_id = ${sessionId}`;
+        if (gc && Number(gc.game_count) === 1) return badRequest("This row is set to one game - switch it to two games first");
+      }
 
       if (action === "add_row") {
         const rowType = String(body.rowType || "");
@@ -359,13 +384,14 @@ export default async (req: Request, context: Context) => {
         const startMin = body.startMin === "" || body.startMin == null ? null : Number(body.startMin);
         const durationMin = body.durationMin === "" || body.durationMin == null ? null : Number(body.durationMin);
         const notes = body.notes ? String(body.notes).trim() || null : null;
+        const gameCount = Number(body.gameCount) === 1 ? 1 : 2;
 
         const [{ next }] = await db.sql`
           select coalesce(max(row_order), 0) + 1 as next from timetable_rows where session_id = ${sessionId} and archived_at is null
         `;
         const [row] = await db.sql`
-          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by)
-          values (${sessionId}, ${next}, ${rowType}, ${label}, ${startMin}, ${durationMin}, ${notes}, ${caller.id}, ${caller.id})
+          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
+          values (${sessionId}, ${next}, ${rowType}, ${label}, ${startMin}, ${durationMin}, ${notes}, ${caller.id}, ${caller.id}, ${gameCount})
           returning id
         `;
         if (rowType === "game") await ensurePoolGamesExist(db, row.id);
@@ -404,6 +430,34 @@ export default async (req: Request, context: Context) => {
           previousValue: { label: existing.label, startMin: existing.start_min, durationMin: existing.duration_min, rowType: existing.row_type },
           newValue: { label, startMin, durationMin, rowType }, note: `${caller.email} edited a timetable row`,
         });
+      } else if (action === "clear_all_rows") {
+        // Start from scratch: never-published rows are deleted outright;
+        // anything that's already been public is archived (keeps history).
+        await db.sql`delete from timetable_rows where session_id = ${sessionId} and archived_at is null and published_at is null`;
+        await db.sql`update timetable_rows set archived_at = now(), updated_by = ${caller.id}, updated_at = now() where session_id = ${sessionId} and archived_at is null`;
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: "timetable_row_removed",
+          resourceType: "session", resourceId: String(sessionId),
+          newValue: { sessionDate, clearedAll: true }, note: `${caller.email} cleared the whole timetable for ${sessionDate}`,
+        });
+      } else if (action === "set_game_count") {
+        const rowId = Number(body.rowId);
+        const gameCount = Number(body.gameCount) === 1 ? 1 : 2;
+        const [existing] = await db.sql`select id, game_count from timetable_rows where id = ${rowId} and session_id = ${sessionId} and row_type = 'game'`;
+        if (!existing) return badRequest("That isn't a Game row in this session");
+        await db.sql`update timetable_rows set game_count = ${gameCount}, updated_by = ${caller.id}, updated_at = now() where id = ${rowId}`;
+        if (gameCount === 1) {
+          // Pool B's teams, referees (and any score/goals, via cascade) go.
+          await db.sql`delete from timetable_pool_games where row_id = ${rowId} and pool = 'Pool B'`;
+        } else {
+          await ensurePoolGamesExist(db, rowId);
+        }
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: "timetable_row_edited",
+          resourceType: "timetable_row", resourceId: String(rowId),
+          previousValue: { gameCount: Number(existing.game_count) || 2 }, newValue: { gameCount },
+          note: `${caller.email} set a game row to ${gameCount === 1 ? "one game" : "two games at once"}`,
+        });
       } else if (action === "duplicate_row") {
         const rowId = Number(body.rowId);
         const [existing] = await db.sql`select * from timetable_rows where id = ${rowId} and session_id = ${sessionId}`;
@@ -414,8 +468,8 @@ export default async (req: Request, context: Context) => {
           where session_id = ${sessionId} and archived_at is null and row_order > ${existing.row_order}
         `;
         const [copy] = await db.sql`
-          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by)
-          values (${sessionId}, ${existing.row_order + 1}, ${existing.row_type}, ${existing.label + " (copy)"}, ${existing.start_min}, ${existing.duration_min}, ${existing.notes}, ${caller.id}, ${caller.id})
+          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
+          values (${sessionId}, ${existing.row_order + 1}, ${existing.row_type}, ${existing.label + " (copy)"}, ${existing.start_min}, ${existing.duration_min}, ${existing.notes}, ${caller.id}, ${caller.id}, ${Number(existing.game_count) === 1 ? 1 : 2})
           returning id
         `;
         if (existing.row_type === "game") {
@@ -427,6 +481,7 @@ export default async (req: Request, context: Context) => {
               where row_id = ${copy.id} and pool = ${pg.pool}
             `;
             const [newPg] = await db.sql`select id from timetable_pool_games where row_id = ${copy.id} and pool = ${pg.pool}`;
+            if (!newPg) continue;
             const refs = await db.sql`select member_id from timetable_pool_referees where pool_game_id = ${pg.id}`;
             for (const ref of refs) {
               await db.sql`insert into timetable_pool_referees (pool_game_id, member_id) values (${newPg.id}, ${ref.member_id}) on conflict do nothing`;
@@ -593,7 +648,10 @@ export default async (req: Request, context: Context) => {
       }
     }
 
-    return new Response(JSON.stringify(await buildResponse(db, sessionId, sessionDate)), {
+    const [copyInfo] = await db.sql`select timetable_copied_from::text as copied_from from sessions where id = ${sessionId}`;
+    const payload: any = await buildResponse(db, sessionId, sessionDate);
+    payload.copiedFrom = copyInfo ? copyInfo.copied_from : null;
+    return new Response(JSON.stringify(payload), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

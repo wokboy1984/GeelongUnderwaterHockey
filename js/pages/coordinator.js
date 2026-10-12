@@ -43,7 +43,31 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   // ---------------------------------------------------------------- Attendance
+  // Upcoming Wednesday in the club's terms (today if it's Wednesday) -
+  // used for page headings only; the server decides which week data
+  // belongs to.
+  // Tells the Tonight strip to refresh after anything on Game Coordination
+  // changes (teams loaded or moved, timetable saved, scores, publish).
+  function coordChanged() { try { window.dispatchEvent(new Event("guwh:coord-changed")); } catch (e) {} }
+
+  function upcomingWednesdayLocal() {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() + ((3 - d.getDay() + 7) % 7));
+    return d;
+  }
+  function addDaysISO(iso, n) {
+    const d = new Date(iso + "T12:00:00");
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  // Roll by game night (12 Oct 2026, Cheongy): the roll used to record
+  // against *today*. Now the page works on a chosen Wednesday - Thu/Fri it
+  // opens on the night just gone, otherwise the upcoming one - and Prev /
+  // Next moves between weeks (last 12 weeks + upcoming).
   function AttendanceTab() {
+    const [week, setWeek] = React.useState(null); // null = server default
     const [sessionDate, setSessionDate] = React.useState(null);
     const [players, setPlayers] = React.useState([]);
     const [checkin, setCheckin] = React.useState(null); // { sessionDate, players, closed, closedAt, closedByName }
@@ -60,14 +84,15 @@ GUWH.Pages = GUWH.Pages || {};
     const searchSeq = React.useRef(0);
     const searchTimer = React.useRef(null);
 
-    function load() {
+    function load(date) {
       setLoading(true);
       setError(null);
+      const q = date ? "date=" + encodeURIComponent(date) : "";
       return Promise.all([
-        GUWH.Identity.authFetch("/api/coordinator/attendance").then((r) => r.json()),
-        GUWH.Identity.authFetch("/api/coordinator/checkin").then((r) => r.json()),
+        GUWH.Identity.authFetch("/api/coordinator/attendance" + (q ? "?" + q : "")).then((r) => r.json()),
+        GUWH.Identity.authFetch("/api/coordinator/checkin" + (q ? "?" + q : "")).then((r) => r.json()),
         GUWH.Identity.authFetch("/api/invites?scope=all").then((r) => r.json()).catch(() => ({ ok: false })),
-        GUWH.Identity.authFetch("/api/trial-signup?scope=coordinator").then((r) => r.json()).catch(() => ({ ok: false })),
+        GUWH.Identity.authFetch("/api/trial-signup?scope=coordinator" + (q ? "&" + q : "")).then((r) => r.json()).catch(() => ({ ok: false })),
       ])
         .then(([a, c, i, t]) => {
           if (a.ok) { setSessionDate(a.sessionDate); setPlayers(a.players); }
@@ -79,13 +104,14 @@ GUWH.Pages = GUWH.Pages || {};
           if (c.ok) setCheckin(c);
           else setError(c.error || "Could not load today's roll.");
           if (i.ok) setNewPlayers(i.invites);
-          if (t && t.ok) setTrialSignups(t.signups);
+          if (t && t.ok) setTrialSignups(t.signups || []);
         })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     }
 
     React.useEffect(() => { load(); }, []);
+    function goToWeek(date) { setWeek(date); setAddQuery(""); setAddResults([]); load(date); }
 
     // The roll's tick state starts from whatever's already saved for today,
     // every time a fresh `checkin` comes in (first load, and after Save/Close/Reopen).
@@ -96,19 +122,19 @@ GUWH.Pages = GUWH.Pages || {};
       setRoll(next);
     }, [checkin]);
 
-    // The roll always records against *today* server-side (see
-    // coordinator-checkin.mts) — the Confirmed list above is for the
-    // upcoming Wednesday, which is only the same date as today on game day
-    // itself. This used to hide the whole roll on any other day; that was
-    // more confusing than useful (13 Sept 2026, Cheongy's request), so the
-    // roll is now always available — just with a note below when today
-    // isn't the scheduled game day, naming the date it's actually for.
-    const isGameDay = !!(checkin && sessionDate && checkin.sessionDate === sessionDate);
+    // The roll is per Wednesday (12 Oct 2026): the week switcher picks the
+    // game night. A future night is view-only until the day; past nights
+    // can still be corrected (see coordinator-checkin.mts).
+    const isFuture = !!(checkin && checkin.today && checkin.sessionDate > checkin.today);
+    const isPast = !!(checkin && checkin.today && checkin.sessionDate < checkin.today);
+    const weeks = checkin && checkin.upcoming
+      ? Array.from({ length: 13 }, (_, i) => addDaysISO(checkin.upcoming, -7 * i))
+      : [];
 
     async function setAttendance(memberEmail, isIn) {
       setError(null);
       try {
-        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ memberEmail, in: isIn }) });
+        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ sessionDate, memberEmail, in: isIn }) });
         const data = await res.json();
         if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); setAddQuery(""); setAddResults([]); }
         else setError(data.error || "Something went wrong");
@@ -123,7 +149,7 @@ GUWH.Pages = GUWH.Pages || {};
       if (!name) return;
       setError(null);
       try {
-        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ guestName: name }) });
+        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ sessionDate, guestName: name }) });
         const data = await res.json();
         if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); setAddName(""); }
         else setError(data.error || "Something went wrong");
@@ -195,7 +221,7 @@ GUWH.Pages = GUWH.Pages || {};
       React.Fragment,
       null,
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
-      sessionDate && h(Pill, { tone: "accent" }, GUWH.formatDate(new Date(sessionDate + "T00:00:00"))),
+      checkin && h("div", { className: "max-w-md" }, h(GUWH.UI.WeekSwitcher, { date: checkin.sessionDate, weeks, upcoming: checkin.upcoming, onChange: goToWeek })),
 
       // ---- Add an existing member: type-ahead by name, not raw email ----
       h(
@@ -237,13 +263,10 @@ GUWH.Pages = GUWH.Pages || {};
           ? h(
               React.Fragment,
               null,
-              h("p", { className: "text-xs text-[var(--ink-soft)] " + (isGameDay ? "mb-3" : "mb-1") }, "Tick who actually showed up, then Save Roll. Marking someone attended charges their game fee — see Finance."),
-              !isGameDay &&
-                h(
-                  "p",
-                  { className: "text-xs font-semibold text-[var(--bad)] mb-3" },
-                  "Not game day — this records against today (" + GUWH.formatDate(new Date(checkin.sessionDate + "T00:00:00")) + "), not the upcoming Wednesday shown above."
-                ),
+              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Tick who actually showed up, then Save Roll. Marking someone attended charges their game fee — see Finance."),
+              isFuture && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
+              isPast && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)] mb-3" }, "Past week — saving updates that night's roll and game fees."),
+              !isFuture && !isPast && h("div", { className: "mb-3" }),
               checkin.closed &&
                 h(
                   "div",
@@ -253,12 +276,12 @@ GUWH.Pages = GUWH.Pages || {};
                 )
             )
           : loading
-          ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Loading today's roll…")
+          ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Loading the roll…")
           : h(
               "p",
               { className: "text-xs font-semibold text-[var(--bad)] mb-3 flex items-center gap-2 flex-wrap" },
-              "Couldn't load today's roll.",
-              h("button", { type: "button", className: "underline", onClick: load }, "Retry")
+              "Couldn't load the roll.",
+              h("button", { type: "button", className: "underline", onClick: () => load(week) }, "Retry")
             ),
         loading
           ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
@@ -287,7 +310,7 @@ GUWH.Pages = GUWH.Pages || {};
                         h("input", {
                           type: "checkbox",
                           checked: !!roll[p.id],
-                          disabled: checkin.closed,
+                          disabled: checkin.closed || isFuture,
                           onChange: (e) => tick(p.id, e.target.checked),
                         }),
                         "Attended"
@@ -299,6 +322,7 @@ GUWH.Pages = GUWH.Pages || {};
             ),
         checkin &&
           !checkin.closed &&
+          !isFuture &&
           h(
             "div",
             { className: "mt-4 flex flex-wrap gap-3" },
@@ -315,7 +339,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "mt-8" },
-        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "New Players Today"),
+        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "New players this week"),
         // Free Trial signups for the upcoming Wednesday (2 Oct 2026 — the
         // /new-player form now saves for real via /api/trial-signup).
         // Gear size, writing hand and emergency contact shown so whoever
@@ -449,17 +473,24 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   // ---------------------------------------------------------------- Teams
-  function PlayerRow({ player, action }) {
+  function PlayerRow({ player, action, fromLastWeek, onDragStart, onDragEnd }) {
     return h(
       "div",
-      { className: "flex items-center justify-between bg-white rounded-xl px-3 py-2 gap-3" },
+      {
+        className: cx("flex items-center justify-between bg-white rounded-xl px-3 py-2 gap-3", onDragStart && "cursor-grab active:cursor-grabbing"),
+        draggable: !!onDragStart,
+        onDragStart: onDragStart ? (e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", player.email); onDragStart(player); } : undefined,
+        onDragEnd: onDragEnd || undefined,
+      },
+      onDragStart && h(Icon, { name: "grip", size: 14, className: "text-[var(--ink-soft)] shrink-0 hidden sm:block" }),
       h(
         "div",
-        { className: "flex items-center gap-2 flex-wrap min-w-0" },
+        { className: "flex-1 flex items-center gap-2 flex-wrap min-w-0" },
         h("span", { className: "text-sm text-[var(--ink)]" }, player.firstName + " " + player.lastName),
         player.isNew && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, "New"),
         player.grade && h(Pill, { tone: "dark", className: "!py-0.5 !px-2 !text-[10px]" }, "Grade " + player.grade),
-        player.position && h("span", { className: "text-xs text-[var(--ink-soft)]" }, player.position)
+        player.position && h("span", { className: "text-xs text-[var(--ink-soft)]" }, player.position),
+        fromLastWeek && h("span", { className: "text-[10px] font-semibold text-[var(--accent-dark)]" }, "Same team as last week")
       ),
       action
     );
@@ -472,13 +503,37 @@ GUWH.Pages = GUWH.Pages || {};
     const [assignTo, setAssignTo] = React.useState({}); // memberId -> teamId
     const [newTeamName, setNewTeamName] = React.useState("");
     const [renaming, setRenaming] = React.useState({}); // teamId -> draft name
+    // Drag players between teams (12 Oct 2026, Cheongy: "can we just drag
+    // them?"). Drag any player onto a team to move them there, or onto
+    // Unassigned to take them off. Phones can't drag, so on a touch screen
+    // each player in a team gets a small "Move to" dropdown instead.
+    const [dragging, setDragging] = React.useState(null); // player being dragged
+    const [dropKey, setDropKey] = React.useState(null);   // team id or "unassigned"
+    const isTouch = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    function dropZone(key, onDropPlayer) {
+      return {
+        onDragOver: (e) => { if (dragging) { e.preventDefault(); if (dropKey !== key) setDropKey(key); } },
+        onDragLeave: () => { if (dropKey === key) setDropKey(null); },
+        onDrop: (e) => { e.preventDefault(); const p = dragging; setDragging(null); setDropKey(null); if (p) onDropPlayer(p); },
+      };
+    }
+    function teamOf(player) {
+      const t = (board.teams || []).find((x) => x.players.some((pp) => pp.id === player.id));
+      return t ? t.id : null;
+    }
+    function moveTo(player, teamId) {
+      if (teamId === "unassigned") { if (teamOf(player) != null) call({ action: "unassign", memberEmail: player.email }); return; }
+      if (teamOf(player) === Number(teamId)) return;
+      call({ action: "assign", memberEmail: player.email, teamId: Number(teamId) });
+    }
+    const dragProps = { onDragStart: (p) => setDragging(p), onDragEnd: () => { setDragging(null); setDropKey(null); } };
 
     function load() {
       setLoading(true);
       setError(null);
       return GUWH.Identity.authFetch("/api/coordinator/teams")
         .then((r) => r.json())
-        .then((data) => (data.ok ? setBoard(data) : setError(data.error || "Something went wrong")))
+        .then((data) => { if (data.ok) { setBoard(data); coordChanged(); } else setError(data.error || "Something went wrong"); })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     }
@@ -490,7 +545,7 @@ GUWH.Pages = GUWH.Pages || {};
       try {
         const res = await GUWH.Identity.authFetch("/api/coordinator/teams", { method: "POST", body: JSON.stringify(body) });
         const data = await res.json();
-        if (data.ok) setBoard(data);
+        if (data.ok) { setBoard(data); coordChanged(); }
         else setError(data.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
@@ -524,7 +579,18 @@ GUWH.Pages = GUWH.Pages || {};
       React.Fragment,
       null,
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
-      h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md mb-6" }, "Create as many teams as you need for the night, assign confirmed players to them, then build the timetable in the next tab. Nothing here is visible to players until you publish."),
+      h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md mb-6" }, "Drag players onto a team to place or move them (on a phone, use the dropdown next to each name). Nothing here is visible to players until you publish."),
+
+      // Carried forward from last week (12 Oct 2026) — see
+      // _shared/carry-forward.mts. Everything stays editable until publish.
+      board.copiedFrom && board.teams.length > 0 &&
+        h(
+          "div",
+          { className: "rounded-2xl bg-[var(--accent-12)] p-4 mb-6 text-sm text-[var(--ink)]" },
+          "Teams carried over from ",
+          h("strong", null, GUWH.formatDate(new Date(board.copiedFrom + "T00:00:00"))),
+          ". Players who book in are put back in last week's team until you publish. Move, remove, rename or delete anything you need."
+        ),
 
       h(
         "form",
@@ -533,10 +599,13 @@ GUWH.Pages = GUWH.Pages || {};
         h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Add team")
       ),
 
-      board.unassigned.length > 0 &&
+      (board.unassigned.length > 0 || (dragging && teamOf(dragging) != null)) &&
         h(
           "div",
-          { className: "rounded-2xl bg-[var(--warn-10)] p-5 mb-6" },
+          Object.assign(
+            { className: cx("rounded-2xl bg-[var(--warn-10)] p-5 mb-6 transition", dropKey === "unassigned" && "ring-2 ring-[var(--accent)]") },
+            dropZone("unassigned", (p) => moveTo(p, "unassigned"))
+          ),
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-3" }, "Unassigned (" + board.unassigned.length + ")"),
           board.teams.length === 0
             ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Create a team above before assigning players.")
@@ -544,7 +613,7 @@ GUWH.Pages = GUWH.Pages || {};
                 "div",
                 { className: "flex flex-col gap-2" },
                 board.unassigned.map((p) =>
-                  h(PlayerRow, {
+                  h(PlayerRow, Object.assign({}, dragProps, {
                     key: p.id,
                     player: p,
                     action: h(
@@ -557,7 +626,7 @@ GUWH.Pages = GUWH.Pages || {};
                       ),
                       h(Button, { size: "sm", onClick: () => assign(p) }, "Assign")
                     ),
-                  })
+                  }))
                 )
               )
         ),
@@ -570,7 +639,10 @@ GUWH.Pages = GUWH.Pages || {};
             board.teams.map((team) =>
               h(
                 "div",
-                { key: team.id, className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+                Object.assign(
+                  { key: team.id, className: cx("rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3 transition", dropKey === team.id && "ring-2 ring-[var(--accent)]") },
+                  dropZone(team.id, (p) => moveTo(p, team.id))
+                ),
                 h(
                   "div",
                   { className: "flex items-center justify-between gap-2" },
@@ -599,7 +671,24 @@ GUWH.Pages = GUWH.Pages || {};
                   team.players.length === 0
                     ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No players yet.")
                     : team.players.map((p) =>
-                        h(PlayerRow, { key: p.id, player: p, action: h(Button, { size: "sm", variant: "ghost", onClick: () => call({ action: "unassign", memberEmail: p.email }) }, "Remove") })
+                        h(PlayerRow, Object.assign({}, dragProps, {
+                          key: p.id,
+                          player: p,
+                          fromLastWeek: (board.autoPlacedIds || []).indexOf(p.id) !== -1,
+                          action: isTouch
+                            ? h(
+                                "select",
+                                {
+                                  className: inputCls + " !w-auto !py-1 text-xs",
+                                  value: String(team.id),
+                                  "aria-label": "Move " + p.firstName + " to",
+                                  onChange: (e) => moveTo(p, e.target.value),
+                                },
+                                board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
+                                h("option", { value: "unassigned" }, "Unassigned")
+                              )
+                            : h(Button, { size: "sm", variant: "ghost", onClick: () => call({ action: "unassign", memberEmail: p.email }) }, "Remove"),
+                        }))
                       )
                 )
               )
@@ -749,7 +838,7 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   // ---- Per-pool referee picker: eligible-only by default, reasons on request ----
-  function RefereeSelector({ rowId, pool, poolGame, onAssign, onUnassign }) {
+  function RefereeSelector({ rowId, pool, title, poolGame, onAssign, onUnassign }) {
     const [showUnavailable, setShowUnavailable] = React.useState(false);
     const [pick, setPick] = React.useState("");
     const eligible = poolGame.eligible || [];
@@ -765,7 +854,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { className: "flex flex-col gap-1.5" },
-      h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, pool + " referees"),
+      h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, (title && title !== pool ? "" : pool + " ") + "Referees"),
       poolGame.referees.length === 0
         ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "None picked yet.")
         : h(
@@ -824,23 +913,23 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   // ---- One pool's whole block: two slots + its referee picker ----
-  function PoolBlock({ rowId, pool, poolGame, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }) {
+  function PoolBlock({ rowId, pool, title, poolGame, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }) {
     return h(
       "div",
       { className: "flex-1 min-w-[240px] rounded-xl bg-[var(--sand)] p-3 flex flex-col gap-2.5" },
-      h("p", { className: "text-xs font-bold text-[var(--ink)]" }, pool),
+      h("p", { className: "text-xs font-bold text-[var(--ink)]" }, title || pool),
       h(
         "div",
         { className: "grid grid-cols-2 gap-2" },
         h(TeamSlot, { rowId, pool, slot: "black", cur: poolGame.black, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign: onAssignTeam, onSwapOrMove }),
         h(TeamSlot, { rowId, pool, slot: "white", cur: poolGame.white, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign: onAssignTeam, onSwapOrMove })
       ),
-      h(RefereeSelector, { rowId, pool, poolGame, onAssign: onAssignRef, onUnassign: onUnassignRef })
+      h(RefereeSelector, { rowId, pool, title, poolGame, onAssign: onAssignRef, onUnassign: onUnassignRef })
     );
   }
 
   // ---- One timetable row: non-game activity, or a Game row with 2 pools ----
-  function RowCard({ row, teams, drag, setDrag, dragOverKey, setDragOverKey, draggingRowId, setDraggingRowId, onRowDrop, onUpdateRow, onDuplicate, onRemoveOrArchive, onClearTeams, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef, rowErrors, registerRef }) {
+  function RowCard({ row, teams, drag, setDrag, dragOverKey, setDragOverKey, draggingRowId, setDraggingRowId, onRowDrop, onUpdateRow, onDuplicate, onRemoveOrArchive, onClearTeams, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef, onSetGameCount, rowErrors, registerRef }) {
     const [label, setLabel] = React.useState(row.label);
     const [notes, setNotes] = React.useState(row.notes || "");
 
@@ -855,8 +944,20 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     const isGame = row.rowType === "game";
+    const single = row.gameCount === 1;
     const poolA = (row.poolGames || []).find((p) => p.pool === "Pool A") || { pool: "Pool A", black: null, white: null, referees: [], eligible: [], unavailable: [] };
     const poolB = (row.poolGames || []).find((p) => p.pool === "Pool B") || { pool: "Pool B", black: null, white: null, referees: [], eligible: [], unavailable: [] };
+
+    // One game / two games at once (12 Oct 2026, Cheongy). Switching to one
+    // game drops Pool B's teams, referees and any score, so it asks first
+    // when there's something to lose.
+    function chooseGameCount(n) {
+      if (n === row.gameCount) return;
+      if (n === 1 && (poolB.black || poolB.white || (poolB.referees || []).length)) {
+        if (!window.confirm("Switch to one game? Pool B's teams and referees for this row will be removed.")) return;
+      }
+      onSetGameCount(row, n);
+    }
 
     return h(
       "div",
@@ -909,7 +1010,25 @@ GUWH.Pages = GUWH.Pages || {};
           value: row.durationMin == null ? "" : row.durationMin,
           onChange: (e) => onUpdateRow(row, { durationMin: e.target.value === "" ? null : Number(e.target.value) }),
         }),
-        row.startMin != null && row.durationMin != null && h("span", { className: "text-xs text-[var(--ink-soft)]" }, "ends " + minToClock(row.startMin + row.durationMin))
+        row.startMin != null && row.durationMin != null && h("span", { className: "text-xs text-[var(--ink-soft)]" }, "ends " + minToClock(row.startMin + row.durationMin)),
+        isGame &&
+          h(
+            "div",
+            { className: "inline-flex rounded-full ring-1 ring-black/10 p-0.5 bg-white ml-auto", role: "group", "aria-label": "Games at once" },
+            [[1, "One game"], [2, "Two games at once"]].map(([n, text]) =>
+              h(
+                "button",
+                {
+                  key: n,
+                  type: "button",
+                  "aria-pressed": row.gameCount === n,
+                  onClick: () => chooseGameCount(n),
+                  className: cx("rounded-full px-3 py-1 text-xs font-semibold transition", row.gameCount === n ? "bg-[var(--navy)] text-white" : "text-[var(--ink-soft)] hover:text-[var(--ink)]"),
+                },
+                text
+              )
+            )
+          )
       ),
       !isGame &&
         h("input", {
@@ -923,8 +1042,8 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "flex flex-col sm:flex-row gap-3" },
-          h(PoolBlock, { rowId: row.id, pool: "Pool A", poolGame: poolA, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }),
-          h(PoolBlock, { rowId: row.id, pool: "Pool B", poolGame: poolB, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef })
+          h(PoolBlock, { rowId: row.id, pool: "Pool A", title: single ? "Game" : "Pool A", poolGame: poolA, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }),
+          !single && h(PoolBlock, { rowId: row.id, pool: "Pool B", poolGame: poolB, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef })
         ),
       rowErrors.length > 0 &&
         h(
@@ -959,13 +1078,35 @@ GUWH.Pages = GUWH.Pages || {};
     game_changeover: "Game Changeover", skills_development: "Skills Development", pack_up: "Pack Up", custom: "",
   };
 
+  // Builder rows -> the shape the public Game Board uses (12 Oct 2026). The
+  // preview used to pass builder rows straight in, which have rowType /
+  // black.name rather than isGame / blackTeamName, so game rows previewed
+  // as blank labels.
+  function toPublicRows(rows) {
+    return (rows || []).map((r) => ({
+      id: r.id,
+      label: r.label,
+      notes: r.notes,
+      startMin: r.startMin,
+      durationMin: r.durationMin,
+      isGame: r.rowType === "game",
+      gameCount: r.gameCount,
+      poolGames: (r.poolGames || []).map((pg) => ({
+        pool: pg.pool,
+        blackTeamName: pg.black ? pg.black.name : null,
+        whiteTeamName: pg.white ? pg.white.name : null,
+        referees: pg.referees || [],
+      })),
+    }));
+  }
+
   function ScheduleTab() {
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
     const [showArchived, setShowArchived] = React.useState(false);
     const [preview, setPreview] = React.useState(false);
-    const [addForm, setAddForm] = React.useState({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "" });
+    const [addForm, setAddForm] = React.useState({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "", gameCount: 2 });
     const [drag, setDrag] = React.useState(null);
     const [dragOverKey, setDragOverKey] = React.useState(null);
     const [draggingRowId, setDraggingRowId] = React.useState(null);
@@ -989,7 +1130,7 @@ GUWH.Pages = GUWH.Pages || {};
       try {
         const res = await GUWH.Identity.authFetch("/api/coordinator/schedule", { method: "POST", body: JSON.stringify(body) });
         const d = await res.json();
-        if (d.ok) setData(d);
+        if (d.ok) { setData(d); coordChanged(); }
         else setError(d.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
@@ -1030,14 +1171,17 @@ GUWH.Pages = GUWH.Pages || {};
         startMin: timeInputToMin(addForm.time),
         durationMin: addForm.durationMin === "" ? null : Number(addForm.durationMin),
         notes: addForm.notes.trim() || null,
+        gameCount: addForm.gameCount,
       });
-      setAddForm({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "" });
+      // Keep the games-at-once choice for the next row — usually the same all night.
+      setAddForm((f) => ({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "", gameCount: f.gameCount }));
     }
 
     function updateRow(row, patch) {
       call(Object.assign({ action: "update_row", rowId: row.id, rowType: row.rowType, label: row.label, startMin: row.startMin, durationMin: row.durationMin, notes: row.notes }, patch));
     }
     function duplicateRow(row) { call({ action: "duplicate_row", rowId: row.id }); }
+    function setGameCount(row, gameCount) { call({ action: "set_game_count", rowId: row.id, gameCount }); }
     function removeOrArchive(row) {
       if (row.published) {
         if (window.confirm('Archive "' + row.label + '"? It already went out to players, so it\'ll be hidden rather than deleted.')) call({ action: "archive_row", rowId: row.id });
@@ -1089,7 +1233,7 @@ GUWH.Pages = GUWH.Pages || {};
           h("h3", { className: "font-display text-lg font-bold text-[var(--ink)]" }, "Preview — what players will see once published"),
           h(Button, { size: "sm", variant: "secondary", onClick: () => setPreview(false) }, "Back to editing")
         ),
-        h("div", { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" }, h(GUWH.Pages.PublicTimetable, { rows: data.rows }))
+        h("div", { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" }, h(GUWH.Pages.PublicTimetable, { rows: toPublicRows(data.rows) }))
       );
     }
 
@@ -1100,9 +1244,30 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "flex flex-wrap items-center justify-between gap-3 mb-4" },
-        h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md" }, "Build the night as a sequence of rows, then drag teams from Available Teams into Pool A and Pool B — both pools can run at once."),
+        h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md" }, "Build the night as a sequence of rows, then drag teams from Available Teams into each game. Each game row can be one game, or two at once (Pool A + Pool B)."),
         h(Button, { size: "sm", variant: "secondary", onClick: () => setPreview(true) }, h(Icon, { name: "share", size: 14 }), "Preview public timetable")
       ),
+
+      // Last week's format (12 Oct 2026): the server copies the previous
+      // week's row layout into an empty new week once. Say so, and offer a
+      // clean slate.
+      data.copiedFrom && data.rows.length > 0 &&
+        h(
+          "div",
+          { className: "rounded-2xl bg-[var(--accent-12)] p-4 mb-4 flex flex-wrap items-center justify-between gap-3" },
+          h(
+            "p",
+            { className: "text-sm text-[var(--ink)]" },
+            "Layout copied from ",
+            h("strong", null, GUWH.formatDate(new Date(data.copiedFrom + "T00:00:00"))),
+            ". Same rows, times and matchups as last week; referees start empty."
+          ),
+          h(Button, {
+            size: "sm",
+            variant: "ghost",
+            onClick: () => { if (window.confirm("Clear every row and start this week's timetable from scratch?")) call({ action: "clear_all_rows" }); },
+          }, "Clear and start fresh")
+        ),
 
       h(ValidationSummary, { validation: data.validation, onJump: jumpToRow }),
 
@@ -1132,6 +1297,17 @@ GUWH.Pages = GUWH.Pages || {};
         ),
         h(FormField, { label: "Start time" }, h("input", { type: "time", className: inputCls + " !w-36", value: addForm.time, onChange: (e) => setAddForm((f) => Object.assign({}, f, { time: e.target.value, timeTouched: true })) })),
         h(FormField, { label: "Minutes" }, h("input", { type: "number", min: "0", className: inputCls + " !w-24", value: addForm.durationMin, onChange: (e) => setAddForm((f) => Object.assign({}, f, { durationMin: e.target.value })) })),
+        addForm.rowType === "game" &&
+          h(
+            FormField,
+            { label: "Games at once" },
+            h(
+              "select",
+              { className: inputCls + " !w-40", value: String(addForm.gameCount), onChange: (e) => setAddForm((f) => Object.assign({}, f, { gameCount: Number(e.target.value) })) },
+              h("option", { value: "1" }, "One game"),
+              h("option", { value: "2" }, "Two at once")
+            )
+          ),
         h(FormField, { label: "Notes" }, h("input", { className: inputCls + " !w-40", value: addForm.notes, onChange: (e) => setAddForm((f) => Object.assign({}, f, { notes: e.target.value })), placeholder: "Optional" })),
         h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Add row")
       ),
@@ -1156,6 +1332,7 @@ GUWH.Pages = GUWH.Pages || {};
                 onSwapOrMove: swapOrMove,
                 onAssignRef: assignRef,
                 onUnassignRef: unassignRef,
+                onSetGameCount: setGameCount,
                 rowErrors: errorsByRow[row.id] || [],
                 registerRef: (el) => {
                   rowRefs.current[row.id] = el;
@@ -1198,7 +1375,7 @@ GUWH.Pages = GUWH.Pages || {};
   // player scored in it. Season/career totals are just SUM(goals) — see
   // game_goals in the DB and the same total surfaced on each member's own
   // Profile page.
-  function ScoreCard({ pg, rowLabel, onSave }) {
+  function ScoreCard({ pg, rowLabel, single, onSave }) {
     const [blackScore, setBlackScore] = React.useState(pg.blackScore == null ? "" : String(pg.blackScore));
     const [whiteScore, setWhiteScore] = React.useState(pg.whiteScore == null ? "" : String(pg.whiteScore));
     const [goals, setGoals] = React.useState(() => {
@@ -1241,7 +1418,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { className: "rounded-2xl border-2 border-black/5 p-4 sm:p-5 flex flex-col gap-4" },
-      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, rowLabel + " · " + pg.pool),
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, single ? rowLabel : rowLabel + " · " + pg.pool),
       h(
         "div",
         { className: "grid sm:grid-cols-2 gap-4" },
@@ -1298,14 +1475,14 @@ GUWH.Pages = GUWH.Pages || {};
         body: JSON.stringify({ sessionDate: data.sessionDate, poolGameId, blackScore, whiteScore, goals }),
       });
       const d = await res.json();
-      if (d.ok) setData(d);
+      if (d.ok) { setData(d); coordChanged(); }
       else setError(d.error || "Something went wrong");
     }
 
     if (!data) return loading ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…") : error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
     const allPoolGames = [];
-    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label })));
+    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, single: row.poolGames.length === 1 && pg.pool === "Pool A" })));
 
     return h(
       "div",
@@ -1319,7 +1496,7 @@ GUWH.Pages = GUWH.Pages || {};
         : h(
             "div",
             { className: "flex flex-col gap-4" },
-            allPoolGames.map(({ pg, rowLabel }) => h(ScoreCard, { key: pg.id, pg, rowLabel, onSave: saveScore }))
+            allPoolGames.map(({ pg, rowLabel, single }) => h(ScoreCard, { key: pg.id, pg, rowLabel, single, onSave: saveScore }))
           ),
       h(
         "div",
@@ -1373,7 +1550,7 @@ GUWH.Pages = GUWH.Pages || {};
       setError(null);
       const res = await GUWH.Identity.authFetch("/api/coordinator/teams", { method: "POST", body: JSON.stringify({ action: "publish", published: !board.published }) });
       const data = await res.json();
-      if (data.ok) setBoard(data);
+      if (data.ok) { setBoard(data); coordChanged(); }
       else {
         setError(data.error || "Something went wrong");
         if (data.validation) setValidation(data.validation);
@@ -1393,7 +1570,9 @@ GUWH.Pages = GUWH.Pages || {};
       { className: "rounded-2xl bg-[var(--navy)] text-white p-6 flex flex-col gap-4 max-w-md" },
       h("h3", { className: "font-display font-bold" }, "Ready to publish?"),
       error && h("p", { className: "text-sm text-[#ffb4a8]" }, error),
-      board.unassigned.length > 0
+      board.confirmed.length === 0
+        ? h("p", { className: "text-sm text-white/70" }, "Nobody's booked in yet.")
+        : board.unassigned.length > 0
         ? h("p", { className: "text-sm text-[var(--warn-light,#f0c98a)]" }, board.unassigned.length + " confirmed player(s) still unassigned — check the Teams tab.")
         : h("p", { className: "text-sm text-white/70" }, "Every confirmed player is on a team."),
       blocked &&
@@ -1555,12 +1734,70 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // "Tonight at a glance" (12 Oct 2026): one line of status across the
+  // whole Wednesday job, refreshed each time the tab changes. Each figure
+  // comes from the same endpoint its own tab uses.
+  function TonightStrip() {
+    const [st, setSt] = React.useState(null);
+    React.useEffect(() => {
+      let off = false, seq = 0, timer = null;
+      const get = (u) => GUWH.Identity.authFetch(u).then((r) => r.json()).catch(() => ({ ok: false }));
+      function refresh() {
+      const mine = ++seq;
+      Promise.all([get("/api/coordinator/teams"), get("/api/coordinator/schedule"), get("/api/booking")]).then(([t, sc, b]) => {
+        if (off || mine !== seq) return;
+        const upcoming = t.ok ? t.sessionDate : null;
+        (upcoming ? get("/api/coordinator/scores?date=" + upcoming) : Promise.resolve({ ok: false })).then((scr) => {
+          if (off || mine !== seq) return;
+          let games = 0, scored = 0;
+          if (scr.ok) scr.games.forEach((row) => row.poolGames.forEach((pg) => { games++; if (pg.blackScore != null && pg.whiteScore != null) scored++; }));
+          setSt({
+            booked: t.ok ? t.confirmed.length : null,
+            unassigned: t.ok ? t.unassigned.length : null,
+            published: t.ok ? !!t.published : null,
+            issues: sc.ok ? (sc.validation || []).length : null,
+            games, scored,
+            cutoffAt: b.ok ? b.cutoffAt : null,
+          });
+        });
+      });
+      }
+      refresh();
+      // Re-check shortly after any change (debounced) so the counts match
+      // what's on screen - e.g. returning players auto-placed on Teams load.
+      const onChange = () => { clearTimeout(timer); timer = setTimeout(refresh, 400); };
+      window.addEventListener("guwh:coord-changed", onChange);
+      return () => { off = true; clearTimeout(timer); window.removeEventListener("guwh:coord-changed", onChange); };
+    }, []);
+    if (!st) return null;
+    const left = st.cutoffAt ? new Date(st.cutoffAt).getTime() - Date.now() : null;
+    const chip = (label, value, tone) =>
+      h(
+        "div",
+        { className: cx("rounded-xl px-3 py-2 min-w-[96px]", tone === "warn" ? "bg-[var(--warn-10)]" : tone === "good" ? "bg-[var(--good-15)]" : "bg-white ring-1 ring-black/5") },
+        h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, label),
+        h("p", { className: "font-display font-bold text-[var(--ink)] tabular-nums" }, value)
+      );
+    const hrs = left != null && left > 0 ? Math.floor(left / 3600000) : null;
+    return h(
+      "div",
+      { className: "flex flex-wrap gap-2 mb-6" },
+      chip("Booked in", st.booked == null ? "—" : String(st.booked)),
+      chip("Bookings", left == null ? "—" : left > 0 ? (hrs >= 24 ? Math.floor(hrs / 24) + "d " + (hrs % 24) + "h left" : hrs + "h " + Math.floor((left % 3600000) / 60000) + "m left") : "Closed"),
+      chip("Unassigned", st.unassigned == null ? "—" : String(st.unassigned), st.unassigned > 0 ? "warn" : null),
+      chip("Timetable", st.issues == null ? "—" : st.issues === 0 ? "Ready" : st.issues + (st.issues === 1 ? " issue" : " issues"), st.issues > 0 ? "warn" : st.issues === 0 ? "good" : null),
+      chip("Board", st.published == null ? "—" : st.published ? "Published" : "Not published", st.published ? "good" : null),
+      chip("Scores", st.games ? st.scored + " of " + st.games : "—", st.games && st.scored === st.games ? "good" : null)
+    );
+  }
+
   function CoordinatorPage({ tab }) {
     const activeTab = tab || "teams";
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
-      h(SectionHeading, { eyebrow: "Game Coordination", title: "This Wednesday", sub: "Real teams and a real timetable, editable on a player's behalf. Taking the roll is under Attendance." }),
+      h(SectionHeading, { eyebrow: "Game Coordination", title: GUWH.formatDate(upcomingWednesdayLocal()), sub: "Set up this week's teams and timetable, publish it, then enter the scores. The roll is under Attendance." }),
+      h(TonightStrip),
       h(CoordinatorTabs, { active: activeTab }),
       activeTab === "teams" && h(TeamsTab),
       activeTab === "schedule" && h(ScheduleTab),
@@ -1574,7 +1811,7 @@ GUWH.Pages = GUWH.Pages || {};
   // its own Admin Functions menu item — same AttendanceTab/HistoryTab built
   // earlier, just no longer nested under Teams/Timetable/Publish.
   const ATTENDANCE_TABS = [
-    { key: "roll", label: "Today's Roll", path: "/attendance" },
+    { key: "roll", label: "Roll", path: "/attendance" },
     { key: "history", label: "History", path: "/attendance/history", adminOnly: true },
   ];
 
@@ -1606,7 +1843,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
-      h(SectionHeading, { eyebrow: "Attendance", title: "This Wednesday", sub: "Confirmed players, the actual roll, and closed-out history." }),
+      h(SectionHeading, { eyebrow: "Attendance", title: "Roll call", sub: "Who's booked in, who turned up, and past rolls. Pick the week below." }),
       h(AttendanceTabs, { active: activeTab, isAdmin }),
       activeTab === "roll" && h(AttendanceTab),
       activeTab === "history" && (isAdmin ? h(HistoryTab) : h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Administrators only."))

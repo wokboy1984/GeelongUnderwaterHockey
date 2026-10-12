@@ -93,6 +93,16 @@ export async function ensureNicknameColumn(db: any): Promise<void> {
   nicknameColumnReady = true;
 }
 
+// One-or-two-games timetable rows (12 Oct 2026). Column added by migration
+// 20261012000001_timetable_game_count; ensured here too, same reason as
+// the nickname column above.
+let gameCountColumnReady = false;
+export async function ensureGameCountColumn(db: any): Promise<void> {
+  if (gameCountColumnReady) return;
+  await db.sql`alter table timetable_rows add column if not exists game_count smallint not null default 2`;
+  gameCountColumnReady = true;
+}
+
 // The name other members see: nickname if set, otherwise real first + last.
 export function memberDisplayName(row: { nickname?: string | null; first_name?: string | null; last_name?: string | null }): string {
   const nick = (row.nickname || "").trim();

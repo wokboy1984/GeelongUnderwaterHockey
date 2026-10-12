@@ -163,7 +163,31 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  function DiscussionsCard({ topics, unreadCount }) {
+  // Finish your profile (12 Oct 2026, pre-launch member review): shown at
+  // the top of the Dashboard until the member has an emergency contact
+  // and date of birth on file. The waiver is signed in person for now, so
+  // this is the only place the site collects an emergency contact; date
+  // of birth is also what unlocks the adults-only Members Forum.
+  function FinishProfileCard({ profile }) {
+    if (!profile) return null;
+    const missing = [];
+    if (!profile.emergencyName || !profile.emergencyPhone) missing.push("an emergency contact");
+    if (!profile.dateOfBirth) missing.push("your date of birth");
+    if (missing.length === 0) return null;
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--warn-10)] ring-1 ring-black/5 p-4 mb-6 flex flex-wrap items-center justify-between gap-3" },
+      h(
+        "div",
+        { className: "min-w-0" },
+        h("p", { className: "font-display font-bold text-[var(--ink)]" }, "Finish your profile"),
+        h("p", { className: "text-sm text-[var(--ink-soft)] mt-0.5" }, "Add " + missing.join(" and ") + ". We need an emergency contact for everyone in the pool.")
+      ),
+      h(Button, { size: "sm", onClick: () => navigate("/portal/profile") }, "Finish profile", h(Icon, { name: "chevronRight", size: 14 }))
+    );
+  }
+
+  function DiscussionsCard({ topics, unreadCount, loaded }) {
     const rest = topics.slice(0, 3);
     return h(
       "div",
@@ -174,7 +198,11 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "font-display font-bold text-[var(--ink)] flex items-center gap-2" }, "Latest discussions", unreadCount > 0 && h(Pill, { tone: "accent", className: "!py-0 !px-1.5" }, unreadCount)),
         h("button", { onClick: () => navigate("/portal/forum"), className: "text-xs text-[var(--accent-dark)] font-semibold underline" }, "Open Forum")
       ),
-      rest.length === 0
+      // "Loading…" until the topics request has come back (12 Oct 2026) —
+      // it used to flash "No recent discussions yet" for a second first.
+      !loaded
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
+        : rest.length === 0
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No recent discussions yet.")
         : h(
             "div",
@@ -340,6 +368,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [finance, setFinance] = React.useState(null);
     const [forumMe, setForumMe] = React.useState(null);
     const [topics, setTopics] = React.useState([]);
+    const [topicsLoaded, setTopicsLoaded] = React.useState(false);
     const [recap, setRecap] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
@@ -367,7 +396,7 @@ GUWH.Pages = GUWH.Pages || {};
     React.useEffect(() => {
       const eligible = forumMe && forumMe.eligible && forumMe.participation && forumMe.participation.optedIn;
       if (!eligible) return;
-      GUWH.Identity.authFetch("/api/forum/topics").then((r) => r.json()).then((d) => { if (d.ok) setTopics(d.topics); }).catch(() => {});
+      GUWH.Identity.authFetch("/api/forum/topics").then((r) => r.json()).then((d) => { if (d.ok) setTopics(d.topics); }).catch(() => {}).finally(() => setTopicsLoaded(true));
       // eslint-disable-next-line
     }, [forumMe && forumMe.eligible, forumMe && forumMe.participation && forumMe.participation.optedIn]);
 
@@ -431,6 +460,8 @@ GUWH.Pages = GUWH.Pages || {};
       ),
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
+
+      h(FinishProfileCard, { profile }),
 
       h(
         "div",
@@ -514,7 +545,7 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "grid sm:grid-cols-2 gap-4 items-start" },
         h(ThisWeeksGameCard, { board }),
-        forumEligible && h(DiscussionsCard, { topics: discussionTopics, unreadCount: forumMe.unreadCount })
+        forumEligible && h(DiscussionsCard, { topics: discussionTopics, unreadCount: forumMe.unreadCount, loaded: topicsLoaded })
       )
     );
   }

@@ -9,6 +9,16 @@ window.GUWH = window.GUWH || {};
   const listeners = new Set();
   let cachedMember = null; // { id, email, firstName, lastName, age, roles } — always from /api/me, never client-guessed
 
+  // Readiness (12 Oct 2026). Before this, the router checked "logged in?"
+  // and "which roles?" before the Identity widget had started and before
+  // /api/me had answered, so opening any member or coordinator link
+  // directly (a bookmark, or the reminder / "teams are up" email links)
+  // bounced a logged-in person to the login page or the Dashboard. The
+  // router now waits for isReady() on protected pages.
+  let initDone = false;
+  let memberSettled = false;
+  let refreshing = null;
+
   function ready() {
     return typeof window.netlifyIdentity !== "undefined";
   }
@@ -19,18 +29,33 @@ window.GUWH = window.GUWH || {};
   async function refreshMember() {
     if (!currentUser()) {
       cachedMember = null;
+      memberSettled = true;
       listeners.forEach((fn) => fn());
       return null;
     }
-    try {
-      const res = await authFetch("/api/me");
-      const data = await res.json();
-      cachedMember = data.ok ? data.member : null;
-    } catch (e) {
-      cachedMember = null;
-    }
-    listeners.forEach((fn) => fn());
-    return cachedMember;
+    if (refreshing) return refreshing;
+    refreshing = (async () => {
+      try {
+        const res = await authFetch("/api/me");
+        const data = await res.json();
+        cachedMember = data.ok ? data.member : null;
+      } catch (e) {
+        cachedMember = null;
+      }
+      memberSettled = true;
+      refreshing = null;
+      listeners.forEach((fn) => fn());
+      return cachedMember;
+    })();
+    return refreshing;
+  }
+
+  // True once we know who (if anyone) is logged in and, if they are, what
+  // their member record and roles are. If the widget script never loaded,
+  // don't hold pages hostage - report ready.
+  function isReady() {
+    if (!ready()) return true;
+    return initDone && (!currentUser() || memberSettled);
   }
 
   function currentMember() {
@@ -47,10 +72,18 @@ window.GUWH = window.GUWH || {};
 
   function init() {
     if (!ready()) return;
-    window.netlifyIdentity.on("login", () => { refreshMember(); listeners.forEach((fn) => fn()); });
-    window.netlifyIdentity.on("logout", () => { cachedMember = null; listeners.forEach((fn) => fn()); });
-    window.netlifyIdentity.on("init", (user) => { if (user) refreshMember(); listeners.forEach((fn) => fn()); });
+    window.netlifyIdentity.on("login", () => { memberSettled = false; refreshMember(); listeners.forEach((fn) => fn()); });
+    window.netlifyIdentity.on("logout", () => { cachedMember = null; memberSettled = true; listeners.forEach((fn) => fn()); });
+    window.netlifyIdentity.on("init", (user) => { initDone = true; if (user && !cachedMember) refreshMember(); listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.init();
+    // The widget can finish initialising before this runs (so its "init"
+    // event has already fired and won't fire again) - in which case the
+    // member record was never fetched and roles stayed empty. Its stored
+    // session is readable straight away, so don't wait on the event.
+    initDone = true;
+    if (currentUser() && !cachedMember) refreshMember();
+    else if (!currentUser()) memberSettled = true;
+    listeners.forEach((fn) => fn());
   }
 
   function onChange(fn) {
@@ -98,5 +131,5 @@ window.GUWH = window.GUWH || {};
     return fetch(url, Object.assign({}, options, { headers }));
   }
 
-  GUWH.Identity = { init, onChange, currentUser, login, signup, logout, updateEmail, authFetch, currentMember, currentRoles, hasRole, refreshMember };
+  GUWH.Identity = { init, onChange, currentUser, login, signup, logout, updateEmail, authFetch, currentMember, currentRoles, hasRole, refreshMember, isReady };
 })();

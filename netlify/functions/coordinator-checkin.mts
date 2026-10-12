@@ -1,6 +1,6 @@
 import {getDatabase} from '@netlify/database';
 import {getVerifiedUser,ensureMember,hasPermission,logAudit,unauthorized,forbidden} from './_shared/roles.mts';
-import {clubToday} from './_shared/attendance.mts';
+import {clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
 const json=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 
 // Defensive, idempotent — belt-and-braces alongside the real migration
@@ -34,11 +34,20 @@ export default async(req:Request)=>{
   const db=getDatabase(),caller=await ensureMember(db,user);
   if(!hasPermission(caller.roles,'mark_actual_attendance'))return forbidden();
   await ensureCloseoutTable(db);
-  const sessionDate=clubToday();
+  // The roll belongs to a game night (12 Oct 2026, Cheongy) - it used to
+  // record against *today*, so a roll ticked the morning after (and the
+  // game fees it charges) landed on the wrong date. ?date= / sessionDate
+  // picks the Wednesday; default is defaultRollDateISO() (Thu/Fri: the
+  // night just gone, otherwise the upcoming Wednesday).
+  const body=req.method==='POST'?await req.json().catch(()=>null):null;
+  if(req.method==='POST'&&!body)return json({ok:false,error:'Nothing to save'},400);
+  const asked=req.method==='POST'?body.sessionDate:new URL(req.url).searchParams.get('date');
+  const sessionDate=asked?requestedSessionDate(asked):defaultRollDateISO();
+  const today=clubToday();
   if(req.method==='POST'){
-   const body=await req.json().catch(()=>null);
-   if(!body)return json({ok:false,error:'Nothing to save'},400);
-   if(body.sessionDate!==sessionDate)return json({ok:false,error:'The date has changed. Refresh the attendance list.'},409);
+   if(asked&&asked!==sessionDate)return json({ok:false,error:'That date is not a game night.'},400);
+   const writes=body.action==='save'||(body.action!=='close'&&body.action!=='reopen');
+   if(writes&&sessionDate>today)return json({ok:false,error:'The roll opens on game day - this Wednesday hasn\'t happened yet.'},400);
 
    if(body.action==='close'||body.action==='reopen'){
     if(body.action==='close'){
@@ -96,7 +105,7 @@ export default async(req:Request)=>{
    from members m left join session_attendance a on a.member_id=m.id and a.session_date=${sessionDate}::date
    order by m.first_name,m.last_name,m.id`;
   const closeout=await closeoutFor(db,sessionDate);
-  return json({ok:true,sessionDate,players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null});
+  return json({ok:true,sessionDate,today,upcoming:nextSessionDateISO(),players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null});
  }catch(error){console.error('Attendance request failed',error);return json({ok:false,error:'Could not load or save attendance. Please try again.'},500);}
 };
 export const config={path:'/api/coordinator/checkin'};

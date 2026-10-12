@@ -298,7 +298,24 @@
   // /portal, /coordinator, /attendance etc. is gated below.
   const WAIVER_EXEMPT_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/portal", "/portal/waiver"];
 
+  // Online waiver switched OFF (12 Oct 2026, Cheongy): for now the waiver
+  // is signed in person at the pool, so new members go straight to the
+  // Dashboard. Flip to true to bring the online gate back - and set
+  // ONLINE_WAIVER_REQUIRED in netlify/functions/booking.mts to match.
+  const ONLINE_WAIVER_REQUIRED = false;
+
+  // Pages anyone can see without logging in - they never wait for login.
+  const OPEN_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/state-titles"];
+
   function Route(path) {
+    // Wait until we know who's logged in and what roles they have before
+    // deciding on a protected page (12 Oct 2026) - otherwise a direct link
+    // (bookmark, email) bounced logged-in people to the login page or the
+    // Dashboard. See isReady() in js/identity.js.
+    if (GUWH.Identity && OPEN_PATHS.indexOf(path) === -1 && !GUWH.Identity.isReady()) {
+      return h(Container, { className: "py-24 text-center text-sm text-[var(--ink-soft)]" }, "Loading…");
+    }
+
     // Digital waiver gate (live site only, real backend). Anyone logged in
     // whose member record shows no waiver_accepted_at gets sent to sign it
     // before doing anything else in the portal or admin areas. Existing
@@ -309,7 +326,7 @@
     // login while /api/me is still loading — skip the check then rather
     // than bounce on incomplete data; the per-route currentUser() checks
     // below still apply in the meantime.
-    if (GUWH.Identity && GUWH.Identity.currentUser() && WAIVER_EXEMPT_PATHS.indexOf(path) === -1) {
+    if (ONLINE_WAIVER_REQUIRED && GUWH.Identity && GUWH.Identity.currentUser() && WAIVER_EXEMPT_PATHS.indexOf(path) === -1) {
       const member = GUWH.Identity.currentMember();
       if (member && !member.waiverAccepted) { navigate("/portal/waiver"); return null; }
     }

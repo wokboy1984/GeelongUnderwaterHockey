@@ -14,9 +14,18 @@ GUWH.Pages = GUWH.Pages || {};
   // plain link, so nothing is sent until the person hits send in that app.
   // Messenger's link only opens on phones with the Messenger app installed;
   // on a computer it falls back to copying the link and opening messenger.com.
-  function ShareRow({ text, url, dark }) {
+  // `to` (12 Oct 2026): optional phone number or email of the friend. A
+  // phone number pre-fills the recipient in Text message and WhatsApp
+  // (Australian 04xx numbers converted to +61 for WhatsApp); an email adds
+  // an Email button addressed to them.
+  function ShareRow({ text, url, dark, to }) {
     const full = text + " " + url;
     const enc = encodeURIComponent;
+    const raw = String(to || "").trim();
+    const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw);
+    const digits = raw.replace(/[^\d+]/g, "");
+    const isPhone = !isEmail && digits.replace(/\D/g, "").length >= 8;
+    const waNumber = isPhone ? (digits.startsWith("+") ? digits.slice(1) : digits.startsWith("0") ? "61" + digits.slice(1) : digits).replace(/\D/g, "") : "";
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const [copied, setCopied] = React.useState(false);
     const btn = dark
@@ -41,12 +50,31 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "flex flex-wrap gap-2" },
-        h("a", { className: btn, href: "https://wa.me/?text=" + enc(full), target: "_blank", rel: "noopener" }, "WhatsApp"),
+        h("a", { className: btn, href: "https://wa.me/" + waNumber + "?text=" + enc(full), target: "_blank", rel: "noopener" }, "WhatsApp"),
         h("a", { className: btn, href: "fb-messenger://share/?link=" + enc(url), onClick: messenger }, "Messenger"),
-        h("a", { className: btn, href: "sms:?&body=" + enc(full) }, "Text message"),
+        h("a", { className: btn, href: "sms:" + (isPhone ? digits : "") + "?&body=" + enc(full) }, "Text message"),
+        isEmail && h("a", { className: btn, href: "mailto:" + raw + "?subject=" + enc("Come try underwater hockey") + "&body=" + enc(full) }, "Email"),
         h("button", { type: "button", className: btn, onClick: more }, h(Icon, { name: "share", size: 14 }), "More")
       ),
       copied && h("p", { className: dark ? "text-xs text-white/70" : "text-xs text-[var(--ink-soft)]", role: "status" }, "Invite copied - paste it into your message.")
+    );
+  }
+
+  // After an invite is saved (12 Oct 2026, pre-launch review): "Send
+  // invite" used to only log the name, so it read as if the friend had
+  // been messaged. Now it saves and then shows the share buttons with a
+  // message addressed to them by name.
+  function personalMessage(name) {
+    const first = String(name || "").trim().split(" ")[0];
+    return (first ? "Hey " + first + "! " : "") + MESSAGE;
+  }
+  function SendItNow({ sent, url }) {
+    if (!sent) return null;
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--accent-12)] p-4 flex flex-col gap-3", role: "status" },
+      h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-1.5" }, h(Icon, { name: "check", size: 14, className: "text-[var(--good-dark)]" }), "Saved. Now send it to " + sent.name + ":"),
+      h(ShareRow, { text: personalMessage(sent.name), url, to: sent.contact })
     );
   }
 
@@ -85,7 +113,7 @@ GUWH.Pages = GUWH.Pages || {};
         const data = await res.json();
         if (data.ok) {
           setInvites(data.invites);
-          setJustSent(true);
+          setJustSent({ name: friendName.trim(), contact: contact.trim() });
           setFriendName("");
           setContact("");
         } else {
@@ -129,8 +157,8 @@ GUWH.Pages = GUWH.Pages || {};
           h("h3", { className: "font-display font-bold text-[var(--ink)]" }, "Invite someone for " + GUWH.formatDate(wed)),
           h(FormField, { label: "Their name" }, h("input", { className: inputCls, value: friendName, onChange: (e) => setFriendName(e.target.value) })),
           h(FormField, { label: "Phone or email (optional)" }, h("input", { className: inputCls, value: contact, onChange: (e) => setContact(e.target.value) })),
-          h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Send invite"),
-          justSent && h("p", { className: "text-sm text-[var(--good-dark)] flex items-center gap-1.5" }, h(Icon, { name: "check", size: 14 }), "Invite logged — nudge them to book on Try Underwater Hockey.")
+          h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Save & send invite"),
+          h(SendItNow, { sent: justSent, url: inviteLink })
         ),
 
         h(
@@ -149,7 +177,7 @@ GUWH.Pages = GUWH.Pages || {};
         loading
           ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
           : invites.length === 0
-          ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No invites yet — send your first one above.")
+          ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No invites yet — add your first one above.")
           : h(
               "div",
               { className: "rounded-2xl bg-[var(--sand)] divide-y divide-black/5" },
@@ -203,7 +231,7 @@ GUWH.Pages = GUWH.Pages || {};
         });
         const data = await res.json();
         if (data.ok) {
-          setJustSent(true);
+          setJustSent({ name: friendName.trim(), contact: contact.trim() });
           setFriendName("");
           setContact("");
           onSent && onSent(data.invites);
@@ -231,8 +259,8 @@ GUWH.Pages = GUWH.Pages || {};
         { onSubmit: send, className: "flex flex-col gap-4" },
         h(FormField, { label: "Their name" }, h("input", { className: inputCls, value: friendName, onChange: (e) => setFriendName(e.target.value), disabled: sending, autoFocus: true })),
         h(FormField, { label: "Phone or email (optional)" }, h("input", { className: inputCls, value: contact, onChange: (e) => setContact(e.target.value), disabled: sending })),
-        h(Button, { type: "submit", disabled: sending || !friendName.trim() }, h(Icon, { name: "plus", size: 16 }), sending ? "Sending…" : "Send invite"),
-        justSent && h("p", { className: "text-sm text-[var(--good-dark)] flex items-center gap-1.5", role: "status" }, h(Icon, { name: "check", size: 14 }), "Invite logged — nudge them to book on Try Underwater Hockey.")
+        h(Button, { type: "submit", disabled: sending || !friendName.trim() }, h(Icon, { name: "plus", size: 16 }), sending ? "Saving…" : "Save & send invite"),
+        h(SendItNow, { sent: justSent, url: inviteLink })
       ),
       h(
         "div",

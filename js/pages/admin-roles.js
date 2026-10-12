@@ -72,6 +72,26 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // In-person waiver (12 Oct 2026): record (or undo) a paper waiver.
+    async function setWaiver(member, signed) {
+      const key = member.id + ":waiver";
+      setBusy(key);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          body: JSON.stringify({ action: "waiver", memberEmail: member.email, signed }),
+        });
+        const data = await res.json();
+        if (data.ok) setMembers((prev) => prev.map((m) => (m.id === data.member.id ? data.member : m)));
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(null);
+      }
+    }
+
     async function setGrade(member, grade) {
       const key = member.id + ":grade";
       setBusy(key);
@@ -160,8 +180,18 @@ GUWH.Pages = GUWH.Pages || {};
                       "td",
                       { className: "px-4 py-3" },
                       m.waiverSigned
-                        ? h(Pill, { tone: "good", className: "!py-0.5 !px-2 !text-[10px]" }, "Signed")
-                        : h(Pill, { tone: "warn", className: "!py-0.5 !px-2 !text-[10px]" }, "Not signed")
+                        ? h(
+                            "div",
+                            { className: "flex flex-col items-start gap-1" },
+                            h(Pill, { tone: "good", className: "!py-0.5 !px-2 !text-[10px]" }, "Signed"),
+                            h("button", { type: "button", className: "text-[11px] text-[var(--ink-soft)] underline disabled:opacity-40", disabled: busy === m.id + ":waiver", onClick: () => setWaiver(m, false) }, "Undo")
+                          )
+                        : h(
+                            "div",
+                            { className: "flex flex-col items-start gap-1" },
+                            h(Pill, { tone: "warn", className: "!py-0.5 !px-2 !text-[10px]" }, "Not signed"),
+                            h(Button, { type: "button", size: "sm", variant: "secondary", className: "!py-1 !px-2.5 !text-xs whitespace-nowrap", disabled: busy === m.id + ":waiver", onClick: () => setWaiver(m, true) }, "Mark signed")
+                          )
                     ),
                     h(
                       "td",

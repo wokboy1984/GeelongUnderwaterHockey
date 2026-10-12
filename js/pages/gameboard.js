@@ -103,12 +103,13 @@ GUWH.Pages = GUWH.Pages || {};
   // when it's the logged-in member's own team (see highlightTeamName below)
   // — an accent border/background plus a "YOUR TEAM" label, never colour
   // alone, so it still reads under colour-blindness or on a bad screen.
-  function teamCell(name, highlightTeamName) {
+  function teamCell(name, highlightTeamName, extraClass, prefix) {
     const mine = !!(name && highlightTeamName && name === highlightTeamName);
     return h(
       "div",
-      { className: cx("py-2.5 border-b border-black/5 text-sm font-semibold", mine ? "text-[var(--accent-dark)]" : "text-[var(--ink)]") },
+      { className: cx("py-2.5 border-b border-black/5 text-sm font-semibold", extraClass, mine ? "text-[var(--accent-dark)]" : "text-[var(--ink)]") },
       mine && h("span", { className: "block text-[9px] font-bold uppercase tracking-wide text-[var(--accent-dark)]" }, "Your team"),
+      prefix && h("span", { className: "text-[var(--ink-soft)] font-normal" }, prefix),
       h("span", { className: mine ? "underline decoration-2 decoration-[var(--accent)] underline-offset-2" : "" }, name || "—")
     );
   }
@@ -126,9 +127,94 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  function MobileTimetable({ rows, highlightTeamName }) {
+    return h(
+        "div",
+        { className: "md:hidden flex flex-col gap-3" },
+        rows.map((row) => {
+          const poolA = row.poolGames && row.poolGames.find((p) => p.pool === "Pool A");
+          const poolB = row.poolGames && row.poolGames.find((p) => p.pool === "Pool B");
+          return h(
+            "div",
+            { key: row.id, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+            h(
+              "div",
+              { className: "flex items-center gap-2 mb-2" },
+              h("span", { className: "font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" }, minToClockReal(row.startMin) || "—"),
+              h("span", { className: "text-sm font-bold text-[var(--ink)]" }, row.label)
+            ),
+            !row.isGame
+              ? row.notes && h("p", { className: "text-xs text-[var(--ink-soft)]" }, row.notes)
+              : h(
+                  "div",
+                  { className: "flex flex-col gap-2.5" },
+                  ((row.gameCount || (row.poolGames || []).length) === 1
+                    ? [{ key: "", data: poolA }]
+                    : [
+                    { key: "Pool A", data: poolA },
+                    { key: "Pool B", data: poolB },
+                  ]).map(
+                    ({ key, data }) =>
+                      (data && (data.blackTeamName || data.whiteTeamName)) &&
+                      h(
+                        "div",
+                        { key: key || "single" },
+                        key && h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, key),
+                        h(
+                          "p",
+                          { className: "text-sm text-[var(--ink)]" },
+                          h("span", { className: "text-[var(--ink-soft)]" }, "Black: "),
+                          teamNameInline(data.blackTeamName, highlightTeamName),
+                          h("span", { className: "text-[var(--ink-soft)] ml-3" }, "White: "),
+                          teamNameInline(data.whiteTeamName, highlightTeamName)
+                        ),
+                        data.referees && data.referees.length > 0 && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(data.referees))
+                      )
+                  )
+                )
+          );
+        })
+      );
+  }
+
   function PublicTimetable({ rows, highlightTeamName }) {
     if (!rows || rows.length === 0) {
       return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No timetable rows yet.");
+    }
+    // Every game tonight is one-at-a-time (12 Oct 2026): a simpler desktop
+    // grid - Time / Black Stick / White Stick - instead of four pool columns.
+    const anyDouble = rows.some((r) => r.isGame && (r.gameCount || (r.poolGames || []).length) === 2);
+    if (!anyDouble) {
+      const head = "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10";
+      const desktop = h(
+        "div",
+        { className: "hidden md:grid gap-x-3 gap-y-0", style: { gridTemplateColumns: "88px 1fr 1fr" } },
+        h("div", { className: head }, "Time"),
+        h("div", { className: head }, "Black Stick"),
+        h("div", { className: head }, "White Stick"),
+        rows.map((row) => {
+          const g = (row.poolGames || [])[0];
+          const time = h("div", { key: row.id + "-t", className: "py-2.5 border-b border-black/5 font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" }, minToClockReal(row.startMin) || "—");
+          if (!row.isGame) {
+            return h(
+              React.Fragment,
+              { key: row.id },
+              time,
+              h("div", { className: "py-2.5 border-b border-black/5 col-span-2" }, h("span", { className: "text-sm font-bold text-[var(--ink)]" }, row.label), row.notes && h("span", { className: "text-xs text-[var(--ink-soft)] ml-2" }, row.notes))
+            );
+          }
+          return h(
+            React.Fragment,
+            { key: row.id },
+            time,
+            teamCell(g && g.blackTeamName, highlightTeamName),
+            teamCell(g && g.whiteTeamName, highlightTeamName),
+            g && g.referees && g.referees.length > 0 &&
+              h(React.Fragment, null, h("div", { className: "pb-2.5 border-b border-black/5" }), h("div", { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" }, "Referees: " + refNames(g.referees)))
+          );
+        })
+      );
+      return h(React.Fragment, null, desktop, h(MobileTimetable, { rows, highlightTeamName }));
     }
     return h(
       React.Fragment,
@@ -164,6 +250,28 @@ GUWH.Pages = GUWH.Pages || {};
               )
             );
           }
+          // One game at a time (12 Oct 2026): Black and White each span both
+          // pool columns, and the referee line spans all four.
+          if ((row.gameCount || (row.poolGames || []).length) === 1) {
+            // One game at a time (12 Oct 2026): a single matchup across all
+            // four pool columns ("Black: X v White: Y"), referees underneath.
+            const refs = poolA && poolA.referees && poolA.referees.length > 0 ? poolA.referees : null;
+            return h(
+              React.Fragment,
+              { key: row.id },
+              timeCell,
+              h(
+                "div",
+                { className: "py-2.5 border-b border-black/5 col-span-4 text-sm font-semibold text-[var(--ink)] flex flex-wrap items-baseline gap-x-2" },
+                h("span", { className: "text-[var(--ink-soft)] font-normal" }, "Black:"),
+                teamNameInline(poolA && poolA.blackTeamName, highlightTeamName),
+                h("span", { className: "text-[var(--ink-soft)] font-normal px-1" }, "v"),
+                h("span", { className: "text-[var(--ink-soft)] font-normal" }, "White:"),
+                teamNameInline(poolA && poolA.whiteTeamName, highlightTeamName),
+                refs && h("span", { className: "basis-full text-xs font-normal text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(refs))
+              )
+            );
+          }
           return h(
             React.Fragment,
             { key: row.id },
@@ -192,51 +300,7 @@ GUWH.Pages = GUWH.Pages || {};
         })
       ),
       // ---- Mobile: one card per time slot, pools stacked, clearly labelled. ----
-      h(
-        "div",
-        { className: "md:hidden flex flex-col gap-3" },
-        rows.map((row) => {
-          const poolA = row.poolGames && row.poolGames.find((p) => p.pool === "Pool A");
-          const poolB = row.poolGames && row.poolGames.find((p) => p.pool === "Pool B");
-          return h(
-            "div",
-            { key: row.id, className: "rounded-xl bg-[var(--sand)] p-3.5" },
-            h(
-              "div",
-              { className: "flex items-center gap-2 mb-2" },
-              h("span", { className: "font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" }, minToClockReal(row.startMin) || "—"),
-              h("span", { className: "text-sm font-bold text-[var(--ink)]" }, row.label)
-            ),
-            !row.isGame
-              ? row.notes && h("p", { className: "text-xs text-[var(--ink-soft)]" }, row.notes)
-              : h(
-                  "div",
-                  { className: "flex flex-col gap-2.5" },
-                  [
-                    { key: "Pool A", data: poolA },
-                    { key: "Pool B", data: poolB },
-                  ].map(
-                    ({ key, data }) =>
-                      (data && (data.blackTeamName || data.whiteTeamName)) &&
-                      h(
-                        "div",
-                        { key },
-                        h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, key),
-                        h(
-                          "p",
-                          { className: "text-sm text-[var(--ink)]" },
-                          h("span", { className: "text-[var(--ink-soft)]" }, "Black: "),
-                          teamNameInline(data.blackTeamName, highlightTeamName),
-                          h("span", { className: "text-[var(--ink-soft)] ml-3" }, "White: "),
-                          teamNameInline(data.whiteTeamName, highlightTeamName)
-                        ),
-                        data.referees && data.referees.length > 0 && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(data.referees))
-                      )
-                  )
-                )
-          );
-        })
-      )
+      h(MobileTimetable, { rows, highlightTeamName })
     );
   }
 
@@ -301,7 +365,7 @@ GUWH.Pages = GUWH.Pages || {};
   function ResultsCard({ rows, mvp, highlightTeamName }) {
     const games = [];
     (rows || []).forEach((row) => (row.poolGames || []).forEach((pg) => {
-      if (pg.blackScore != null && pg.whiteScore != null) games.push(Object.assign({ rowLabel: row.label }, pg));
+      if (pg.blackScore != null && pg.whiteScore != null) games.push(Object.assign({ rowLabel: row.label, single: (row.gameCount || (row.poolGames || []).length) === 1 }, pg));
     }));
     const mvps = mvp || [];
     if (games.length === 0 && mvps.length === 0) return null;
@@ -325,7 +389,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { key: i, className: "py-2.5" },
-            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, pg.rowLabel + " · " + pg.pool),
+            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, pg.single ? pg.rowLabel : pg.rowLabel + " · " + pg.pool),
             h(
               "div",
               { className: "flex items-center justify-between gap-3 mt-0.5" },

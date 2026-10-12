@@ -28,6 +28,12 @@ function lastNameFrom(fullName: string | undefined): string {
   return parts.length > 1 ? parts.slice(1).join(" ") : "";
 }
 
+// Online waiver switched OFF (12 Oct 2026, Cheongy): the waiver is signed
+// in person at the pool for now, so booking no longer checks
+// waiver_accepted_at. Set to true (together with ONLINE_WAIVER_REQUIRED in
+// js/app.js) to bring the online waiver back.
+const ONLINE_WAIVER_REQUIRED = false;
+
 export default async (req: Request, context: Context) => {
   const user = await getVerifiedUser(req);
   if (!user) {
@@ -82,7 +88,7 @@ export default async (req: Request, context: Context) => {
         }
       }
 
-      if (wantsIn) {
+      if (wantsIn && ONLINE_WAIVER_REQUIRED) {
         const [waiver] = await db.sql`select waiver_accepted_at from members where id = ${memberId}`;
         if (!waiver || !waiver.waiver_accepted_at) {
           return new Response(JSON.stringify({ ok: false, error: "Please sign the club waiver before booking in — it's on your Dashboard." }), {

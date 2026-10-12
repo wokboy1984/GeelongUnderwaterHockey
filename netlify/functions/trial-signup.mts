@@ -22,7 +22,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, unauthorized, forbidden } from "./_shared/roles.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -81,7 +81,8 @@ export default async (req: Request, context: Context) => {
       if (!hasPermission(caller.roles, "manage_others_attendance")) {
         return forbidden("Only Game Coordinators and Administrators can see trial signups");
       }
-      const sessionDate = nextSessionDateISO();
+      const askedDate = url.searchParams.get("date");
+      const sessionDate = askedDate ? requestedSessionDate(askedDate) : nextSessionDateISO();
       const rows = await db.sql`
         select id, first_name, last_name, email, phone, age, fin_size, handed, emergency_name, emergency_phone, heard_from, created_at
         from trial_signups

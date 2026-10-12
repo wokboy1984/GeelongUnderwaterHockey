@@ -294,19 +294,12 @@ GUWH.Pages = GUWH.Pages || {};
       { className: "py-10 sm:py-14 max-w-3xl" },
       h(SectionHeading, { eyebrow: "My profile", title: member.firstName + " " + member.lastName }),
 
-      h(
-        "div",
-        { className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 mb-6" },
-        h(PhotoUploader, { member, onChange: (photoVersion) => setMember((m) => Object.assign({}, m, { photoVersion })) })
-      ),
-
-      h(EmailUpdateCard, { currentEmail: member.email }),
-
-      h("div", { className: "mt-6" }, h(ForumPrefsCard)),
-
+      // Order (12 Oct 2026, pre-launch member review): personal details
+      // first — that's what a new member comes here to fill in — then
+      // photo, login email and forum settings underneath.
       h(
         "form",
-        { onSubmit: save, className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 mt-6 flex flex-col gap-5" },
+        { onSubmit: save, className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 flex flex-col gap-5" },
 
         error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
 
@@ -382,7 +375,17 @@ GUWH.Pages = GUWH.Pages || {};
           h(Button, { type: "submit" }, "Save profile"),
           savedFlash && h("span", { className: "text-sm text-[var(--good-dark)] flex items-center gap-1.5" }, h(Icon, { name: "check", size: 14 }), "Saved")
         )
-      )
+      ),
+
+      h(
+        "div",
+        { className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 mt-6" },
+        h(PhotoUploader, { member, onChange: (photoVersion) => setMember((m) => Object.assign({}, m, { photoVersion })) })
+      ),
+
+      h("div", { className: "mt-6" }, h(EmailUpdateCard, { currentEmail: member.email })),
+
+      h("div", { className: "mt-6" }, h(ForumPrefsCard))
     );
   }
 
