@@ -9,6 +9,47 @@ GUWH.Pages = GUWH.Pages || {};
 
   const MESSAGE = "I'm playing underwater hockey in Geelong this Wednesday. Your first three sessions are free and they'll supply the gear. Come give it a crack.";
 
+  // One-tap share row (2 Oct 2026): WhatsApp, Messenger, phone message
+  // (SMS/iMessage), plus the phone's own share sheet as "More". Each is a
+  // plain link, so nothing is sent until the person hits send in that app.
+  // Messenger's link only opens on phones with the Messenger app installed;
+  // on a computer it falls back to copying the link and opening messenger.com.
+  function ShareRow({ text, url, dark }) {
+    const full = text + " " + url;
+    const enc = encodeURIComponent;
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const [copied, setCopied] = React.useState(false);
+    const btn = dark
+      ? "inline-flex items-center gap-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white px-3.5 py-2 text-sm font-semibold transition"
+      : "inline-flex items-center gap-1.5 rounded-full bg-white ring-1 ring-black/10 hover:ring-[var(--accent)] text-[var(--ink)] px-3.5 py-2 text-sm font-semibold transition";
+
+    function messenger(ev) {
+      if (isMobile) return; // let the fb-messenger:// link open the app
+      ev.preventDefault();
+      if (navigator.clipboard) navigator.clipboard.writeText(full).catch(() => {});
+      setCopied(true);
+      window.open("https://www.messenger.com/", "_blank", "noopener");
+    }
+    async function more() {
+      const r = await shareOrCopy({ title: "Come play underwater hockey", text, url });
+      if (r === "copied") setCopied(true);
+    }
+
+    return h(
+      "div",
+      { className: "flex flex-col gap-2" },
+      h(
+        "div",
+        { className: "flex flex-wrap gap-2" },
+        h("a", { className: btn, href: "https://wa.me/?text=" + enc(full), target: "_blank", rel: "noopener" }, "WhatsApp"),
+        h("a", { className: btn, href: "fb-messenger://share/?link=" + enc(url), onClick: messenger }, "Messenger"),
+        h("a", { className: btn, href: "sms:?&body=" + enc(full) }, "Text message"),
+        h("button", { type: "button", className: btn, onClick: more }, h(Icon, { name: "share", size: 14 }), "More")
+      ),
+      copied && h("p", { className: dark ? "text-xs text-white/70" : "text-xs text-[var(--ink-soft)]", role: "status" }, "Invite copied - paste it into your message.")
+    );
+  }
+
   // Real invites (live site) — backed by the `invites` table via /api/invites.
   function RealBringAMatePage() {
     const wed = GUWH.nextWednesday();
@@ -97,7 +138,7 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "rounded-3xl bg-[var(--navy)] text-white p-6 flex flex-col gap-4" },
           h("h3", { className: "font-display font-bold" }, "Or just share the link"),
           h("p", { className: "text-sm text-white/70 leading-relaxed" }, "“" + MESSAGE + "”"),
-          h(Button, { variant: "dark", className: "!bg-white/15 hover:!bg-white/25", onClick: shareLink }, h(Icon, { name: "share", size: 16 }), "Share invitation")
+          h(ShareRow, { text: MESSAGE, url: inviteLink, dark: true })
         )
       ),
 
@@ -195,9 +236,9 @@ GUWH.Pages = GUWH.Pages || {};
       ),
       h(
         "div",
-        { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-wrap items-center justify-between gap-3" },
-        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Or just share the invite link"),
-        h(Button, { size: "sm", variant: "ghost", onClick: shareLink, type: "button" }, h(Icon, { name: "share", size: 14 }), "Share")
+        { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Or share the invite straight from your phone"),
+        h(ShareRow, { text: MESSAGE, url: inviteLink })
       )
     );
   }

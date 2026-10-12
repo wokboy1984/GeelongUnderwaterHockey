@@ -143,7 +143,9 @@ GUWH.Pages = GUWH.Pages || {};
                     { className: "mt-2 text-sm text-white/70 leading-relaxed max-w-xs" },
                     "Book in, see who else is coming and get everything you need for this week's game."
                   ),
-                  confirmed !== null &&
+                  // Only shown at 8+ — a low number reads as a quiet club to a
+                  // newcomer and as "nobody's going" to a regular (2 Oct 2026).
+                  confirmed !== null && confirmed >= 8 &&
                     h(
                       "p",
                       { className: "mt-3 text-sm" },
@@ -298,7 +300,7 @@ GUWH.Pages = GUWH.Pages || {};
             "div",
             null,
             h(Pill, { tone: "accent" }, h(Icon, { name: "heart", size: 14 }), "After the whistle"),
-            h("h3", { className: "font-display text-2xl font-bold text-[var(--ink)] mt-3" }, "Wednesday doesn't end at 7:45."),
+            h("h3", { className: "font-display text-2xl font-bold text-[var(--ink)] mt-3" }, "Wednesday doesn't end at 7:30."),
             h(
               "p",
               { className: "mt-2 text-[var(--ink-soft)] max-w-md" },

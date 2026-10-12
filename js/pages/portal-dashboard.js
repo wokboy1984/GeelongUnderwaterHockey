@@ -73,6 +73,28 @@ GUWH.Pages = GUWH.Pages || {};
   // (13 Sept 2026, Cheongy's request) — same compact form used before in
   // the modal, just rendered inline now. The standalone /portal/bring-a-mate
   // page and its own layout are still completely untouched.
+  // Bring a Mate as a single button (2 Oct 2026, Cheongy's request) — sits
+  // in the right column next to Who's Coming and opens the full Bring a
+  // Mate page (invite form + WhatsApp/Messenger/Text share buttons).
+  function BringAMateButton() {
+    return h(
+      "button",
+      {
+        onClick: () => navigate("/portal/bring-a-mate"),
+        className: "w-full rounded-2xl bg-[var(--accent-12)] p-4 text-left hover:ring-2 hover:ring-[var(--accent)] transition flex items-center justify-between gap-3",
+      },
+      h(
+        "div",
+        null,
+        h("p", { className: "font-display font-bold text-[var(--accent-dark)]" }, "Bring a Mate"),
+        h("p", { className: "text-xs text-[var(--ink-70)] mt-0.5" }, "Their first three sessions are free. Invite or share in one tap.")
+      ),
+      h("span", { className: "h-10 w-10 rounded-full bg-[var(--accent)] text-white flex items-center justify-center shrink-0" }, h(Icon, { name: "share", size: 18 }))
+    );
+  }
+
+  // Inline form version — no longer on the dashboard (replaced by
+  // BringAMateButton above), kept in case it's wanted back.
   function BringAMateCard() {
     return h(
       "div",
@@ -165,11 +187,145 @@ GUWH.Pages = GUWH.Pages || {};
                 h(
                   "p",
                   { className: "text-xs text-[var(--ink-soft)]" },
-                  t.categoryName + " · " + t.lastActivityBy + " · " + GUWH.formatRelativeTime(t.lastActivityAt) + (t.replyCount ? " · " + t.replyCount + (t.replyCount === 1 ? " reply" : " replies") : "")
+                  // "Last reply by" (2 Oct 2026): lastActivityBy is whoever posted
+                  // last, which read as the topic's author. Now labelled.
+                  t.categoryName + " · " +
+                    (t.replyCount
+                      ? "Started by " + t.authorDisplay + " · last reply " + t.lastActivityBy + " " + GUWH.formatRelativeTime(t.lastActivityAt) + " · " + t.replyCount + (t.replyCount === 1 ? " reply" : " replies")
+                      : "Posted by " + t.authorDisplay + " · " + GUWH.formatRelativeTime(t.lastActivityAt))
                 )
               )
             )
           )
+    );
+  }
+
+  // ---- Booking cut-off countdown (2 Oct 2026). cutoffAt comes from the
+  // server (/api/booking), which also enforces it — see bookingCutoffFor()
+  // in _shared/attendance.mts. Ticks once a minute.
+  function formatCountdown(ms) {
+    const mins = Math.max(0, Math.floor(ms / 60000));
+    const days = Math.floor(mins / 1440);
+    const hrs = Math.floor((mins % 1440) / 60);
+    const m = mins % 60;
+    if (days > 0) return days + (days === 1 ? " day " : " days ") + hrs + (hrs === 1 ? " hr" : " hrs");
+    if (hrs > 0) return hrs + (hrs === 1 ? " hr " : " hrs ") + m + " min";
+    return m + " min";
+  }
+  function useNow(intervalMs) {
+    const [now, setNow] = React.useState(() => Date.now());
+    React.useEffect(() => {
+      const t = setInterval(() => setNow(Date.now()), intervalMs);
+      return () => clearInterval(t);
+    }, [intervalMs]);
+    return now;
+  }
+  function BookingCountdown({ cutoffAt }) {
+    const now = useNow(60000);
+    if (!cutoffAt) return null;
+    const cutoff = new Date(cutoffAt);
+    const left = cutoff.getTime() - now;
+    // e.g. "Wed 9:00am" — built by hand so it reads the same on every phone.
+    const parts = new Intl.DateTimeFormat("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Australia/Melbourne" }).formatToParts(cutoff);
+    const part = (t) => (parts.find((x) => x.type === t) || {}).value || "";
+    const when = part("weekday") + " " + part("hour") + ":" + part("minute") + part("dayPeriod").toLowerCase().replace(/\s|\./g, "");
+    return h(
+      "p",
+      { className: "mt-4 text-xs text-white/60 leading-relaxed" },
+      left > 0
+        ? h(React.Fragment, null, "Bookings close " + when + " · ", h("span", { className: "font-semibold text-white tabular-nums whitespace-nowrap" }, formatCountdown(left) + " to go"))
+        : "Bookings closed " + when + "."
+    );
+  }
+
+  // ---- Who's coming (2 Oct 2026): names + photos of everyone booked in.
+  // Name is nickname if set, otherwise real name (server-side, see
+  // memberDisplayName in _shared/roles.mts).
+  function WhosComingCard({ confirmed }) {
+    const list = confirmed || [];
+    return h(
+      "div",
+      { className: "rounded-2xl bg-white ring-1 ring-black/5 p-4" },
+      h(
+        "div",
+        { className: "flex items-baseline justify-between mb-3" },
+        h("p", { className: "font-display font-bold text-[var(--ink)]" }, "Who's coming"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] tabular-nums" }, list.length + (list.length === 1 ? " player" : " players"))
+      ),
+      list.length === 0
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No one's booked in yet - be the first.")
+        : h(
+            "div",
+            { className: "flex flex-wrap gap-2" },
+            list.map((p) =>
+              h(
+                "div",
+                { key: p.id, className: "flex items-center gap-2 rounded-full bg-[var(--sand)] pl-1 pr-3 py-1" },
+                h(MemberPhoto, { memberId: p.id, version: p.photoVersion, size: 28 }),
+                h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, p.name)
+              )
+            )
+          )
+    );
+  }
+
+  // ---- Last game recap (2 Oct 2026): results, MVP and top scorers from
+  // the most recent past session, via /api/recap. Renders nothing at all
+  // when nothing was recorded (Cheongy's call: no empty card).
+  function RecapCard({ recap }) {
+    if (!recap) return null;
+    const dateLabel = GUWH.formatDate(new Date(recap.sessionDate + "T00:00:00"));
+    return h(
+      "div",
+      { className: "rounded-2xl bg-white ring-1 ring-black/5 p-4 mb-6" },
+      h("p", { className: "font-mono text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)]" }, "Last week"),
+      h("p", { className: "font-display text-xl font-bold text-[var(--ink)] mt-0.5" }, dateLabel),
+      h(
+        "div",
+        { className: "mt-4 grid sm:grid-cols-3 gap-4" },
+        recap.mvp.length > 0 &&
+          h(
+            "div",
+            { className: "rounded-xl bg-[var(--accent-12)] p-3" },
+            h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--accent-dark)] mb-2 flex items-center gap-1.5" }, h(Icon, { name: "trophy", size: 13 }), "MVP"),
+            recap.mvp.map((m) =>
+              h(
+                "div",
+                { key: m.id, className: "flex items-center gap-2 mt-1" },
+                h(MemberPhoto, { memberId: m.id, version: m.photoVersion, size: 32 }),
+                h("span", { className: "font-display font-bold text-[var(--ink)]" }, m.name)
+              )
+            )
+          ),
+        recap.topScorers.length > 0 &&
+          h(
+            "div",
+            { className: "rounded-xl bg-[var(--sand)] p-3" },
+            h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-2" }, "Top scorers"),
+            recap.topScorers.map((p, i) =>
+              h(
+                "div",
+                { key: p.id, className: "flex justify-between text-sm py-0.5" },
+                h("span", { className: "text-[var(--ink)]" }, (i + 1) + ". " + p.name),
+                h("span", { className: "font-semibold tabular-nums text-[var(--ink)]" }, p.goals + (p.goals === 1 ? " goal" : " goals"))
+              )
+            )
+          ),
+        recap.games.length > 0 &&
+          h(
+            "div",
+            { className: "rounded-xl bg-[var(--sand)] p-3" },
+            h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-2" }, "Results"),
+            recap.games.map((g, i) =>
+              h(
+                "div",
+                { key: i, className: "flex justify-between gap-2 text-sm py-0.5" },
+                h("span", { className: "text-[var(--ink)] truncate" }, g.black.name + " v " + g.white.name),
+                h("span", { className: "font-semibold tabular-nums text-[var(--ink)] shrink-0" }, g.black.score + " - " + g.white.score)
+              )
+            )
+          )
+      )
     );
   }
 
@@ -184,6 +340,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [finance, setFinance] = React.useState(null);
     const [forumMe, setForumMe] = React.useState(null);
     const [topics, setTopics] = React.useState([]);
+    const [recap, setRecap] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
@@ -204,6 +361,7 @@ GUWH.Pages = GUWH.Pages || {};
       GUWH.Identity.authFetch("/api/game-board").then((r) => r.json()).then((d) => { if (d.ok) setBoard(d); }).catch(() => {});
       GUWH.Identity.authFetch("/api/finance?self=1").then((r) => r.json()).then((d) => { if (d.ok) setFinance(d); }).catch(() => {});
       GUWH.Identity.authFetch("/api/forum/me").then((r) => r.json()).then((d) => { if (d.ok) setForumMe(d); }).catch(() => {});
+      GUWH.Identity.authFetch("/api/recap").then((r) => r.json()).then((d) => { if (d.ok) setRecap(d.recap); }).catch(() => {});
     }, [user]);
 
     React.useEffect(() => {
@@ -230,8 +388,11 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     if (!user) return null;
-    const displayName = (user.user_metadata && user.user_metadata.full_name) || user.email.split("@")[0];
-    const firstName = displayName.split(" ")[0];
+    // Greeting name (2 Oct 2026): nickname if set on the Profile page,
+    // otherwise the real first name. Identity's own name is only a
+    // fallback while /api/profile is still loading.
+    const identityName = (user.user_metadata && user.user_metadata.full_name) || user.email.split("@")[0];
+    const firstName = profile ? ((profile.nickname && profile.nickname.trim()) || profile.firstName || identityName.split(" ")[0]) : identityName.split(" ")[0];
     const sessionDateObj = status
       ? new Date(status.sessionDate + "T00:00:00")
       : board
@@ -247,19 +408,23 @@ GUWH.Pages = GUWH.Pages || {};
       { className: "py-10 sm:py-14 max-w-4xl" },
 
       // ---- Header: simplified, attendance-first ----
+      // Header (2 Oct 2026): "Upcoming Wednesday" + the date in the display
+      // font, once. The attendance card below no longer repeats "this
+      // Wednesday". Profile/Log out wrap under the heading on narrow phones
+      // instead of squeezing it.
       h(
         "div",
-        { className: "flex items-start justify-between gap-4 mb-8" },
+        { className: "flex flex-wrap items-start justify-between gap-x-4 gap-y-2 mb-8" },
         h(
           "div",
-          null,
+          { className: "min-w-0" },
           h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)]" }, "G'day " + firstName),
-          h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-1" }, "This Wednesday"),
-          sessionDateObj && h("p", { className: "text-[var(--ink-soft)] mt-1" }, GUWH.formatDate(sessionDateObj))
+          h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-1" }, "Upcoming Wednesday"),
+          sessionDateObj && h("p", { className: "font-display text-xl sm:text-2xl font-bold text-[var(--accent-dark)] mt-1" }, GUWH.formatDate(sessionDateObj))
         ),
         h(
           "div",
-          { className: "flex items-center gap-2 shrink-0" },
+          { className: "flex items-center gap-1 shrink-0 -ml-2 sm:ml-0" },
           h(Button, { variant: "ghost", size: "sm", onClick: () => navigate("/portal/profile") }, h(Icon, { name: "chevronRight", size: 14 }), "Profile"),
           h(Button, { variant: "ghost", size: "sm", onClick: () => { GUWH.Identity.logout(); navigate("/"); } }, "Log out")
         )
@@ -283,7 +448,7 @@ GUWH.Pages = GUWH.Pages || {};
                   ? h(
                       React.Fragment,
                       null,
-                      h("h2", { className: "font-display text-xl sm:text-2xl font-bold" }, "Are you playing this Wednesday?"),
+                      h("h2", { className: "font-display text-xl sm:text-2xl font-bold" }, "Are you playing?"),
                       h(
                         "div",
                         { className: "mt-3 flex flex-col gap-1 text-sm text-white/70" },
@@ -293,9 +458,12 @@ GUWH.Pages = GUWH.Pages || {};
                       h(
                         "div",
                         { className: "mt-6 flex items-center gap-4 flex-wrap" },
-                        h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "I'm Coming"),
+                        status.bookingClosed
+                          ? h("p", { className: "text-sm text-white/80" }, "Bookings have closed. Message the Game Coordinator if you can still make it.")
+                          : h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "I'm Coming"),
                         h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white" }, status.confirmedCount), " members confirmed")
-                      )
+                      ),
+                      h(BookingCountdown, { cutoffAt: status.cutoffAt })
                     )
                   : h(
                       React.Fragment,
@@ -313,12 +481,15 @@ GUWH.Pages = GUWH.Pages || {};
                         h(
                           "p",
                           { className: "text-xs text-white/60" },
-                          board && board.published ? "This week's teams and timetable are published — see below." : "Teams and timetable not published yet."
+                          board && board.published ? "This week's teams and timetable are published — see This Week's Game." : "Teams and timetable not published yet."
                         )
-                      )
+                      ),
+                      h(BookingCountdown, { cutoffAt: status.cutoffAt })
                     )
               )
-            : loading && h("div", { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" }, h("p", { className: "text-sm text-white/70" }, "Loading…"))
+            : loading && h("div", { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" }, h("p", { className: "text-sm text-white/70" }, "Loading…")),
+          // Directly under the attendance card so it's the next thing seen.
+          status && h("div", { className: "mt-4" }, h(WhosComingCard, { confirmed: status.confirmed }))
         ),
 
         // ---- Profile + finance, secondary column ----
@@ -326,26 +497,25 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "flex flex-col gap-4" },
           profile && h(ProfileSummaryCard, { profile, compact: true }),
-          h(FinanceCard, { finance })
+          h(FinanceCard, { finance }),
+          h(BringAMateButton)
         )
       ),
 
-      // ---- This Week's Game (its own page) + Bring a Mate (its own box) ----
+      h(RecapCard, { recap }),
+
+      // ---- Club announcement (only when one is pinned), full width ----
+      announcement && h("div", { className: "mb-4" }, h(AnnouncementCard, { announcement })),
+
+      // ---- This Week's Game + Latest discussions, 50/50 on tablet and up,
+      // stacked on phones (2 Oct 2026, Cheongy's request). items-start so
+      // the shorter card doesn't stretch to the taller one's height.
       h(
         "div",
-        { className: "grid sm:grid-cols-2 gap-4 mb-6" },
+        { className: "grid sm:grid-cols-2 gap-4 items-start" },
         h(ThisWeeksGameCard, { board }),
-        h(BringAMateCard)
-      ),
-
-      // ---- Announcement + latest discussions ----
-      (announcement || discussionTopics.length > 0 || forumEligible) &&
-        h(
-          "div",
-          { className: "grid sm:grid-cols-2 gap-4" },
-          h(AnnouncementCard, { announcement }),
-          forumEligible && h(DiscussionsCard, { topics: discussionTopics, unreadCount: forumMe.unreadCount })
-        )
+        forumEligible && h(DiscussionsCard, { topics: discussionTopics, unreadCount: forumMe.unreadCount })
+      )
     );
   }
 

@@ -7,9 +7,13 @@
 // every call — never cached — so it always matches the real, current
 // timetable (same principle as _shared/timetable.mts's eligibility checks).
 //
-// GET  /api/mvp -> { ok, sessionDate, published, isReferee, nominees,
+// GET  /api/mvp[?date=YYYY-MM-DD] -> { ok, sessionDate, published, isReferee, nominees,
 //                     myNomination, canViewResults, results? }
-// POST /api/mvp { nomineeId, note? } -> same shape as GET
+// POST /api/mvp { sessionDate?, nomineeId, note? } -> same shape as GET
+//
+// Week by week (2 Oct 2026): date/sessionDate picks which Wednesday (any
+// past one, default the upcoming one) - so a referee can still nominate
+// the morning after, when the "upcoming" Wednesday has already moved on.
 //
 // Nominating requires having refereed this session (checked server-side,
 // not a stackable role — see _shared/roles.mts's note on Member baseline +
@@ -20,7 +24,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized } from "./_shared/roles.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
   return { id: r.id, firstName: r.first_name, lastName: r.last_name };
@@ -100,7 +104,8 @@ export default async (req: Request, context: Context) => {
     const db = getDatabase();
     const caller = await ensureMember(db, user);
 
-    const sessionDate = nextSessionDateISO();
+    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const sessionDate = requestedSessionDate(req.method === "POST" ? body.sessionDate : new URL(req.url).searchParams.get("date"));
     const [session] = await db.sql`select id, published from sessions where session_date = ${sessionDate}`;
 
     if (!session || !session.published) {
@@ -110,7 +115,6 @@ export default async (req: Request, context: Context) => {
     }
 
     if (req.method === "POST") {
-      const body = await req.json().catch(() => ({}));
       const nomineeId = String(body.nomineeId || "").trim();
 
       const refereeIds = await refereeIdsForSession(db, session.id);

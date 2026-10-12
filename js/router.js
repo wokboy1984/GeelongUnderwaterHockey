@@ -12,7 +12,7 @@ window.GUWH = window.GUWH || {};
 
   function navigate(path) {
     window.location.hash = "#" + path;
-    window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+    window.scrollTo({ top: 0, behavior: "instant" }); // "instant" beats the smooth-scroll CSS (2 Oct 2026)
   }
 
   function useRoute() {

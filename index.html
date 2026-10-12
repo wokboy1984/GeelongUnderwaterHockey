@@ -17,6 +17,22 @@
   <div id="root"></div>
 
   <!--
+    Netlify Forms detection (12 Oct 2026). Netlify only knows a form exists
+    if it's in the deployed HTML, and the real free trial form is built by
+    React, so this hidden copy registers the field names. After a trial
+    booking saves to the database (/api/trial-signup), newplayer.js also
+    posts the same details here, and Netlify emails them to whoever is set
+    under Site configuration > Notifications > Form submission notifications.
+    Field names must match the ones newplayer.js sends.
+  -->
+  <form name="trial-signup" data-netlify="true" netlify-honeypot="website" hidden>
+    <input name="website" />
+    <input name="name" /><input name="wednesday" /><input name="age" />
+    <input name="email" /><input name="phone" /><input name="finSize" />
+    <input name="handed" /><input name="emergencyContact" /><input name="heardAbout" />
+  </form>
+
+  <!--
     iOS Safari fix: when Safari restores a tab from its back-forward cache
     (bfcache) — e.g. after switching apps or tabs and coming back — WebKit
     has a known bug where touch hit-testing goes stale: the page looks and
@@ -62,7 +78,6 @@
   <script src="js/pages/portal-book.js"></script>
   <script src="js/pages/portal-bringamate.js"></script>
   <script src="js/pages/portal-profile.js"></script>
-  <script src="js/pages/state-titles.js"></script>
   <script src="js/pages/organiser.js"></script>
   <script src="js/pages/coordinator.js"></script>
   <script src="js/pages/forum.js"></script>

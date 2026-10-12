@@ -2,16 +2,21 @@
 // backend (Netlify Identity + Netlify DB) instead of the concept's
 // localStorage demo data.
 //
-// GET  /api/booking  -> { sessionDate, inSession, confirmedCount }
-// POST /api/booking  { in: boolean } -> { sessionDate, inSession, confirmedCount }
+// GET  /api/booking  -> { sessionDate, inSession, confirmedCount, confirmed[], cutoffAt, bookingClosed }
+// POST /api/booking  { in: boolean } -> same shape
+//
+// confirmed[] (2 Oct 2026): who's coming, for the Dashboard's Who's Coming
+// list - id, display name (nickname, else real name), photo version. Only
+// ever returned to a logged-in member. cutoffAt/bookingClosed: see
+// bookingCutoffFor() in _shared/attendance.mts.
 //
 // Both require a logged-in Netlify Identity user (JWT in the Authorization
 // header — the widget's user.jwt() handles this on the frontend).
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { getVerifiedUser } from "./_shared/roles.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { bookingCutoffFor, nextSessionDateISO } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -38,6 +43,9 @@ export default async (req: Request, context: Context) => {
     const email: string = user.email;
     const fullName: string | undefined = user.user_metadata?.full_name;
     const sessionDate = nextSessionDateISO();
+    const cutoffAt = bookingCutoffFor(sessionDate);
+    const bookingClosed = Date.now() >= cutoffAt.getTime();
+    await ensureNicknameColumn(db);
 
     // Make sure this member and this week's session both exist.
     await db.sql`
@@ -62,6 +70,18 @@ export default async (req: Request, context: Context) => {
       // self-service write a brand-new member could otherwise reach
       // directly — re-checked here server-side rather than trusted from
       // the client. Cancelling ("out") is always allowed regardless.
+      // Past the cut-off: no new self-service bookings. Cancelling still
+      // works, and a Game Coordinator can still add someone on the day.
+      if (wantsIn && bookingClosed) {
+        const [current] = await db.sql`select status from bookings where session_id = ${sessionId} and member_id = ${memberId}`;
+        if (!current || current.status !== "in") {
+          return new Response(JSON.stringify({ ok: false, error: "Bookings for this Wednesday have closed. Message the Game Coordinator if you can still make it." }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+
       if (wantsIn) {
         const [waiver] = await db.sql`select waiver_accepted_at from members where id = ${memberId}`;
         if (!waiver || !waiver.waiver_accepted_at) {
@@ -83,9 +103,18 @@ export default async (req: Request, context: Context) => {
     const [mine] = await db.sql`
       select status from bookings where session_id = ${sessionId} and member_id = ${memberId}
     `;
-    const [{ count }] = await db.sql`
-      select count(*)::int as count from bookings where session_id = ${sessionId} and status = 'in'
+    const confirmedRows = await db.sql`
+      select m.id, m.nickname, m.first_name, m.last_name, m.photo_version
+      from bookings b join members m on m.id = b.member_id
+      where b.session_id = ${sessionId} and b.status = 'in'
+      order by b.created_at asc
     `;
+    const confirmed = confirmedRows.map((r: any) => ({
+      id: r.id,
+      name: memberDisplayName(r),
+      photoVersion: r.photo_version || 0,
+    }));
+    const count = confirmed.length;
 
     return new Response(
       JSON.stringify({
@@ -93,6 +122,9 @@ export default async (req: Request, context: Context) => {
         sessionDate,
         inSession: mine ? mine.status === "in" : false,
         confirmedCount: count,
+        confirmed,
+        cutoffAt: cutoffAt.toISOString(),
+        bookingClosed,
       }),
       { headers: { "content-type": "application/json" } }
     );

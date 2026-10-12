@@ -18,6 +18,7 @@ GUWH.Pages = GUWH.Pages || {};
       firstName: "", lastName: "", age: "", finSize: "", handed: "Right",
       emergencyName: "", emergencyPhone: "", heardAbout: HEARD_OPTIONS[0],
       phone: "", email: "", sessionDate: "", guardianConsent: false, disclaimer: false,
+      website: "", // honeypot - hidden from people, bots fill it in
     };
   }
 
@@ -25,11 +26,26 @@ GUWH.Pages = GUWH.Pages || {};
     const [form, setForm] = React.useState(emptyForm());
     const [errors, setErrors] = React.useState({});
     const [submitted, setSubmitted] = React.useState(null);
-    const wed = GUWH.nextWednesday();
+    const [submitting, setSubmitting] = React.useState(false);
+    const [submitError, setSubmitError] = React.useState(null);
+    // "Which Wednesday?" (2 Oct 2026): a dropdown of the next four
+    // Wednesdays instead of an open date picker that allowed any day. On the
+    // live site the list comes from the server (/api/trial-signup), so it
+    // always matches what the server will accept; the concept preview (no
+    // backend) works it out locally.
+    const [dates, setDates] = React.useState(() => localNextFourWednesdays());
 
     React.useEffect(() => {
-      setForm((f) => (f.sessionDate ? f : Object.assign({}, f, { sessionDate: toLocalDateInputValue(wed) })));
+      if (!GUWH.Identity) return;
+      fetch("/api/trial-signup")
+        .then((r) => r.json())
+        .then((d) => { if (d.ok && Array.isArray(d.dates) && d.dates.length) setDates(d.dates); })
+        .catch(() => {});
     }, []);
+
+    React.useEffect(() => {
+      setForm((f) => (f.sessionDate && dates.indexOf(f.sessionDate) !== -1 ? f : Object.assign({}, f, { sessionDate: dates[0] || "" })));
+    }, [dates]);
 
     const isJunior = Number(form.age) > 0 && Number(form.age) < 18;
 
@@ -46,7 +62,7 @@ GUWH.Pages = GUWH.Pages || {};
       if (!form.finSize.trim()) e.finSize = "Let us know a fin/shoe size so we can pull the right size.";
       if (!form.emergencyName.trim()) e.emergencyName = "We need someone to call if needed.";
       if (!form.emergencyPhone.trim()) e.emergencyPhone = "Enter a phone number for that contact.";
-      if (!form.email.trim() && !form.phone.trim()) e.email = "Leave an email or a phone number.";
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) e.email = "Enter your email so we can confirm your spot.";
       if (!form.sessionDate) e.sessionDate = "Pick the Wednesday you're planning to come.";
       if (isJunior && !form.guardianConsent) e.guardianConsent = "A parent or guardian needs to acknowledge this for under-18s.";
       if (!form.disclaimer) e.disclaimer = "Please acknowledge this to continue.";
@@ -54,9 +70,35 @@ GUWH.Pages = GUWH.Pages || {};
       return Object.keys(e).length === 0;
     }
 
-    function handleSubmit(ev) {
+    async function handleSubmit(ev) {
       ev.preventDefault();
-      if (!validate()) return;
+      if (!validate() || submitting) return;
+      setSubmitError(null);
+
+      // Live site: save for real (2 Oct 2026 — this used to only write to
+      // the demo store, so nothing reached the club).
+      if (GUWH.Identity) {
+        setSubmitting(true);
+        try {
+          const res = await fetch("/api/trial-signup", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(form),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            setSubmitted({ sessionDate: form.sessionDate });
+            notifyOrganisers(form);
+          }
+          else setSubmitError(data.error || "Something went wrong. Please try again.");
+        } catch (e) {
+          setSubmitError("Couldn't reach the server. Check your connection and try again.");
+        } finally {
+          setSubmitting(false);
+        }
+        return;
+      }
+
       const rec = GUWH.Store.addGuestBooking({
         firstName: form.firstName, lastName: form.lastName, age: form.age,
         finSize: form.finSize, handed: form.handed, heardAbout: form.heardAbout,
@@ -75,7 +117,7 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "rounded-3xl bg-white ring-1 ring-black/5 p-8 sm:p-10 text-center" },
           h("div", { className: "mx-auto h-14 w-14 rounded-full bg-[var(--good-15)] text-[var(--good-dark)] flex items-center justify-center mb-5" }, h(Icon, { name: "check", size: 26 })),
           h("h1", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, "You're booked in, " + form.firstName + "!"),
-          h("p", { className: "mt-2 text-[var(--ink-soft)]" }, "The committee will reach out within 24 hours, but here's everything you need in the meantime."),
+          h("p", { className: "mt-2 text-[var(--ink-soft)]" }, "The club has your details and will have loan gear ready for you. Here's everything you need."),
           h(
             "div",
             { className: "mt-7 grid sm:grid-cols-2 gap-4 text-left" },
@@ -256,7 +298,17 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { className: "grid sm:grid-cols-2 gap-4" },
-            h(FormField, { label: "Which Wednesday?", required: true }, h("input", { type: "date", className: inputCls, value: form.sessionDate, onChange: (e) => set("sessionDate", e.target.value) })),
+            h(
+              FormField,
+              { label: "Which Wednesday?", required: true },
+              h(
+                "select",
+                { className: inputCls, value: form.sessionDate, onChange: (e) => set("sessionDate", e.target.value) },
+                dates.map((d, i) =>
+                  h("option", { key: d, value: d }, GUWH.formatDate(new Date(d + "T00:00:00")) + (i === 0 ? " (this week)" : ""))
+                )
+              )
+            ),
             h(
               FormField,
               { label: "How'd you hear about us?" },
@@ -282,10 +334,55 @@ GUWH.Pages = GUWH.Pages || {};
           ),
           errors.disclaimer && h(FieldError, { text: errors.disclaimer }),
 
-          h(Button, { type: "submit", size: "lg", className: "mt-1" }, "Book my free session")
+          // Honeypot: off-screen and skipped by keyboard/screen readers.
+          h("input", { type: "text", name: "website", tabIndex: -1, autoComplete: "off", "aria-hidden": "true", value: form.website, onChange: (e) => set("website", e.target.value), style: { position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 } }),
+
+          submitError && h("p", { className: "text-sm text-[var(--bad)]", role: "alert" }, submitError),
+          h(Button, { type: "submit", size: "lg", className: "mt-1", disabled: submitting }, submitting ? "Booking…" : "Book my free session")
         )
       )
     );
+  }
+
+  // Email alert to organisers (12 Oct 2026). Sends a copy of the booking to
+  // Netlify Forms ("trial-signup", registered by the hidden form in
+  // index.html); Netlify emails it to the address set in Site configuration
+  // > Notifications. Fire-and-forget: the booking is already saved, so a
+  // failure here never shows an error to the newcomer. Only works on the
+  // deployed site — `netlify dev` doesn't process form submissions.
+  function notifyOrganisers(f) {
+    const fields = {
+      "form-name": "trial-signup",
+      website: f.website || "",
+      name: (f.firstName + " " + f.lastName).trim(),
+      wednesday: GUWH.formatDate(new Date(f.sessionDate + "T00:00:00")),
+      age: String(f.age || ""),
+      email: f.email || "",
+      phone: f.phone || "",
+      finSize: f.finSize || "",
+      handed: f.handed || "",
+      emergencyContact: (f.emergencyName + " " + f.emergencyPhone).trim(),
+      heardAbout: f.heardAbout || "",
+    };
+    fetch("/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(fields).toString(),
+    }).catch(() => {});
+  }
+
+  // Next four Wednesdays, starting today if today is Wednesday (same rule
+  // as the server). Only used before/without the server's list.
+  function localNextFourWednesdays() {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() + ((3 - d.getDay() + 7) % 7));
+    const out = [];
+    for (let i = 0; i < 4; i++) {
+      out.push(toLocalDateInputValue(d));
+      d.setDate(d.getDate() + 7);
+    }
+    return out;
   }
 
   function FieldError({ text }) {

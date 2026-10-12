@@ -48,6 +48,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [players, setPlayers] = React.useState([]);
     const [checkin, setCheckin] = React.useState(null); // { sessionDate, players, closed, closedAt, closedByName }
     const [newPlayers, setNewPlayers] = React.useState([]);
+    const [trialSignups, setTrialSignups] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
     const [addQuery, setAddQuery] = React.useState("");
@@ -66,8 +67,9 @@ GUWH.Pages = GUWH.Pages || {};
         GUWH.Identity.authFetch("/api/coordinator/attendance").then((r) => r.json()),
         GUWH.Identity.authFetch("/api/coordinator/checkin").then((r) => r.json()),
         GUWH.Identity.authFetch("/api/invites?scope=all").then((r) => r.json()).catch(() => ({ ok: false })),
+        GUWH.Identity.authFetch("/api/trial-signup?scope=coordinator").then((r) => r.json()).catch(() => ({ ok: false })),
       ])
-        .then(([a, c, i]) => {
+        .then(([a, c, i, t]) => {
           if (a.ok) { setSessionDate(a.sessionDate); setPlayers(a.players); }
           else setError(a.error || "Something went wrong");
           // This used to be silently dropped on failure (no `else`), so a
@@ -77,6 +79,7 @@ GUWH.Pages = GUWH.Pages || {};
           if (c.ok) setCheckin(c);
           else setError(c.error || "Could not load today's roll.");
           if (i.ok) setNewPlayers(i.invites);
+          if (t && t.ok) setTrialSignups(t.signups);
         })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
@@ -313,7 +316,31 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "mt-8" },
         h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "New Players Today"),
-        newPlayers.length === 0
+        // Free Trial signups for the upcoming Wednesday (2 Oct 2026 — the
+        // /new-player form now saves for real via /api/trial-signup).
+        // Gear size, writing hand and emergency contact shown so whoever
+        // meets them poolside has it to hand.
+        trialSignups.length > 0 &&
+          h(
+            "div",
+            { className: "rounded-2xl bg-[var(--warn-10)] divide-y divide-black/10 mb-3" },
+            trialSignups.map((t) =>
+              h(
+                "div",
+                { key: "t" + t.id, className: "flex items-start justify-between gap-3 px-5 py-3" },
+                h(
+                  "div",
+                  { className: "min-w-0" },
+                  h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, t.name + (t.age ? " (" + t.age + ")" : "")),
+                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Fins/shoe " + (t.finSize || "?") + " · " + (t.handed || "Right") + "-handed" + (t.heardFrom ? " · heard via " + t.heardFrom : "")),
+                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, (t.phone ? t.phone + " · " : "") + t.email),
+                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone)
+                ),
+                h(Pill, { tone: "accent" }, "Free trial")
+              )
+            )
+          ),
+        newPlayers.length === 0 && trialSignups.length === 0
           ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No new Bring a Mate or Free Trial players registered recently.")
           : h(
               "div",
@@ -1246,14 +1273,18 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // Scores, week by week (2 Oct 2026): opens on the most recent week with
+  // games (so the morning after, it's last night, not an empty next week),
+  // and Prev/Next moves between weeks to enter or fix any week's scores.
   function ScoresTab() {
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
-    function load() {
+    function load(date) {
       setLoading(true);
-      return GUWH.Identity.authFetch("/api/coordinator/scores")
+      setError(null);
+      return GUWH.Identity.authFetch("/api/coordinator/scores" + (date ? "?date=" + encodeURIComponent(date) : ""))
         .then((r) => r.json())
         .then((d) => (d.ok ? setData(d) : setError(d.error || "Something went wrong")))
         .catch((e) => setError(String(e)))
@@ -1264,15 +1295,14 @@ GUWH.Pages = GUWH.Pages || {};
     async function saveScore(poolGameId, blackScore, whiteScore, goals) {
       const res = await GUWH.Identity.authFetch("/api/coordinator/scores", {
         method: "POST",
-        body: JSON.stringify({ poolGameId, blackScore, whiteScore, goals }),
+        body: JSON.stringify({ sessionDate: data.sessionDate, poolGameId, blackScore, whiteScore, goals }),
       });
       const d = await res.json();
       if (d.ok) setData(d);
       else setError(d.error || "Something went wrong");
     }
 
-    if (loading) return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…");
-    if (!data) return error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
+    if (!data) return loading ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…") : error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
     const allPoolGames = [];
     data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label })));
@@ -1280,9 +1310,12 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { className: "flex flex-col gap-8" },
+      h("div", { className: "max-w-md" }, h(GUWH.UI.WeekSwitcher, { date: data.sessionDate, weeks: data.weeks, upcoming: data.upcoming, onChange: load })),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
-      allPoolGames.length === 0
-        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No games with teams assigned yet — set them up in the Teams and Timetable tabs first.")
+      loading
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
+        : allPoolGames.length === 0
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, data.sessionDate === data.upcoming ? "No games with teams assigned yet — set them up in the Teams and Timetable tabs first." : "No games were set up for this week.")
         : h(
             "div",
             { className: "flex flex-col gap-4" },
@@ -1291,7 +1324,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "rounded-2xl bg-[var(--sand)] p-5 max-w-md" },
-        h("h3", { className: "font-display font-bold text-[var(--ink)] mb-3" }, new Date().getFullYear() + " top scorers"),
+        h("h3", { className: "font-display font-bold text-[var(--ink)] mb-3" }, new Date(data.sessionDate + "T00:00:00").getFullYear() + " top scorers"),
         data.seasonLeaders.length === 0
           ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No goals recorded yet this season.")
           : h(
@@ -1385,7 +1418,102 @@ GUWH.Pages = GUWH.Pages || {};
       ),
       h("button", { className: "text-sm text-white/60 underline text-left", onClick: () => navigate("/portal/board") }, "Preview this week's game →")
       ),
-      h(MvpResultsPanel, { mvp })
+      h(MvpResultsPanel, { mvp }),
+      h(EmailPlayersPanel, null)
+    );
+  }
+
+  // Email players (2 Oct 2026). The site doesn't send email itself: each
+  // button opens a pre-written Gmail message with every recipient in BCC,
+  // and the coordinator checks it and hits Send from their own Gmail. Uses
+  // no Netlify email quota. "Copy emails" is the fallback for any other
+  // email app. Recipients come from /api/coordinator/emails.
+  function EmailPlayersPanel() {
+    const [data, setData] = React.useState(null);
+    const [error, setError] = React.useState(null);
+    const [copied, setCopied] = React.useState(null);
+
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/coordinator/emails")
+        .then((r) => r.json())
+        .then((d) => (d.ok ? setData(d) : setError(d.error || "Couldn't load member emails")))
+        .catch((e) => setError(String(e)));
+    }, []);
+
+    if (error) return h("p", { className: "text-sm text-[var(--bad)] mt-6" }, error);
+    if (!data) return null;
+
+    const site = window.location.origin + window.location.pathname;
+    const dateLabel = GUWH.formatDate(new Date(data.sessionDate + "T00:00:00"));
+    const me = GUWH.Identity.currentMember();
+    const signOff = me && me.firstName ? me.firstName : "Geelong Underwater Hockey";
+
+    const emails = {
+      reminder: {
+        label: "Wednesday reminder",
+        who: "All members",
+        to: data.allEmails,
+        subject: "Underwater hockey " + dateLabel + " - are you in?",
+        body:
+          "Hi all,\n\n" +
+          "We're on " + dateLabel + ", " + GUWH.club.sessionTime + " at " + GUWH.club.venue + ".\n\n" +
+          "Book in here (takes 5 seconds): " + site + "#/portal/dashboard\n\n" +
+          "Bringing someone new? Their first three sessions are free and we lend the gear.\n\n" +
+          "See you in the pool,\n" + signOff,
+      },
+      teams: {
+        label: "Teams are up",
+        who: "Players booked in",
+        to: data.confirmedEmails,
+        subject: "Teams are up for " + dateLabel,
+        body:
+          "Hi all,\n\n" +
+          "Teams and the timetable for " + dateLabel + " are up: " + site + "#/portal/board\n\n" +
+          "Can't make it any more? Hit \"Can't Make It\" on your Dashboard so we can rebalance the teams.\n\n" +
+          "See you in the pool,\n" + signOff,
+      },
+    };
+
+    function gmailUrl(e) {
+      return "https://mail.google.com/mail/?view=cm&fs=1" +
+        "&bcc=" + encodeURIComponent(e.to.join(",")) +
+        "&su=" + encodeURIComponent(e.subject) +
+        "&body=" + encodeURIComponent(e.body);
+    }
+    function copy(key, e) {
+      const text = e.to.join(", ");
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => setCopied(key)).catch(() => {});
+    }
+
+    return h(
+      "div",
+      { className: "mt-6 rounded-2xl bg-white ring-1 ring-black/5 p-5 max-w-md" },
+      h("h3", { className: "font-display font-bold text-[var(--ink)]" }, "Email players"),
+      h("p", { className: "text-xs text-[var(--ink-soft)] mt-1 mb-4" }, "Opens a ready-to-send message in your Gmail, everyone in BCC. Check it, then hit Send."),
+      Object.keys(emails).map((key) => {
+        const e = emails[key];
+        const disabled = e.to.length === 0 || (key === "teams" && !data.published);
+        return h(
+          "div",
+          { key, className: "flex flex-wrap items-center justify-between gap-2 py-3 border-t border-black/5" },
+          h(
+            "div",
+            null,
+            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, e.label),
+            h("p", { className: "text-xs text-[var(--ink-soft)]" },
+              e.who + " · " + e.to.length + (e.to.length === 1 ? " person" : " people") +
+              (key === "teams" && !data.published ? " · publish the board first" : ""))
+          ),
+          h(
+            "div",
+            { className: "flex items-center gap-2" },
+            h("button", { type: "button", className: "text-xs text-[var(--accent-dark)] font-semibold underline disabled:opacity-40", disabled: e.to.length === 0, onClick: () => copy(key, e) }, copied === key ? "Copied" : "Copy emails"),
+            disabled
+              ? h("span", { className: "rounded-full bg-black/5 text-[var(--ink-soft)] px-3.5 py-2 text-sm font-semibold" }, "Open in Gmail")
+              : h("a", { href: gmailUrl(e), target: "_blank", rel: "noopener", className: "rounded-full bg-[var(--accent)] text-white px-3.5 py-2 text-sm font-semibold hover:opacity-90" }, "Open in Gmail")
+          )
+        );
+      })
     );
   }
 

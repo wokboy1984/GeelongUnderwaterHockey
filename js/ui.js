@@ -12,6 +12,7 @@ window.GUWH = window.GUWH || {};
     check: "M4 12.5 9.5 18 20 6",
     x: "M6 6l12 12M18 6 6 18",
     chevronRight: "m9 5 7 7-7 7",
+    chevronLeft: "m15 5-7 7 7 7",
     mapPin: "M12 21s7-6.1 7-11.5A7 7 0 0 0 5 9.5C5 14.9 12 21 12 21ZM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
     clock: "M12 7.5V12l3 2M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0Z",
     trophy: "M8 4h8v4a4 4 0 0 1-8 0V4ZM5 5h3v2a3 3 0 0 1-3 3 2 2 0 0 1-2-2 3 3 0 0 1 2-3ZM19 5h-3v2a3 3 0 0 0 3 3 2 2 0 0 0 2-2 3 3 0 0 0-2-3ZM10 13.5v2.5M14 13.5v2.5M8.5 20.5h7M9.5 16h5l.5 4.5h-6l.5-4.5Z",
@@ -374,9 +375,45 @@ window.GUWH = window.GUWH || {};
     );
   }
 
+  // Week switcher (2 Oct 2026) — Previous / Next through Wednesdays, used by
+  // This Week's Game and the coordinator's Scores tab. `weeks` is newest
+  // first (as the APIs return it); `upcoming` is the next Wednesday.
+  function WeekSwitcher({ date, weeks, upcoming, onChange, dark }) {
+    const list = weeks && weeks.length ? weeks : [date];
+    const i = list.indexOf(date);
+    const older = i === -1 ? list.find((d) => d < date) : list[i + 1];
+    const newer = i === -1 ? [...list].reverse().find((d) => d > date) : list[i - 1];
+    // Short form ("Wed 30 Sep") so it fits between the buttons on a phone;
+    // the page heading already shows the full date.
+    const label = date ? new Date(date + "T00:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) : "";
+    const isUpcoming = date === upcoming;
+    const btn = cx(
+      "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:opacity-30 disabled:cursor-default",
+      dark ? "bg-white/10 text-white hover:bg-white/20" : "bg-white ring-1 ring-black/10 text-[var(--ink)] hover:ring-[var(--accent)]"
+    );
+    return h(
+      "div",
+      { className: "flex flex-col gap-1.5" },
+      h(
+        "div",
+        { className: "flex items-center gap-2" },
+        h("button", { type: "button", className: btn, disabled: !older, onClick: () => older && onChange(older), "aria-label": "Previous week" }, h(Icon, { name: "chevronLeft", size: 16 }), "Prev"),
+        h(
+          "div",
+          { className: "flex-1 text-center min-w-0" },
+          h("p", { className: cx("font-display font-bold truncate", dark ? "text-white" : "text-[var(--ink)]") }, label),
+          h("p", { className: cx("text-[11px] uppercase tracking-wide font-bold", dark ? "text-white/60" : "text-[var(--ink-soft)]") }, isUpcoming ? "This week" : date && upcoming && date < upcoming ? "Past week" : "")
+        ),
+        h("button", { type: "button", className: btn, disabled: !newer, onClick: () => newer && onChange(newer), "aria-label": "Next week" }, "Next", h(Icon, { name: "chevronRight", size: 16 }))
+      ),
+      !isUpcoming && upcoming &&
+        h("button", { type: "button", className: cx("text-xs font-semibold underline self-center", dark ? "text-white/70" : "text-[var(--accent-dark)]"), onClick: () => onChange(upcoming) }, "Back to this week")
+    );
+  }
+
   GUWH.UI = {
     Icon, Container, Button, Pill, SectionHeading, Avatar, PlayerChip, MemberPhoto,
     MilestoneCard, AttendanceCounter, EventCard, TeamBoard, ScheduleList,
-    ShareCard, FormField, inputCls, Modal,
+    ShareCard, FormField, inputCls, Modal, WeekSwitcher,
   };
 })();

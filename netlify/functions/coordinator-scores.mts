@@ -2,8 +2,16 @@
 // session's games are done (not live during play, not self-service for
 // referees). One pool game = one final score plus zero or more scorers.
 //
-// GET  /api/coordinator/scores -> { ok, sessionDate, games, seasonLeaders }
-// POST /api/coordinator/scores { poolGameId, blackScore, whiteScore, goals: { memberId: goals, ... } }
+// GET  /api/coordinator/scores[?date=YYYY-MM-DD] -> { ok, sessionDate, upcoming, weeks, games, seasonLeaders }
+// POST /api/coordinator/scores { sessionDate, poolGameId, blackScore, whiteScore, goals: { memberId: goals, ... } }
+//
+// Week by week (2 Oct 2026): scores used to be tied to "the upcoming
+// Wednesday", which flips to next week at midnight Wednesday - so the
+// night after a game there was no way to enter its scores. Now any week up
+// to the upcoming one can be opened and scored. With no ?date, it opens
+// the most recent week that has games in its timetable (so on a Thursday
+// you land on last night, not an empty next week). `weeks` lists every
+// week with games, newest first, plus the upcoming one.
 //
 // Requires 'record_scores' (game_coordinator or administrator).
 
@@ -11,13 +19,32 @@ import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 import { POOLS } from "./_shared/timetable.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
   return { id: r.id, firstName: r.first_name, lastName: r.last_name };
 }
 
-async function buildResponse(db: any, sessionId: number, sessionDate: string) {
+// Weeks that have at least one game row, newest first, up to the upcoming
+// Wednesday (always included so the coordinator can get back to it).
+async function weeksWithGames(db: any, upcoming: string): Promise<string[]> {
+  const rows = await db.sql`
+    select distinct s.session_date::text as d
+    from sessions s join timetable_rows tr on tr.session_id = s.id
+    where tr.row_type = 'game' and tr.archived_at is null and s.session_date <= ${upcoming}
+    order by d desc
+    limit 104
+  `;
+  const weeks: string[] = rows.map((r: any) => r.d);
+  if (!weeks.includes(upcoming)) weeks.unshift(upcoming);
+  return weeks.sort().reverse();
+}
+
+async function buildResponse(db: any, sessionId: number | null, sessionDate: string, upcoming: string) {
+  const weeks = await weeksWithGames(db, upcoming);
+  if (sessionId == null) {
+    return { ok: true, sessionDate, upcoming, weeks, games: [], seasonLeaders: [] };
+  }
   const teamRows = await db.sql`select id, name from game_teams where session_id = ${sessionId} order by created_at asc`;
   const teamNames: Record<number, string> = {};
   teamRows.forEach((t: any) => { teamNames[t.id] = t.name; });
@@ -106,7 +133,7 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
   `;
   const seasonLeaders = seasonRows.map((r: any) => ({ memberId: r.member_id, name: `${r.first_name} ${r.last_name}`, totalGoals: r.total_goals }));
 
-  return { ok: true, sessionDate, games, seasonLeaders };
+  return { ok: true, sessionDate, upcoming, weeks, games, seasonLeaders };
 }
 
 export default async (req: Request, context: Context) => {
@@ -120,17 +147,36 @@ export default async (req: Request, context: Context) => {
   }
 
   try {
-    const sessionDate = nextSessionDateISO();
-    const [session] = await db.sql`
-      insert into sessions (session_date)
-      values (${sessionDate})
-      on conflict (session_date) do update set session_date = excluded.session_date
-      returning id
-    `;
-    const sessionId = session.id;
+    const upcoming = nextSessionDateISO();
+    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const asked = req.method === "POST" ? body.sessionDate : new URL(req.url).searchParams.get("date");
+
+    let sessionDate: string;
+    if (asked) {
+      sessionDate = requestedSessionDate(asked);
+    } else {
+      // No week asked for: open the most recent week with games.
+      const weeks = await weeksWithGames(db, upcoming);
+      const [latest] = await db.sql`
+        select s.session_date::text as d
+        from sessions s join timetable_rows tr on tr.session_id = s.id
+        where tr.row_type = 'game' and tr.archived_at is null and s.session_date <= ${upcoming}
+        order by s.session_date desc
+        limit 1
+      `;
+      sessionDate = latest ? latest.d : weeks[0];
+    }
+
+    const [session] = await db.sql`select id from sessions where session_date = ${sessionDate}`;
+    const sessionId: number | null = session ? session.id : null;
 
     if (req.method === "POST") {
-      const body = await req.json().catch(() => ({}));
+      if (sessionId == null) {
+        return new Response(JSON.stringify({ ok: false, error: "There's no game recorded for that week" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
       const poolGameId = Number(body.poolGameId);
 
       // Confirm this pool game actually belongs to tonight's session before
@@ -142,7 +188,7 @@ export default async (req: Request, context: Context) => {
         where tpg.id = ${poolGameId} and tr.session_id = ${sessionId}
       `;
       if (!pg) {
-        return new Response(JSON.stringify({ ok: false, error: "That game isn't part of tonight's session" }), {
+        return new Response(JSON.stringify({ ok: false, error: "That game isn't part of this week's session" }), {
           status: 400,
           headers: { "content-type": "application/json" },
         });
@@ -191,7 +237,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    return new Response(JSON.stringify(await buildResponse(db, sessionId, sessionDate)), {
+    return new Response(JSON.stringify(await buildResponse(db, sessionId, sessionDate, upcoming)), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

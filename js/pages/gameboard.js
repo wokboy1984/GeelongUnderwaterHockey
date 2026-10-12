@@ -258,7 +258,7 @@ GUWH.Pages = GUWH.Pages || {};
       setError(null);
       setSaved(false);
       try {
-        const res = await GUWH.Identity.authFetch("/api/mvp", { method: "POST", body: JSON.stringify({ nomineeId, note }) });
+        const res = await GUWH.Identity.authFetch("/api/mvp", { method: "POST", body: JSON.stringify({ sessionDate: mvp.sessionDate, nomineeId, note }) });
         const d = await res.json();
         if (d.ok) {
           setSaved(true);
@@ -295,8 +295,61 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // Results for the week (2 Oct 2026): final scores, goal scorers and the
+  // night's MVP, from /api/game-board. Renders nothing until something has
+  // been recorded for that week.
+  function ResultsCard({ rows, mvp, highlightTeamName }) {
+    const games = [];
+    (rows || []).forEach((row) => (row.poolGames || []).forEach((pg) => {
+      if (pg.blackScore != null && pg.whiteScore != null) games.push(Object.assign({ rowLabel: row.label }, pg));
+    }));
+    const mvps = mvp || [];
+    if (games.length === 0 && mvps.length === 0) return null;
+    const scorerLine = (pg, side) => pg.scorers.filter((x) => x.side === side).map((x) => x.name + (x.goals > 1 ? " x" + x.goals : "")).join(", ");
+    return h(
+      "div",
+      { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 sm:p-6 mb-8" },
+      h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Results"),
+      mvps.length > 0 &&
+        h(
+          "div",
+          { className: "rounded-xl bg-[var(--accent-12)] px-4 py-3 mb-4 flex items-center gap-2" },
+          h(Icon, { name: "trophy", size: 16, className: "text-[var(--accent-dark)]" }),
+          h("span", { className: "text-xs font-bold uppercase tracking-wide text-[var(--accent-dark)]" }, "MVP"),
+          h("span", { className: "font-display font-bold text-[var(--ink)]" }, mvps.map((m) => m.name).join(" & "))
+        ),
+      h(
+        "div",
+        { className: "flex flex-col divide-y divide-black/5" },
+        games.map((pg, i) =>
+          h(
+            "div",
+            { key: i, className: "py-2.5" },
+            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, pg.rowLabel + " · " + pg.pool),
+            h(
+              "div",
+              { className: "flex items-center justify-between gap-3 mt-0.5" },
+              h("span", { className: "text-sm text-[var(--ink)]" }, h("span", { className: "text-[var(--ink-soft)]" }, "Black: "), teamNameInline(pg.blackTeamName, highlightTeamName)),
+              h("span", { className: "font-display font-bold tabular-nums text-[var(--ink)] shrink-0" }, pg.blackScore + " - " + pg.whiteScore),
+              h("span", { className: "text-sm text-[var(--ink)] text-right" }, h("span", { className: "text-[var(--ink-soft)]" }, "White: "), teamNameInline(pg.whiteTeamName, highlightTeamName))
+            ),
+            pg.scorers && pg.scorers.length > 0 &&
+              h(
+                "div",
+                { className: "flex justify-between gap-3 text-xs text-[var(--ink-soft)] mt-0.5" },
+                h("span", null, scorerLine(pg, "black")),
+                h("span", { className: "text-right" }, scorerLine(pg, "white"))
+              )
+          )
+        )
+      )
+    );
+  }
+
   // Real Game Board (live site) — read-only, shows the published teams and
   // timetable from /api/game-board, or a "not yet finalised" state.
+  // Week by week (2 Oct 2026): Prev/Next steps through every published
+  // Wednesday, so members can look back at how previous weeks went.
   function RealGameBoardPage() {
     const [data, setData] = React.useState(null);
     const [myId, setMyId] = React.useState(null);
@@ -304,19 +357,29 @@ GUWH.Pages = GUWH.Pages || {};
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
-    React.useEffect(() => {
-      GUWH.Identity.authFetch("/api/game-board")
+    function load(date) {
+      setLoading(true);
+      setError(null);
+      setMvp(null);
+      const q = date ? "?date=" + encodeURIComponent(date) : "";
+      GUWH.Identity.authFetch("/api/game-board" + q)
         .then((r) => r.json())
         .then((d) => (d.ok ? setData(d) : setError(d.error || "Something went wrong")))
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
+      // Whether I refereed that week, and if so my current nomination —
+      // harmless if it fails, the rest of the board still works.
+      GUWH.Identity.authFetch("/api/mvp" + q).then((r) => r.json()).then((d) => { if (d.ok && d.published) setMvp(d); }).catch(() => {});
+    }
+
+    React.useEffect(() => {
+      load();
       // Just for "your team" highlighting below — failure here is harmless,
       // the page still works without it.
       GUWH.Identity.authFetch("/api/profile").then((r) => r.json()).then((d) => { if (d.ok) setMyId(d.member.id); }).catch(() => {});
-      // Whether I refereed tonight, and if so my current nomination —
-      // harmless if it fails, the rest of the board still works.
-      GUWH.Identity.authFetch("/api/mvp").then((r) => r.json()).then((d) => { if (d.ok && d.published) setMvp(d); }).catch(() => {});
     }, []);
+
+    const isPast = !!(data && data.upcoming && data.sessionDate < data.upcoming);
 
     const myTeam = data && data.published && myId ? (data.teams || []).find((t) => (t.players || []).some((p) => p.id === myId)) : null;
     const myTeamName = myTeam ? myTeam.name : null;
@@ -324,19 +387,22 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       Container,
       { className: "py-12 sm:py-16 max-w-4xl" },
-      h(SectionHeading, { eyebrow: "This week's game", title: data ? GUWH.formatDate(new Date(data.sessionDate + "T00:00:00")) : "" }),
+      h(SectionHeading, { eyebrow: isPast ? "Past game" : "This week's game", title: data ? GUWH.formatDate(new Date(data.sessionDate + "T00:00:00")) : "" }),
+      data && data.weeks && data.weeks.length > 1 &&
+        h("div", { className: "max-w-md mb-8" }, h(GUWH.UI.WeekSwitcher, { date: data.sessionDate, weeks: data.weeks, upcoming: data.upcoming, onChange: load })),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
-      loading && h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"),
+      loading && h("p", { className: "text-sm text-[var(--ink-soft)] mb-4" }, "Loading…"),
       data && !data.published &&
         h(
           "div",
           { className: "rounded-2xl border-2 border-dashed border-black/10 p-10 text-center text-[var(--ink-soft)]" },
-          "Check back soon — the Game Coordinator is still sorting teams for this week."
+          isPast ? "No game board was published for this week." : "Check back soon — the Game Coordinator is still sorting teams for this week."
         ),
       data && data.published &&
         h(
           React.Fragment,
           null,
+          h(ResultsCard, { rows: data.rows, mvp: data.mvp, highlightTeamName: myTeamName }),
           h(
             "div",
             { className: "mb-10" },

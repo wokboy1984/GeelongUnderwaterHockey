@@ -35,7 +35,7 @@ export const PERMISSIONS = {
 // Playing position and grade are fixed lists shared by the Profile page (self
 // set) and Game Coordinators/Administrators (can override grade after
 // seeing someone play).
-export const POSITIONS = ["Forward", "Back", "Wing", "Goalie", "Centre", "Unknown"] as const;
+export const POSITIONS = ["Forward", "Back", "Wing", "Full Back", "Centre", "Unknown"] as const;
 export type Position = (typeof POSITIONS)[number];
 export function isPosition(value: string): value is Position {
   return (POSITIONS as readonly string[]).includes(value);
@@ -80,6 +80,24 @@ export function lastNameFrom(fullName: string | undefined): string {
   if (!fullName) return "";
   const parts = fullName.trim().split(" ");
   return parts.length > 1 ? parts.slice(1).join(" ") : "";
+}
+
+// Nickname support (2 Oct 2026). The column is added by migration
+// 20261002000001_nickname_trials, but migrations haven't always applied to
+// production on this project, so every function that reads it calls this
+// first. Cheap: runs once per warm function instance.
+let nicknameColumnReady = false;
+export async function ensureNicknameColumn(db: any): Promise<void> {
+  if (nicknameColumnReady) return;
+  await db.sql`alter table members add column if not exists nickname text`;
+  nicknameColumnReady = true;
+}
+
+// The name other members see: nickname if set, otherwise real first + last.
+export function memberDisplayName(row: { nickname?: string | null; first_name?: string | null; last_name?: string | null }): string {
+  const nick = (row.nickname || "").trim();
+  if (nick) return nick;
+  return [row.first_name, row.last_name].filter((x) => x && String(x).trim()).join(" ").trim() || "Member";
 }
 
 export type Member = {

@@ -14,7 +14,6 @@
     { label: "About", path: "/about" },
     { label: "News", path: "/news" },
     { label: "Play", path: "/about" },
-    { label: "State Titles", path: "/state-titles" },
     { label: "Members", path: "/portal" },
   ];
 
@@ -112,6 +111,9 @@
       : [];
     const adminItems = loggedIn && GUWH.Identity ? adminNavFor(GUWH.Identity.currentRoles()) : [];
     const homeHref = "/"; // logo always goes to the public homepage, logged in or not
+    // Logged in (2 Oct 2026): "Members" goes to the same place as the
+    // member nav's "Home", so it's dropped from the public links.
+    const publicNav = loggedIn ? PUBLIC_NAV.filter((item) => item.path !== "/portal") : PUBLIC_NAV;
     function doLogout() {
       if (GUWH.Identity) GUWH.Identity.logout();
       else GUWH.Store.logout();
@@ -122,7 +124,7 @@
       return h(
         "button",
         {
-          key: item.path,
+          key: item.label,
           onClick,
           className: cx(
             "rounded-full font-semibold transition",
@@ -149,7 +151,7 @@
         h(
           "nav",
           { className: "hidden lg:flex items-center gap-1" },
-          PUBLIC_NAV.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path }))
+          publicNav.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path }))
         ),
         h(
           "div",
@@ -191,23 +193,26 @@
           h(
             Container,
             { className: "flex flex-col py-3 gap-1" },
-            PUBLIC_NAV.map((item) =>
-              h(
-                "button",
-                { key: item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
-                item.label
-              )
-            ),
-            loggedIn && portalItems.length > 0 &&
-              h("div", { className: "h-px bg-white/10 my-2" }),
+            // Mobile menu order (2 Oct 2026): a logged-in member's own links
+            // (Home, This Week's Game, Forum...) come first, the public site
+            // links second. Logged out, it's just the public links.
             loggedIn &&
               portalItems.map((item) =>
                 h(
                   "button",
-                  { key: item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                  { key: "m" + item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
                   item.label
                 )
               ),
+            loggedIn && portalItems.length > 0 &&
+              h("div", { className: "h-px bg-white/10 my-2" }),
+            publicNav.map((item, i) =>
+              h(
+                "button",
+                { key: "p" + i, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                item.label
+              )
+            ),
             loggedIn && adminItems.length > 0 &&
               h("div", { className: "h-px bg-white/10 my-2" }),
             loggedIn && adminItems.length > 0 &&
@@ -291,7 +296,7 @@
   // Public marketing pages a logged-in-but-unsigned member can still browse
   // without being bounced to the waiver first — everything else under
   // /portal, /coordinator, /attendance etc. is gated below.
-  const WAIVER_EXEMPT_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/state-titles", "/portal", "/portal/waiver"];
+  const WAIVER_EXEMPT_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/portal", "/portal/waiver"];
 
   function Route(path) {
     // Digital waiver gate (live site only, real backend). Anyone logged in
@@ -315,11 +320,9 @@
     if (path === "/wednesday-games") { const r = requireAuth(path); navigate(r || "/portal/board"); return null; }
     if (path === "/about") return h(GUWH.Pages.About);
     if (path === "/news") return h(GUWH.Pages.News);
-    // Public — no login required (24 Sept 2026, Cheongy's request: moved out
-    // of the member portal so anyone can register interest). Works whether
-    // or not someone's logged in; the page itself asks the backend, which
-    // treats auth as optional too.
-    if (path === "/state-titles") return h(GUWH.Pages.StateTitles);
+    // State Titles interest page removed 2 Oct 2026 (Cheongy: no longer
+    // needed). Old links land on the homepage instead of "Page not found".
+    if (path === "/state-titles" || path === "/portal/state-titles") { navigate("/"); return null; }
 
     if (path === "/portal/waiver") {
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
@@ -432,15 +435,41 @@
     );
   }
 
+  // Logged-in members who open the site on the homepage go straight to
+  // their Dashboard (2 Oct 2026) — only on that first landing, so the logo
+  // can still take them to the public homepage afterwards.
+  let pendingLandingRedirect = GUWH.Router.currentPath() === "/";
+  function maybeRedirectLanding() {
+    if (!pendingLandingRedirect || !GUWH.Identity) return;
+    if (GUWH.Identity.currentUser() && GUWH.Router.currentPath() === "/") navigate("/portal/dashboard");
+    pendingLandingRedirect = false;
+  }
+
+  if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+
   function App() {
     const path = useRoute();
     const [, force] = React.useReducer((x) => x + 1, 0);
     React.useEffect(() => GUWH.Store.subscribe(force), []);
     React.useEffect(() => {
       if (!GUWH.Identity) return; // no-op on the concept preview, which never loads identity.js
+      // Listener first, then init, so the widget's "init" event can't fire
+      // before anyone is listening.
+      const off = GUWH.Identity.onChange(() => { maybeRedirectLanding(); force(); }); // re-render nav/routes on login, logout, and widget init
       GUWH.Identity.init();
-      return GUWH.Identity.onChange(force); // re-render nav/routes on login, logout, and widget init
+      maybeRedirectLanding();
+      return off;
     }, []);
+    // Every page change starts at the top (2 Oct 2026). navigate() already
+    // scrolled, but only before the new page rendered — and back/forward,
+    // typed URLs and plain #links never went through navigate() at all, so
+    // pages opened part-way down (the Dashboard landed 1,000px down, past
+    // the I'm Coming button).
+    React.useLayoutEffect(() => {
+      // "instant" overrides the site's smooth-scroll CSS, which otherwise
+      // animates (and can be interrupted by) this jump.
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    }, [path]);
 
     return h(
       "div",

@@ -10,7 +10,7 @@ GUWH.Pages = GUWH.Pages || {};
 
   const EMOJI_CHOICES = ["🏊", "🤿", "🐬", "🦈", "🐢", "🐙", "🌊", "🥽"];
 
-  const REAL_POSITIONS = ["Forward", "Back", "Wing", "Goalie", "Centre", "Unknown"];
+  const REAL_POSITIONS = ["Forward", "Back", "Wing", "Full Back", "Centre", "Unknown"];
   const REAL_GRADES = ["A", "B", "Casual", "Junior"];
 
   // MemberPhoto now lives in js/ui.js (GUWH.UI.MemberPhoto) so the
@@ -227,6 +227,7 @@ GUWH.Pages = GUWH.Pages || {};
             setForm({
               firstName: d.member.firstName || "",
               lastName: d.member.lastName || "",
+              nickname: d.member.nickname || "",
               dateOfBirth: d.member.dateOfBirth || "",
               emergencyName: d.member.emergencyName || "",
               emergencyPhone: d.member.emergencyPhone || "",
@@ -314,6 +315,11 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "grid sm:grid-cols-2 gap-4" },
           h(FormField, { label: "First name *" }, h("input", { className: inputCls, value: form.firstName, onChange: (e) => set("firstName", e.target.value) })),
           h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: form.lastName, onChange: (e) => set("lastName", e.target.value) }))
+        ),
+        // Nickname (2 Oct 2026): optional. Shown to other members instead of
+        // your real name (Dashboard greeting, Who's Coming, game recap).
+        h(FormField, { label: "Nickname", hint: "Optional. Other members see this instead of your real name. Leave blank to use your real name." },
+          h("input", { className: inputCls, maxLength: 30, value: form.nickname, placeholder: "e.g. Cheongy", onChange: (e) => set("nickname", e.target.value) })
         ),
         h(
           "div",

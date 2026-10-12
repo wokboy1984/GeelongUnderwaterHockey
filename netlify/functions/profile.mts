@@ -3,7 +3,7 @@
 // sessions that have already happened), so it can't drift out of sync.
 //
 // GET  /api/profile -> { ok, member }
-// POST /api/profile { dateOfBirth, emergencyName, emergencyPhone, position, grade, phone } -> { ok, member }
+// POST /api/profile { nickname, dateOfBirth, emergencyName, emergencyPhone, position, grade, phone } -> { ok, member }
 //
 // Email is deliberately NOT editable here — it's the Netlify Identity login
 // itself, changed via the widget's own update() call from the frontend
@@ -11,7 +11,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ageFromDOB, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
+import { ageFromDOB, ensureNicknameColumn, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -37,7 +37,7 @@ function dobToInputString(dob: string | Date | null | undefined): string | null 
 
 async function shapeProfile(db: any, memberId: string) {
   const [row] = await db.sql`
-    select id, email, first_name, last_name, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new
+    select id, email, first_name, last_name, nickname, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new
     from members where id = ${memberId}
   `;
   const [{ count }] = await db.sql`
@@ -67,6 +67,7 @@ async function shapeProfile(db: any, memberId: string) {
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
+    nickname: row.nickname || "",
     dateOfBirth: dobToInputString(row.date_of_birth),
     age: ageFromDOB(row.date_of_birth),
     emergencyName: row.emergency_name,
@@ -92,6 +93,7 @@ export default async (req: Request, context: Context) => {
     const email: string = user.email;
     const fullName: string | undefined = user.user_metadata?.full_name;
 
+    await ensureNicknameColumn(db);
     await db.sql`
       insert into members (id, email, first_name, last_name)
       values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
@@ -110,6 +112,8 @@ export default async (req: Request, context: Context) => {
       const emergencyName = String(body.emergencyName || "").trim();
       const emergencyPhone = String(body.emergencyPhone || "").trim();
       const phone = String(body.phone || "").trim() || null;
+      // Optional. What other members see instead of your real name.
+      const nickname = String(body.nickname || "").trim().slice(0, 30) || null;
 
       const missing: string[] = [];
       if (!firstName) missing.push("first name");
@@ -154,6 +158,7 @@ export default async (req: Request, context: Context) => {
         update members set
           first_name = ${firstName},
           last_name = ${lastName},
+          nickname = ${nickname},
           date_of_birth = ${dateOfBirth},
           emergency_name = ${emergencyName},
           emergency_phone = ${emergencyPhone},
