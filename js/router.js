@@ -5,9 +5,18 @@
 window.GUWH = window.GUWH || {};
 
 (function () {
+  // "#/new-player?ref=abc" -> path "/new-player", query ref=abc (13 Oct
+  // 2026, Bring a Mate links). Routes only ever match on the path.
   function currentPath() {
     const hash = window.location.hash || "#/";
-    return hash.slice(1) || "/";
+    return hash.slice(1).split("?")[0] || "/";
+  }
+
+  function queryParam(name) {
+    const hash = window.location.hash || "";
+    const i = hash.indexOf("?");
+    if (i === -1) return null;
+    try { return new URLSearchParams(hash.slice(i + 1)).get(name); } catch (e) { return null; }
   }
 
   function navigate(path) {
@@ -25,5 +34,5 @@ window.GUWH = window.GUWH || {};
     return path;
   }
 
-  GUWH.Router = { navigate, useRoute, currentPath };
+  GUWH.Router = { navigate, useRoute, currentPath, queryParam };
 })();

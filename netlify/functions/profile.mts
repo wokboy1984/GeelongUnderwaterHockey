@@ -11,7 +11,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ageFromDOB, ensureNicknameColumn, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
+import { ONBOARDING_STEPS, ageFromDOB, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -37,7 +37,8 @@ function dobToInputString(dob: string | Date | null | undefined): string | null 
 
 async function shapeProfile(db: any, memberId: string) {
   const [row] = await db.sql`
-    select id, email, first_name, last_name, nickname, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new
+    select id, email, first_name, last_name, nickname, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new,
+           onboarding_seen, onboarding_hidden_at
     from members where id = ${memberId}
   `;
   const [{ count }] = await db.sql`
@@ -80,6 +81,8 @@ async function shapeProfile(db: any, memberId: string) {
     seasonGoals: season,
     careerGoals: career,
     isNew: row.is_new,
+    onboardingSeen: row.onboarding_seen || [],
+    onboardingHidden: !!row.onboarding_hidden_at,
   };
 }
 
@@ -94,6 +97,7 @@ export default async (req: Request, context: Context) => {
     const fullName: string | undefined = user.user_metadata?.full_name;
 
     await ensureNicknameColumn(db);
+    await ensureOnboardingColumns(db);
     await db.sql`
       insert into members (id, email, first_name, last_name)
       values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
@@ -102,6 +106,23 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
+
+      // Getting started checklist (12 Oct 2026): { action: "onboarding",
+      // seen?: "guide"|"board"|"forum", hide?: true }. Separate from the
+      // profile save below, which needs the full form.
+      if (body.action === "onboarding") {
+        const seen = String(body.seen || "");
+        if (seen && ONBOARDING_STEPS.includes(seen)) {
+          await db.sql`
+            update members set onboarding_seen = array_append(onboarding_seen, ${seen}::text)
+            where id = ${memberId} and not (${seen}::text = any(onboarding_seen))
+          `;
+        }
+        if (body.hide) await db.sql`update members set onboarding_hidden_at = now() where id = ${memberId}`;
+        return new Response(JSON.stringify({ ok: true, member: await shapeProfile(db, memberId) }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
 
       // Name, date of birth and an emergency contact are all safety- or
       // eligibility-critical (DOB gates the adults-only Members Forum;

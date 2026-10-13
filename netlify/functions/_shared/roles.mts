@@ -93,6 +93,17 @@ export async function ensureNicknameColumn(db: any): Promise<void> {
   nicknameColumnReady = true;
 }
 
+// Getting started checklist (12 Oct 2026). Columns added by migration
+// 20261012000004_member_onboarding; ensured here too, same reason as above.
+let onboardingColumnsReady = false;
+export async function ensureOnboardingColumns(db: any): Promise<void> {
+  if (onboardingColumnsReady) return;
+  await db.sql`alter table members add column if not exists onboarding_seen text[] not null default '{}'`;
+  await db.sql`alter table members add column if not exists onboarding_hidden_at timestamptz`;
+  onboardingColumnsReady = true;
+}
+export const ONBOARDING_STEPS = ["guide", "board", "forum"];
+
 // One-or-two-games timetable rows (12 Oct 2026). Column added by migration
 // 20261012000001_timetable_game_count; ensured here too, same reason as
 // the nickname column above.

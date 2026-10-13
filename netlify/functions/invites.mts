@@ -1,11 +1,13 @@
 // Real Bring a Mate endpoint — invites a member has sent, backed by the
 // `invites` table instead of the concept's localStorage demo data.
 //
-// GET   /api/invites              -> { ok, invites: [{ id, guestName, guestEmail, status, createdAt }] }
+// GET   /api/invites              -> { ok, inviteCode, invites: [{ id, guestName, guestEmail, status, token, bookedFor, createdAt }] }
+//                                     status: 'invited' | 'booked' (mate booked a free session
+//                                     through the link - see _shared/invite-links.mts) | 'registered'
 // GET   /api/invites?scope=all    -> club-wide, registered guests from the last 10 days only,
 //                                     with inviterName — for the coordinator's "New Players Today".
 //                                     Requires 'manage_others_attendance' (game_coordinator/administrator).
-// POST  /api/invites   { guestName, guestEmail } -> same shape, invite added
+// POST  /api/invites   { guestName, guestEmail } -> same shape + invite (the new one, with its token)
 // PATCH /api/invites   { id, status: "registered" } -> same shape, one invite updated
 //
 // All require a logged-in Netlify Identity user (JWT in the Authorization
@@ -14,6 +16,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, hasPermission } from "./_shared/roles.mts";
+import { backfillTokens, ensureInviteColumns, memberInviteCode, newToken } from "./_shared/invite-links.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -31,6 +34,8 @@ function shape(row: any) {
     guestName: row.guest_name,
     guestEmail: row.guest_email,
     status: row.status,
+    token: row.token,
+    bookedFor: row.booked_for ? String(row.booked_for instanceof Date ? row.booked_for.toISOString() : row.booked_for).slice(0, 10) : null,
     createdAt: row.created_at,
   };
 }
@@ -56,6 +61,7 @@ export default async (req: Request, context: Context) => {
       values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
       on conflict (id) do nothing
     `;
+    await ensureInviteColumns(db);
 
     // Club-wide view for the Attendance tab's "New Players Today" —
     // recently registered Bring a Mate guests, regardless of who invited
@@ -92,6 +98,7 @@ export default async (req: Request, context: Context) => {
       );
     }
 
+    let created: any = null;
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       const guestName = String(body.guestName || "").trim();
@@ -102,9 +109,10 @@ export default async (req: Request, context: Context) => {
           headers: { "content-type": "application/json" },
         });
       }
-      await db.sql`
-        insert into invites (inviter_id, guest_name, guest_email)
-        values (${memberId}, ${guestName}, ${guestEmail})
+      [created] = await db.sql`
+        insert into invites (inviter_id, guest_name, guest_email, token)
+        values (${memberId}, ${guestName}, ${guestEmail}, ${newToken()})
+        returning id, guest_name, guest_email, status, token, booked_for, created_at
       `;
     }
 
@@ -120,14 +128,16 @@ export default async (req: Request, context: Context) => {
       }
     }
 
+    await backfillTokens(db, memberId);
+    const inviteCode = await memberInviteCode(db, memberId);
     const rows = await db.sql`
-      select id, guest_name, guest_email, status, created_at
+      select id, guest_name, guest_email, status, token, booked_for, created_at
       from invites
       where inviter_id = ${memberId}
       order by created_at desc
     `;
 
-    return new Response(JSON.stringify({ ok: true, invites: rows.map(shape) }), {
+    return new Response(JSON.stringify({ ok: true, inviteCode, invite: created ? shape(created) : undefined, invites: rows.map(shape) }), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

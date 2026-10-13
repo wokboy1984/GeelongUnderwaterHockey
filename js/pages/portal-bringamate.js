@@ -64,6 +64,18 @@ GUWH.Pages = GUWH.Pages || {};
   // invite" used to only log the name, so it read as if the friend had
   // been messaged. Now it saves and then shows the share buttons with a
   // message addressed to them by name.
+  // Tracked links (13 Oct 2026): every invite has its own ?ref= token, and
+  // the general share link carries the member's own invite code, so a
+  // booking through either shows up here by itself.
+  function trialLink(ref) {
+    return window.location.origin + window.location.pathname + "#/new-player" + (ref ? "?ref=" + ref : "");
+  }
+  function statusPill(inv) {
+    if (inv.status === "registered") return h(Pill, { tone: "good" }, "Joined");
+    if (inv.status === "booked") return h(Pill, { tone: "good" }, inv.bookedFor ? "Booked for " + new Date(inv.bookedFor + "T00:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) : "Booked in");
+    return h(Pill, { tone: "accent" }, "Invited");
+  }
+
   function personalMessage(name) {
     const first = String(name || "").trim().split(" ")[0];
     return (first ? "Hey " + first + "! " : "") + MESSAGE;
@@ -74,7 +86,7 @@ GUWH.Pages = GUWH.Pages || {};
       "div",
       { className: "rounded-2xl bg-[var(--accent-12)] p-4 flex flex-col gap-3", role: "status" },
       h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-1.5" }, h(Icon, { name: "check", size: 14, className: "text-[var(--good-dark)]" }), "Saved. Now send it to " + sent.name + ":"),
-      h(ShareRow, { text: personalMessage(sent.name), url, to: sent.contact })
+      h(ShareRow, { text: personalMessage(sent.name), url: sent.url || url, to: sent.contact })
     );
   }
 
@@ -85,16 +97,18 @@ GUWH.Pages = GUWH.Pages || {};
     const [contact, setContact] = React.useState("");
     const [justSent, setJustSent] = React.useState(false);
     const [invites, setInvites] = React.useState([]);
+    const [inviteCode, setInviteCode] = React.useState(null);
+    const [resendId, setResendId] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
-    const inviteLink = window.location.origin + window.location.pathname + "#/new-player";
+    const inviteLink = trialLink(inviteCode);
 
     function load() {
       setLoading(true);
       setError(null);
       return GUWH.Identity.authFetch("/api/invites")
         .then((r) => r.json())
-        .then((data) => (data.ok ? setInvites(data.invites) : setError(data.error || "Something went wrong")))
+        .then((data) => { if (data.ok) { setInvites(data.invites); setInviteCode(data.inviteCode || null); } else setError(data.error || "Something went wrong"); })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     }
@@ -113,24 +127,13 @@ GUWH.Pages = GUWH.Pages || {};
         const data = await res.json();
         if (data.ok) {
           setInvites(data.invites);
-          setJustSent({ name: friendName.trim(), contact: contact.trim() });
+          if (data.inviteCode) setInviteCode(data.inviteCode);
+          setJustSent({ name: friendName.trim(), contact: contact.trim(), url: data.invite && data.invite.token ? trialLink(data.invite.token) : null });
           setFriendName("");
           setContact("");
         } else {
           setError(data.error || "Something went wrong");
         }
-      } catch (e) {
-        setError(String(e));
-      }
-    }
-
-    async function markRegistered(id) {
-      setError(null);
-      try {
-        const res = await GUWH.Identity.authFetch("/api/invites", { method: "PATCH", body: JSON.stringify({ id, status: "registered" }) });
-        const data = await res.json();
-        if (data.ok) setInvites(data.invites);
-        else setError(data.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
       }
@@ -173,7 +176,8 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "mt-10" },
-        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Invites you've sent"),
+        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, "Invites you've sent"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "These update by themselves when your mate books a free session through your link."),
         loading
           ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
           : invites.length === 0
@@ -184,20 +188,25 @@ GUWH.Pages = GUWH.Pages || {};
               invites.map((inv) =>
                 h(
                   "div",
-                  { key: inv.id, className: "flex items-center justify-between px-5 py-3" },
+                  { key: inv.id, className: "px-5 py-3" },
                   h(
                     "div",
-                    null,
-                    h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, inv.guestName),
-                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, new Date(inv.createdAt).toLocaleDateString("en-AU"))
+                    { className: "flex items-center justify-between gap-3" },
+                    h(
+                      "div",
+                      null,
+                      h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, inv.guestName),
+                      h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Invited " + new Date(inv.createdAt).toLocaleDateString("en-AU"))
+                    ),
+                    h(
+                      "div",
+                      { className: "flex items-center gap-2" },
+                      statusPill(inv),
+                      inv.status === "invited" && inv.token &&
+                        h(Button, { size: "sm", variant: "ghost", onClick: () => setResendId(resendId === inv.id ? null : inv.id) }, resendId === inv.id ? "Close" : "Send again")
+                    )
                   ),
-                  h(
-                    "div",
-                    { className: "flex items-center gap-3" },
-                    h(Pill, { tone: inv.status === "registered" ? "good" : "accent" }, inv.status === "registered" ? "Registered" : "Invited"),
-                    inv.status !== "registered" &&
-                      h(Button, { size: "sm", variant: "ghost", onClick: () => markRegistered(inv.id) }, "Mark as registered")
-                  )
+                  resendId === inv.id && h("div", { className: "mt-3" }, h(ShareRow, { text: personalMessage(inv.guestName), url: trialLink(inv.token), to: inv.guestEmail }))
                 )
               )
             )
@@ -217,7 +226,11 @@ GUWH.Pages = GUWH.Pages || {};
     const [sending, setSending] = React.useState(false);
     const [justSent, setJustSent] = React.useState(false);
     const [error, setError] = React.useState(null);
-    const inviteLink = window.location.origin + window.location.pathname + "#/new-player";
+    const [inviteCode, setInviteCode] = React.useState(null);
+    const inviteLink = trialLink(inviteCode);
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/invites").then((r) => r.json()).then((d) => { if (d.ok && d.inviteCode) setInviteCode(d.inviteCode); }).catch(() => {});
+    }, []);
 
     async function send(ev) {
       ev.preventDefault();
@@ -231,7 +244,8 @@ GUWH.Pages = GUWH.Pages || {};
         });
         const data = await res.json();
         if (data.ok) {
-          setJustSent({ name: friendName.trim(), contact: contact.trim() });
+          if (data.inviteCode) setInviteCode(data.inviteCode);
+          setJustSent({ name: friendName.trim(), contact: contact.trim(), url: data.invite && data.invite.token ? trialLink(data.invite.token) : null });
           setFriendName("");
           setContact("");
           onSent && onSent(data.invites);

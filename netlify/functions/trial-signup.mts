@@ -4,8 +4,10 @@
 // localStorage store, so on the live site nothing was saved and nobody at
 // the club knew a newcomer was coming.
 //
-// GET  /api/trial-signup
-//        -> { ok, dates: ["YYYY-MM-DD" x4] }   the next four Wednesdays (public)
+// GET  /api/trial-signup[?ref=TOKEN]
+//        -> { ok, dates: ["YYYY-MM-DD" x4], invite? }  the next four Wednesdays (public);
+//           with a Bring a Mate ref, invite = { inviterName, guestName } for the
+//           "Kev invited you" banner and a pre-filled name (13 Oct 2026)
 // GET  /api/trial-signup?scope=coordinator
 //        -> { ok, sessionDate, signups[] }     newcomers booked for the upcoming
 //                                              Wednesday, with gear + emergency
@@ -13,15 +15,17 @@
 //                                              Administrator only.
 // POST /api/trial-signup { firstName, lastName, age, finSize, handed,
 //                          emergencyName, emergencyPhone, phone, email,
-//                          sessionDate, heardAbout, website }
-//        -> { ok, signup }                     public, no login
+//                          sessionDate, heardAbout, website, ref }
+//        -> { ok, signup }                     public, no login. signup.invitedBy =
+//                                              the member's name when a valid ref came in
 //
 // `website` is a honeypot: a hidden field real people never fill in. If it
 // has anything in it, the request is treated as a bot and quietly dropped.
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, memberDisplayName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { cleanRef, ensureInviteColumns, newToken, resolveRef } from "./_shared/invite-links.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function json(body: unknown, status = 200) {
@@ -63,6 +67,9 @@ async function ensureTable(db: any) {
       created_at timestamptz not null default now()
     )
   `;
+  await db.sql`alter table trial_signups add column if not exists invited_by text`;
+  await ensureNicknameColumn(db);
+  await ensureInviteColumns(db);
   tableReady = true;
 }
 
@@ -84,10 +91,12 @@ export default async (req: Request, context: Context) => {
       const askedDate = url.searchParams.get("date");
       const sessionDate = askedDate ? requestedSessionDate(askedDate) : nextSessionDateISO();
       const rows = await db.sql`
-        select id, first_name, last_name, email, phone, age, fin_size, handed, emergency_name, emergency_phone, heard_from, created_at
-        from trial_signups
-        where session_date = ${sessionDate}
-        order by created_at asc
+        select t.id, t.first_name, t.last_name, t.email, t.phone, t.age, t.fin_size, t.handed, t.emergency_name, t.emergency_phone, t.heard_from, t.created_at,
+               m.nickname as inv_nickname, m.first_name as inv_first_name, m.last_name as inv_last_name
+        from trial_signups t
+        left join members m on m.id = t.invited_by
+        where t.session_date = ${sessionDate}
+        order by t.created_at asc
       `;
       return json({
         ok: true,
@@ -103,13 +112,15 @@ export default async (req: Request, context: Context) => {
           emergencyName: r.emergency_name,
           emergencyPhone: r.emergency_phone,
           heardFrom: r.heard_from,
+          invitedBy: r.inv_first_name || r.inv_nickname ? memberDisplayName({ nickname: r.inv_nickname, first_name: r.inv_first_name, last_name: r.inv_last_name }) : null,
           createdAt: r.created_at,
         })),
       });
     }
 
     if (req.method === "GET") {
-      return json({ ok: true, dates: nextFourWednesdays() });
+      const r = await resolveRef(db, cleanRef(url.searchParams.get("ref")));
+      return json({ ok: true, dates: nextFourWednesdays(), invite: r ? { inviterName: r.inviterName, guestName: r.guestName } : null });
     }
 
     if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
@@ -165,7 +176,45 @@ export default async (req: Request, context: Context) => {
       `;
     }
 
-    return json({ ok: true, signup: { id: row.id, sessionDate: row.session_date, firstName: row.first_name } });
+    // Bring a Mate link (13 Oct 2026): record who brought them and move
+    // the member's invite to "booked" - or, for a general share link,
+    // create the invite now. One invite per signup, so re-submitting the
+    // form doesn't double up.
+    let invitedBy: string | null = null;
+    const ref = await resolveRef(db, cleanRef(body.ref));
+    if (ref) {
+      invitedBy = ref.inviterName;
+      await db.sql`update trial_signups set invited_by = ${ref.inviterId} where id = ${row.id}`;
+      // Same person booking again (same email, maybe a different
+      // Wednesday): keep their one invite and move it to the new date.
+      const [already] = await db.sql`
+        select i.id from invites i join trial_signups t on t.id = i.trial_signup_id
+        where i.inviter_id = ${ref.inviterId} and lower(t.email) = ${email}
+        order by i.id desc limit 1
+      `;
+      if (already) {
+        await db.sql`update invites set booked_for = ${row.session_date}, trial_signup_id = ${row.id} where id = ${already.id}`;
+      } else {
+        // A named invite is used once; if that link gets passed on to
+        // someone else, they get an invite of their own.
+        const claimed = ref.inviteId
+          ? await db.sql`
+              update invites set status = case when status = 'registered' then status else 'booked' end,
+                     trial_signup_id = ${row.id}, booked_for = ${row.session_date}
+              where id = ${ref.inviteId} and trial_signup_id is null
+              returning id
+            `
+          : [];
+        if (!claimed.length) {
+          await db.sql`
+          insert into invites (inviter_id, guest_name, guest_email, status, token, trial_signup_id, booked_for)
+          values (${ref.inviterId}, ${firstName + " " + lastName}, ${email}, 'booked', ${newToken()}, ${row.id}, ${row.session_date})
+        `;
+        }
+      }
+    }
+
+    return json({ ok: true, signup: { id: row.id, sessionDate: row.session_date, firstName: row.first_name, invitedBy } });
   } catch (err) {
     console.error("trial-signup failed", err);
     return json({ ok: false, error: "Something went wrong saving your booking. Please try again." }, 500);

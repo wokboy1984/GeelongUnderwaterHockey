@@ -456,7 +456,21 @@
   // their Dashboard (2 Oct 2026) — only on that first landing, so the logo
   // can still take them to the public homepage afterwards.
   let pendingLandingRedirect = GUWH.Router.currentPath() === "/";
+  // Someone clicking the link in their signup confirmation email lands on
+  // "/#confirmation_token=..." - the widget logs them in a moment later.
+  // Send them to the Dashboard's Getting started checklist rather than the
+  // public homepage (12 Oct 2026, Cheongy: "it should land on the setup
+  // screen").
+  let pendingConfirmation = /confirmation_token=/.test(window.location.hash);
   function maybeRedirectLanding() {
+    if (pendingConfirmation && GUWH.Identity && GUWH.Identity.currentUser()) {
+      pendingConfirmation = false;
+      pendingLandingRedirect = false;
+      GUWH.justJoined = true;
+      navigate("/portal/dashboard");
+      return;
+    }
+    if (pendingConfirmation) return; // wait for the login that follows confirmation
     if (!pendingLandingRedirect || !GUWH.Identity) return;
     if (GUWH.Identity.currentUser() && GUWH.Router.currentPath() === "/") navigate("/portal/dashboard");
     pendingLandingRedirect = false;

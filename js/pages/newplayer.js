@@ -19,6 +19,7 @@ GUWH.Pages = GUWH.Pages || {};
       emergencyName: "", emergencyPhone: "", heardAbout: HEARD_OPTIONS[0],
       phone: "", email: "", sessionDate: "", guardianConsent: false, disclaimer: false,
       website: "", // honeypot - hidden from people, bots fill it in
+      ref: "", // Bring a Mate link (13 Oct 2026)
     };
   }
 
@@ -35,11 +36,29 @@ GUWH.Pages = GUWH.Pages || {};
     // backend) works it out locally.
     const [dates, setDates] = React.useState(() => localNextFourWednesdays());
 
+    // Bring a Mate link (13 Oct 2026): "#/new-player?ref=..." says who
+    // invited them, fills in their name if the member typed it, and is
+    // sent with the booking so the member's invite updates itself.
+    const ref = (GUWH.Router.queryParam && GUWH.Router.queryParam("ref")) || "";
+    const [invite, setInvite] = React.useState(null);
+
     React.useEffect(() => {
       if (!GUWH.Identity) return;
-      fetch("/api/trial-signup")
+      fetch("/api/trial-signup" + (ref ? "?ref=" + encodeURIComponent(ref) : ""))
         .then((r) => r.json())
-        .then((d) => { if (d.ok && Array.isArray(d.dates) && d.dates.length) setDates(d.dates); })
+        .then((d) => {
+          if (d.ok && Array.isArray(d.dates) && d.dates.length) setDates(d.dates);
+          if (d.ok && d.invite) {
+            setInvite(d.invite);
+            const parts = String(d.invite.guestName || "").trim().split(/\s+/);
+            setForm((f) => Object.assign({}, f, {
+              ref,
+              heardAbout: HEARD_OPTIONS[0],
+              firstName: f.firstName || parts[0] || "",
+              lastName: f.lastName || parts.slice(1).join(" "),
+            }));
+          }
+        })
         .catch(() => {});
     }, []);
 
@@ -87,8 +106,8 @@ GUWH.Pages = GUWH.Pages || {};
           });
           const data = await res.json();
           if (data.ok) {
-            setSubmitted({ sessionDate: form.sessionDate });
-            notifyOrganisers(form);
+            setSubmitted({ sessionDate: form.sessionDate, invitedBy: data.signup && data.signup.invitedBy });
+            notifyOrganisers(form, data.signup && data.signup.invitedBy);
           }
           else setSubmitError(data.error || "Something went wrong. Please try again.");
         } catch (e) {
@@ -117,7 +136,7 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "rounded-3xl bg-white ring-1 ring-black/5 p-8 sm:p-10 text-center" },
           h("div", { className: "mx-auto h-14 w-14 rounded-full bg-[var(--good-15)] text-[var(--good-dark)] flex items-center justify-center mb-5" }, h(Icon, { name: "check", size: 26 })),
           h("h1", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, "You're booked in, " + form.firstName + "!"),
-          h("p", { className: "mt-2 text-[var(--ink-soft)]" }, "The club has your details and will have loan gear ready for you. Here's everything you need."),
+          h("p", { className: "mt-2 text-[var(--ink-soft)]" }, (submitted.invitedBy ? submitted.invitedBy + " will see you're booked in. " : "") + "The club has your details and will have loan gear ready for you. Here's everything you need."),
           h(
             "div",
             { className: "mt-7 grid sm:grid-cols-2 gap-4 text-left" },
@@ -242,6 +261,12 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "form",
           { onSubmit: handleSubmit, noValidate: true, className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 flex flex-col gap-5 h-fit" },
+          invite && h(
+            "div",
+            { className: "rounded-2xl bg-[var(--accent-12)] px-4 py-3 text-sm text-[var(--ink)]" },
+            h("span", { className: "font-semibold" }, invite.inviterName + " invited you"),
+            " - pick a Wednesday and you'll be playing with them. Your first three sessions are free."
+          ),
           h("h2", { className: "font-display text-2xl font-bold text-[var(--ink)]" }, "Book your first session"),
 
           h(
@@ -350,7 +375,7 @@ GUWH.Pages = GUWH.Pages || {};
   // > Notifications. Fire-and-forget: the booking is already saved, so a
   // failure here never shows an error to the newcomer. Only works on the
   // deployed site — `netlify dev` doesn't process form submissions.
-  function notifyOrganisers(f) {
+  function notifyOrganisers(f, invitedBy) {
     const fields = {
       "form-name": "trial-signup",
       website: f.website || "",
@@ -363,6 +388,7 @@ GUWH.Pages = GUWH.Pages || {};
       handed: f.handed || "",
       emergencyContact: (f.emergencyName + " " + f.emergencyPhone).trim(),
       heardAbout: f.heardAbout || "",
+      invitedBy: invitedBy || "",
     };
     fetch("/", {
       method: "POST",

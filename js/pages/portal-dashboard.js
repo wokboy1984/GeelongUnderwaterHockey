@@ -187,6 +187,147 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // Getting started (12 Oct 2026, Cheongy: onramping for new members -
+  // "Members clicking 'I'm coming' before Wednesday @ 12pm, then taking
+  // them through the features, the profile, emergency contact, positions,
+  // the timetable, the forum"). A checklist at the top of the Dashboard for
+  // members with fewer than 3 games played. Ticks come from real data
+  // (booking, profile, invites, forum opt-in); the "have a look" steps are
+  // ticked when the member opens them (members.onboarding_seen, saved via
+  // POST /api/profile { action: "onboarding" }). Can't be hidden until the
+  // emergency contact + date of birth are in. Members with 3+ games only
+  // see the Finish your profile prompt, and only if those are missing.
+  const FIRST_NIGHT = [
+    "Games start at 6pm on Wednesday at the Handbury Centre for Wellbeing, Corio. Get there a bit early on your first night so we can fit your gear.",
+    "Bring swimmers, a towel and a water bottle (and a mouthguard if you have one). We lend you fins, mask, snorkel, glove and stick.",
+    "The coordinator splits everyone into teams. Games are short and you rotate on and off - nobody expects you to know the rules yet.",
+    "Your first three sessions are free. After that there's a game fee each night you play - what you owe shows on your Dashboard.",
+  ];
+
+  function GettingStartedCard({ profile, status, invites, forumMe, onBook, booking, onProfile }) {
+    const [guideOpen, setGuideOpen] = React.useState(false);
+    if (!profile) return null;
+    if ((profile.gamesPlayed || 0) >= 3) return h(FinishProfileCard, { profile });
+    const seen = profile.onboardingSeen || [];
+    const hasProfile = !!(profile.emergencyName && profile.emergencyPhone && profile.dateOfBirth);
+    const booked = !!((status && status.inSession) || (profile.gamesPlayed || 0) > 0);
+    const closed = !!(status && status.bookingClosed);
+    const forumOk = !!(forumMe && forumMe.eligible);
+
+    function post(body) {
+      return GUWH.Identity.authFetch("/api/profile", { method: "POST", body: JSON.stringify(Object.assign({ action: "onboarding" }, body)) })
+        .then((r) => r.json()).then((d) => { if (d.ok && d.member && onProfile) onProfile(d.member); }).catch(() => {});
+    }
+    function mark(key, go) { post({ seen: key }); navigate(go); }
+    function openGuide() { setGuideOpen((v) => !v); if (!seen.includes("guide")) post({ seen: "guide" }); }
+    function hide() { post({ hide: true }); if (onProfile) onProfile(Object.assign({}, profile, { onboardingHidden: true })); }
+
+    const steps = [
+      {
+        label: "Book in for Wednesday",
+        hint: closed
+          ? "Bookings for this Wednesday have closed - book in for next week."
+          : "Tap I'm Coming before 12pm Wednesday. That's how the coordinator knows to put you in a team.",
+        done: booked,
+        button: !booked && !closed && status ? h(Button, { size: "sm", className: "shrink-0", disabled: booking, onClick: onBook }, "I'm Coming") : null,
+      },
+      {
+        label: "Add your date of birth and an emergency contact",
+        hint: "Everyone in the pool needs an emergency contact on file.",
+        done: hasProfile, action: "Finish profile", go: "/portal/profile",
+      },
+      {
+        label: "Pick your position",
+        hint: "Forward, Wing, Centre, Back or Full Back. Not sure yet? Ask on the night and change it later.",
+        done: !!(profile.position && profile.position !== "Unknown"), action: "Choose", go: "/portal/profile",
+      },
+      {
+        label: "Add a photo", optional: true,
+        hint: "So the team knows who you are on the night.",
+        done: (profile.photoVersion || 0) > 0, action: "Add photo", go: "/portal/profile",
+      },
+      {
+        label: "How a night works",
+        hint: "What to bring, what we lend you and how the games run.",
+        done: seen.includes("guide"), guide: true, alwaysButton: true,
+        button: h(Button, { size: "sm", variant: "secondary", className: "shrink-0", onClick: openGuide }, guideOpen ? "Close" : "Read"),
+      },
+      {
+        label: "Check This Week's Game",
+        hint: "Teams and the timetable go up here once the coordinator publishes them, usually Wednesday afternoon.",
+        done: seen.includes("board"), action: "Have a look", seenKey: "board", go: "/portal/board",
+      },
+      forumOk && {
+        label: "Join the Members Forum",
+        hint: "Club announcements, carpools, gear and chat.",
+        done: !!(forumMe.participation && forumMe.participation.optedIn) || seen.includes("forum"), action: "Open forum", seenKey: "forum", go: "/portal/forum",
+      },
+      {
+        label: "Bring a mate", optional: true,
+        hint: "Their first three sessions are free too.",
+        done: !!(invites && invites.length), action: "Invite", go: "/portal/bring-a-mate",
+      },
+    ].filter(Boolean);
+
+    const doneCount = steps.filter((st) => st.done).length;
+    if (doneCount === steps.length && !guideOpen) return null;
+    if (profile.onboardingHidden && hasProfile) return null;
+    const firstOpen = steps.findIndex((st) => !st.done);
+    return h(
+      "div",
+      { className: "rounded-2xl bg-white ring-1 ring-black/5 p-4 sm:p-5 mb-6" },
+      h(
+        "div",
+        { className: "flex items-start justify-between gap-3" },
+        h(
+          "div",
+          null,
+          h("p", { className: "font-mono text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)]" }, GUWH.justJoined ? "Welcome to the club" : "Getting started"),
+          h("p", { className: "font-display text-xl font-bold text-[var(--ink)] mt-0.5" }, doneCount + " of " + steps.length + " done"),
+          GUWH.justJoined && h("p", { className: "text-sm text-[var(--ink-soft)] mt-1" }, "Your account is set up. Work down this list and you're ready for Wednesday.")
+        ),
+        hasProfile && h(Button, { variant: "ghost", size: "sm", onClick: hide }, "Hide")
+      ),
+      h(
+        "div",
+        { className: "h-1.5 rounded-full bg-[var(--sand)] mt-3 overflow-hidden" },
+        h("div", { className: "h-full bg-[var(--accent)] rounded-full transition-all", style: { width: Math.round((doneCount / steps.length) * 100) + "%" } })
+      ),
+      h(
+        "ul",
+        { className: "mt-3 divide-y divide-black/5" },
+        steps.map((st, i) =>
+          h(
+            "li",
+            { key: st.label, className: "py-2.5" },
+            h(
+            "div",
+            { className: "flex items-center gap-3" },
+            h(
+              "span",
+              { className: cx("w-6 h-6 rounded-full flex items-center justify-center shrink-0", st.done ? "bg-[var(--accent)] text-white" : "ring-2 ring-black/10 text-[var(--ink-soft)] text-xs font-bold") },
+              st.done ? h(Icon, { name: "check", size: 14 }) : String(i + 1)
+            ),
+            h(
+              "div",
+              { className: "flex-1 min-w-0" },
+              h("p", { className: cx("text-sm font-semibold", st.done ? "text-[var(--ink-soft)] line-through" : "text-[var(--ink)]") }, st.label, st.optional && !st.done && h("span", { className: "font-normal text-[var(--ink-soft)]" }, " (optional)")),
+              !st.done && st.hint && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, st.hint)
+            ),
+            (!st.done || st.alwaysButton) && (st.button ||
+              (st.action && h(Button, { size: "sm", variant: i === firstOpen ? "primary" : "secondary", className: "shrink-0", onClick: () => (st.seenKey ? mark(st.seenKey, st.go) : navigate(st.go)) }, st.action)))
+            ),
+            st.guide && guideOpen && h(
+              "ul",
+              { className: "mt-3 ml-9 rounded-xl bg-[var(--sand)] p-3 space-y-2" },
+              FIRST_NIGHT.map((t, k) => h("li", { key: k, className: "text-sm text-[var(--ink)] flex gap-2" }, h("span", { className: "text-[var(--accent-dark)] font-bold" }, "•"), h("span", null, t)))
+            )
+          )
+        )
+      )
+    );
+  }
+
   function DiscussionsCard({ topics, unreadCount, loaded }) {
     const rest = topics.slice(0, 3);
     return h(
@@ -370,6 +511,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [topics, setTopics] = React.useState([]);
     const [topicsLoaded, setTopicsLoaded] = React.useState(false);
     const [recap, setRecap] = React.useState(null);
+    const [invites, setInvites] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
@@ -390,6 +532,7 @@ GUWH.Pages = GUWH.Pages || {};
       GUWH.Identity.authFetch("/api/game-board").then((r) => r.json()).then((d) => { if (d.ok) setBoard(d); }).catch(() => {});
       GUWH.Identity.authFetch("/api/finance?self=1").then((r) => r.json()).then((d) => { if (d.ok) setFinance(d); }).catch(() => {});
       GUWH.Identity.authFetch("/api/forum/me").then((r) => r.json()).then((d) => { if (d.ok) setForumMe(d); }).catch(() => {});
+      GUWH.Identity.authFetch("/api/invites").then((r) => r.json()).then((d) => { if (d.ok) setInvites(d.invites); }).catch(() => {});
       GUWH.Identity.authFetch("/api/recap").then((r) => r.json()).then((d) => { if (d.ok) setRecap(d.recap); }).catch(() => {});
     }, [user]);
 
@@ -461,7 +604,7 @@ GUWH.Pages = GUWH.Pages || {};
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
 
-      h(FinishProfileCard, { profile }),
+      h(GettingStartedCard, { key: profile ? profile.id : "none", profile, status, invites, forumMe, booking: loading, onBook: () => setIn(true), onProfile: setProfile }),
 
       h(
         "div",

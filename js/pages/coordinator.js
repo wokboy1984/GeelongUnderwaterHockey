@@ -356,6 +356,7 @@ GUWH.Pages = GUWH.Pages || {};
                   "div",
                   { className: "min-w-0" },
                   h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, t.name + (t.age ? " (" + t.age + ")" : "")),
+                  t.invitedBy && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)]" }, t.invitedBy + "'s mate"),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Fins/shoe " + (t.finSize || "?") + " · " + (t.handed || "Right") + "-handed" + (t.heardFrom ? " · heard via " + t.heardFrom : "")),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, (t.phone ? t.phone + " · " : "") + t.email),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone)
