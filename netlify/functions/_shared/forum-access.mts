@@ -4,7 +4,7 @@
 // the server, never inferred from anything the client claims.
 
 import { hasPermission, forbidden } from "./roles.mts";
-import { ADULT_AGE } from "./forum.mts";
+import { FORUM_MIN_AGE } from "./forum.mts";
 
 export type ForumParticipation = {
   member_id: string;
@@ -60,8 +60,8 @@ export async function requireForumAccess(
     return { ok: true, participation, isModerator: true };
   }
 
-  if (caller.age === null || caller.age < ADULT_AGE) {
-    return { ok: false, response: forbidden("The Members Forum is for adult members only.") };
+  if (caller.age === null || caller.age < FORUM_MIN_AGE) {
+    return { ok: false, response: forbidden("Add your date of birth on your Profile to use the Members Forum.") };
   }
   if (!participation || !participation.opted_in) {
     return { ok: false, response: forbidden("You need to opt in to the Members Forum first.") };

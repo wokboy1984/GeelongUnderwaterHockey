@@ -104,6 +104,16 @@ export async function ensureOnboardingColumns(db: any): Promise<void> {
 }
 export const ONBOARDING_STEPS = ["guide", "board", "forum"];
 
+// "My kids" (14 Oct 2026). Columns added by migration
+// 20261014000001_family_members; ensured here too, same reason as above.
+let familyColumnsReady = false;
+export async function ensureFamilyColumns(db: any): Promise<void> {
+  if (familyColumnsReady) return;
+  await db.sql`alter table members add column if not exists parent_id text references members(id)`;
+  await db.sql`alter table members add column if not exists dependant_removed_at timestamptz`;
+  familyColumnsReady = true;
+}
+
 // One-or-two-games timetable rows (12 Oct 2026). Column added by migration
 // 20261012000001_timetable_game_count; ensured here too, same reason as
 // the nickname column above.

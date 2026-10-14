@@ -298,7 +298,7 @@ GUWH.Pages = GUWH.Pages || {};
                     "div",
                     null,
                     h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, (p.firstName + " " + p.lastName).trim(), p.isNew && h(Pill, { tone: "accent" }, "New")),
-                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.email && p.email.endsWith("@no-login.guwh") ? "Walk-in — no account" : p.email)
+                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.parentName ? "Child of " + p.parentName : p.email && p.email.endsWith("@no-login.guwh") ? "Walk-in — no account" : p.email)
                   ),
                   h(
                     "div",

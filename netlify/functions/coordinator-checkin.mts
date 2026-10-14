@@ -1,5 +1,5 @@
 import {getDatabase} from '@netlify/database';
-import {getVerifiedUser,ensureMember,hasPermission,logAudit,unauthorized,forbidden} from './_shared/roles.mts';
+import {ensureFamilyColumns,getVerifiedUser,ensureMember,hasPermission,logAudit,unauthorized,forbidden} from './_shared/roles.mts';
 import {clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
 const json=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 
@@ -34,6 +34,7 @@ export default async(req:Request)=>{
   const db=getDatabase(),caller=await ensureMember(db,user);
   if(!hasPermission(caller.roles,'mark_actual_attendance'))return forbidden();
   await ensureCloseoutTable(db);
+  await ensureFamilyColumns(db);
   // The roll belongs to a game night (12 Oct 2026, Cheongy) - it used to
   // record against *today*, so a roll ticked the morning after (and the
   // game fees it charges) landed on the wrong date. ?date= / sessionDate
@@ -100,9 +101,11 @@ export default async(req:Request)=>{
    }
   }
   const players=await db.sql`select m.id,m.first_name as "firstName",m.last_name as "lastName",
+   nullif(trim(coalesce(pp.first_name,'')||' '||coalesce(pp.last_name,'')),'') as "parentName",
    coalesce(a.attended,false) as attended,
    exists(select 1 from bookings b join sessions s on s.id=b.session_id where b.member_id=m.id and b.status='in' and s.session_date=${sessionDate}::date) as booked
-   from members m left join session_attendance a on a.member_id=m.id and a.session_date=${sessionDate}::date
+   from members m left join members pp on pp.id=m.parent_id left join session_attendance a on a.member_id=m.id and a.session_date=${sessionDate}::date
+   where m.dependant_removed_at is null or a.attended is not null
    order by m.first_name,m.last_name,m.id`;
   const closeout=await closeoutFor(db,sessionDate);
   return json({ok:true,sessionDate,today,upcoming:nextSessionDateISO(),players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null});

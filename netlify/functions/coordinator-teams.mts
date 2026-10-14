@@ -210,10 +210,16 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
+        // Move = replace, never "remove first" (14 Oct 2026, Cheongy: a
+        // player already in a team had to be deleted before they could be
+        // added to another). Done as delete-then-insert rather than
+        // "on conflict (session_id, member_id)": that needs the unique
+        // constraint from migration 20260912000002, and migrations have
+        // not always reached production on this project.
+        await db.sql`delete from team_assignments where session_id = ${sessionId} and member_id = ${target.id}`;
         await db.sql`
           insert into team_assignments (session_id, team_id, member_id)
           values (${sessionId}, ${teamId}, ${target.id})
-          on conflict (session_id, member_id) do update set team_id = excluded.team_id
         `;
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "team_assignment_changed",

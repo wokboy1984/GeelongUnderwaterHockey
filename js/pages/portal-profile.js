@@ -127,7 +127,7 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // Members Forum preferences — adult members only. Kept separate from the
+  // Members Forum preferences. Kept separate from the
   // main profile form/save button since it talks to /api/forum/me, not
   // /api/profile. Mirrors the opt-in flow in js/pages/forum.js's OptInGate,
   // but here for members who are already opted in and just want to adjust
@@ -172,7 +172,7 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
-    if (!me || !me.eligible) return null; // juniors and members without a DOB on file see nothing forum-related here
+    if (!me || !me.eligible) return null; // members without a DOB on file see nothing forum-related here
 
     const p = me.participation;
     if (!p || !p.optedIn) {
@@ -203,6 +203,114 @@ GUWH.Pages = GUWH.Pages || {};
         h(Button, { type: "button", size: "sm", variant: "secondary", onClick: () => navigate("/portal/forum") }, "Open Members Forum"),
         h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: leaveForum }, "Leave the forum")
       )
+    );
+  }
+
+  // "My kids" (14 Oct 2026): children a parent brings along, kept under the
+  // parent's own profile. They don't get a login. Booking them in for
+  // Wednesday happens on the Dashboard; game fees bill to the parent.
+  function FamilyCard({ parentName }) {
+    const emptyForm = { firstName: "", lastName: "", dateOfBirth: "", position: "Unknown" };
+    const [kids, setKids] = React.useState(null);
+    const [editingId, setEditingId] = React.useState(null); // a kid id, "new", or null
+    const [form, setForm] = React.useState(emptyForm);
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState(null);
+
+    function call(body) {
+      return GUWH.Identity.authFetch("/api/family", { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+    }
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/family").then((r) => r.json()).then((d) => { if (d.ok) setKids(d.kids); else setError(d.error || "Something went wrong"); }).catch((e) => setError(String(e)));
+    }, []);
+
+    function set(k, v) { setForm((f) => Object.assign({}, f, { [k]: v })); }
+    function startNew() { setForm(emptyForm); setEditingId("new"); setError(null); }
+    function startEdit(k) { setForm({ firstName: k.firstName, lastName: k.lastName, dateOfBirth: k.dateOfBirth || "", position: k.position || "Unknown" }); setEditingId(k.id); setError(null); }
+
+    async function save(ev) {
+      ev.preventDefault();
+      setBusy(true);
+      setError(null);
+      try {
+        const d = await call(Object.assign({ action: editingId === "new" ? "add" : "update", id: editingId }, form));
+        if (d.ok) { setKids(d.kids); setEditingId(null); } else setError(d.error || "Something went wrong");
+      } catch (e) { setError(String(e)); } finally { setBusy(false); }
+    }
+    async function remove(k) {
+      if (!window.confirm("Remove " + k.firstName + " from your profile? Their past games stay on record.")) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const d = await call({ action: "remove", id: k.id });
+        if (d.ok) setKids(d.kids); else setError(d.error || "Something went wrong");
+      } catch (e) { setError(String(e)); } finally { setBusy(false); }
+    }
+
+    if (kids === null && !error) return null;
+    const list = kids || [];
+
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "My kids"),
+      list.length === 0 && editingId !== "new" && h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Bringing your children along? Add them here, then book them in from your Dashboard when you tap I'm Coming. They don't need their own account. Their game fees go on your account."),
+      list.map((k) =>
+        editingId === k.id
+          ? null
+          : h(
+              "div",
+              { key: k.id, className: "flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3" },
+              h(
+                "div",
+                { className: "min-w-0" },
+                h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, (k.firstName + " " + (k.lastName || "")).trim()),
+                h("p", { className: "text-xs text-[var(--ink-soft)]" }, (k.age !== null ? "Age " + k.age : "Age not set") + " · " + k.position + (k.gamesPlayed ? " · " + k.gamesPlayed + (k.gamesPlayed === 1 ? " game" : " games") : ""))
+              ),
+              h(
+                "div",
+                { className: "flex items-center gap-1 shrink-0" },
+                h(Button, { type: "button", variant: "ghost", size: "sm", disabled: busy, onClick: () => startEdit(k) }, "Edit"),
+                h(Button, { type: "button", variant: "ghost", size: "sm", disabled: busy, onClick: () => remove(k) }, "Remove")
+              )
+            )
+      ),
+      editingId
+        ? h(
+            "form",
+            { onSubmit: save, noValidate: true, className: "rounded-xl bg-white p-4 flex flex-col gap-3" },
+            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, editingId === "new" ? "Add a child" : "Edit child"),
+            h(
+              "div",
+              { className: "grid sm:grid-cols-2 gap-3" },
+              h(FormField, { label: "First name *" }, h("input", { className: inputCls, value: form.firstName, onChange: (e) => set("firstName", e.target.value) })),
+              h(FormField, { label: "Last name", hint: "Leave blank to use yours." }, h("input", { className: inputCls, value: form.lastName, onChange: (e) => set("lastName", e.target.value) }))
+            ),
+            h(
+              "div",
+              { className: "grid sm:grid-cols-2 gap-3" },
+              h(FormField, { label: "Date of birth *" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) })),
+              h(
+                FormField,
+                { label: "Preferred position" },
+                h("select", { className: inputCls, value: form.position, onChange: (e) => set("position", e.target.value) }, REAL_POSITIONS.map((p) => h("option", { key: p, value: p }, p)))
+              )
+            ),
+            h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Your emergency contact and phone number (above) are used for your children too."),
+            error && h("p", { className: "text-xs text-[var(--bad)]" }, error),
+            h(
+              "div",
+              { className: "flex items-center gap-2" },
+              h(Button, { type: "submit", size: "sm", disabled: busy }, busy ? "Saving…" : "Save"),
+              h(Button, { type: "button", variant: "ghost", size: "sm", disabled: busy, onClick: () => { setEditingId(null); setError(null); } }, "Cancel")
+            )
+          )
+        : h(
+            "div",
+            { className: "flex flex-col gap-2" },
+            error && h("p", { className: "text-xs text-[var(--bad)]" }, error),
+            h("div", null, h(Button, { type: "button", variant: "secondary", size: "sm", disabled: busy, onClick: startNew }, "+ Add a child"))
+          )
     );
   }
 
@@ -280,6 +388,9 @@ GUWH.Pages = GUWH.Pages || {};
           // the cached identity used for nav visibility — refresh it so a
           // just-added DOB shows the Members Forum link without a re-login.
           GUWH.Identity.refreshMember();
+          // Just confirmed their email (14 Oct 2026): first save takes them
+          // on to the Dashboard checklist to book in.
+          if (GUWH.justJoined && !GUWH.joinedSaved) { GUWH.joinedSaved = true; setTimeout(() => navigate("/portal/dashboard"), 900); }
         } else setError(d.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
@@ -293,6 +404,12 @@ GUWH.Pages = GUWH.Pages || {};
       Container,
       { className: "py-10 sm:py-14 max-w-3xl" },
       h(SectionHeading, { eyebrow: "My profile", title: member.firstName + " " + member.lastName }),
+      GUWH.justJoined && !GUWH.joinedSaved && h(
+        "div",
+        { className: "rounded-2xl bg-[var(--good-15)] p-4 mb-6" },
+        h("p", { className: "font-display font-bold text-[var(--ink)]" }, "Welcome to the club, " + (member.firstName || "mate") + "! Your email is confirmed."),
+        h("p", { className: "text-sm text-[var(--ink-soft)] mt-0.5" }, "Add your date of birth, an emergency contact and your position below, then hit Save. We'll take you to your Dashboard to book in for Wednesday.")
+      ),
 
       // Order (12 Oct 2026, pre-launch member review): personal details
       // first — that's what a new member comes here to fill in — then
@@ -367,7 +484,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(FormField, { label: "Emergency contact name *" }, h("input", { className: inputCls, value: form.emergencyName, onChange: (e) => set("emergencyName", e.target.value) })),
           h(FormField, { label: "Emergency contact phone *" }, h("input", { type: "tel", className: inputCls, value: form.emergencyPhone, onChange: (e) => set("emergencyPhone", e.target.value) }))
         ),
-        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — an emergency contact is needed poolside, and date of birth is what unlocks the adults-only Members Forum."),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — an emergency contact is needed poolside, and date of birth is what unlocks the Members Forum."),
 
         h(
           "div",
@@ -382,6 +499,8 @@ GUWH.Pages = GUWH.Pages || {};
         { className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 mt-6" },
         h(PhotoUploader, { member, onChange: (photoVersion) => setMember((m) => Object.assign({}, m, { photoVersion })) })
       ),
+
+      h("div", { className: "mt-6" }, h(FamilyCard)),
 
       h("div", { className: "mt-6" }, h(EmailUpdateCard, { currentEmail: member.email })),
 

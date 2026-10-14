@@ -15,7 +15,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureFamilyColumns, ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
@@ -25,13 +25,15 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
 
 async function playerList(db: any, sessionId: number) {
   const rows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new, m.grade
+    select m.id, m.email, m.first_name, m.last_name, m.is_new, m.grade,
+           nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '') as parent_name
     from bookings b
     join members m on m.id = b.member_id
+    left join members p on p.id = m.parent_id
     where b.session_id = ${sessionId} and b.status = 'in'
     order by b.created_at asc
   `;
-  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new, grade: r.grade }));
+  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new, grade: r.grade, parentName: r.parent_name || null }));
 }
 
 export default async (req: Request, context: Context) => {
@@ -39,6 +41,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
 
   const db = getDatabase();
+  await ensureFamilyColumns(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "manage_others_attendance")) {
     return forbidden("Only Game Coordinators and Administrators can manage attendance");

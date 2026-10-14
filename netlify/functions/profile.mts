@@ -11,7 +11,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ONBOARDING_STEPS, ageFromDOB, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
+import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -98,6 +98,7 @@ export default async (req: Request, context: Context) => {
 
     await ensureNicknameColumn(db);
     await ensureOnboardingColumns(db);
+    await ensureFamilyColumns(db);
     await db.sql`
       insert into members (id, email, first_name, last_name)
       values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
@@ -187,6 +188,12 @@ export default async (req: Request, context: Context) => {
           position = ${position},
           grade = ${grade}
         where id = ${memberId}
+      `;
+      // Children on this profile share the parent's emergency contact and
+      // phone ("My kids", 14 Oct 2026), so keep them in step.
+      await db.sql`
+        update members set emergency_name = ${emergencyName}, emergency_phone = ${emergencyPhone}, phone = ${phone}
+        where parent_id = ${memberId}
       `;
     }
 

@@ -5,6 +5,10 @@
 // GET  /api/booking  -> { sessionDate, inSession, confirmedCount, confirmed[], cutoffAt, bookingClosed }
 // POST /api/booking  { in: boolean } -> same shape
 //
+// POST { in, dependantId? } (14 Oct 2026): with dependantId, books/cancels
+// one of the caller's own children instead of the caller. Response also
+// carries family[]: the caller's children with inSession for this Wednesday.
+//
 // confirmed[] (2 Oct 2026): who's coming, for the Dashboard's Who's Coming
 // list - id, display name (nickname, else real name), photo version. Only
 // ever returned to a logged-in member. cutoffAt/bookingClosed: see
@@ -15,7 +19,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { ensureFamilyColumns, ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
 import { bookingCutoffFor, nextSessionDateISO } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
@@ -52,6 +56,7 @@ export default async (req: Request, context: Context) => {
     const cutoffAt = bookingCutoffFor(sessionDate);
     const bookingClosed = Date.now() >= cutoffAt.getTime();
     await ensureNicknameColumn(db);
+    await ensureFamilyColumns(db);
 
     // Make sure this member and this week's session both exist.
     await db.sql`
@@ -71,6 +76,23 @@ export default async (req: Request, context: Context) => {
       const body = await req.json().catch(() => ({}));
       const wantsIn = !!body.in;
 
+      // Booking one of the caller's own children (14 Oct 2026, "My kids").
+      // Same cut-off rules as booking yourself; the child must belong to
+      // the caller and not be removed.
+      let targetId = memberId;
+      if (body.dependantId) {
+        const [kid] = await db.sql`
+          select id from members where id = ${String(body.dependantId)} and parent_id = ${memberId} and dependant_removed_at is null
+        `;
+        if (!kid) {
+          return new Response(JSON.stringify({ ok: false, error: "Child not found on your profile." }), {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        targetId = kid.id;
+      }
+
       // The client route already gates the whole portal behind the waiver
       // (see app.js's WAIVER_EXEMPT_PATHS check), but this is the one
       // self-service write a brand-new member could otherwise reach
@@ -79,7 +101,7 @@ export default async (req: Request, context: Context) => {
       // Past the cut-off: no new self-service bookings. Cancelling still
       // works, and a Game Coordinator can still add someone on the day.
       if (wantsIn && bookingClosed) {
-        const [current] = await db.sql`select status from bookings where session_id = ${sessionId} and member_id = ${memberId}`;
+        const [current] = await db.sql`select status from bookings where session_id = ${sessionId} and member_id = ${targetId}`;
         if (!current || current.status !== "in") {
           return new Response(JSON.stringify({ ok: false, error: "Bookings for this Wednesday have closed. Message the Game Coordinator if you can still make it." }), {
             status: 403,
@@ -100,7 +122,7 @@ export default async (req: Request, context: Context) => {
 
       await db.sql`
         insert into bookings (session_id, member_id, status)
-        values (${sessionId}, ${memberId}, ${wantsIn ? "in" : "out"})
+        values (${sessionId}, ${targetId}, ${wantsIn ? "in" : "out"})
         on conflict (session_id, member_id)
         do update set status = excluded.status
       `;
@@ -122,6 +144,21 @@ export default async (req: Request, context: Context) => {
     }));
     const count = confirmed.length;
 
+    // The caller's children and whether each is booked in for this session.
+    const familyRows = await db.sql`
+      select m.id, m.first_name, m.last_name,
+        coalesce((select b.status = 'in' from bookings b where b.session_id = ${sessionId} and b.member_id = m.id), false) as booked
+      from members m
+      where m.parent_id = ${memberId} and m.dependant_removed_at is null
+      order by m.created_at asc, m.id
+    `;
+    const family = familyRows.map((r: any) => ({
+      id: r.id,
+      name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim(),
+      firstName: r.first_name,
+      inSession: !!r.booked,
+    }));
+
     return new Response(
       JSON.stringify({
         ok: true,
@@ -129,6 +166,7 @@ export default async (req: Request, context: Context) => {
         inSession: mine ? mine.status === "in" : false,
         confirmedCount: count,
         confirmed,
+        family,
         cutoffAt: cutoffAt.toISOString(),
         bookingClosed,
       }),

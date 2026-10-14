@@ -501,6 +501,48 @@ GUWH.Pages = GUWH.Pages || {};
   // Real dashboard (live site) — weekly attendance is the dominant action;
   // everything else (timetable, finance, forum, profile) is real data
   // reused from its existing source, laid out around that one job.
+  // "My kids" on the attendance card (14 Oct 2026): one row per child saved
+  // on the Profile, with a Coming / Not coming button each. Independent of
+  // whether the parent is playing. With no children saved it is just a
+  // quiet pointer to the Profile.
+  function FamilyBooking({ family, closed, busy, onToggle }) {
+    if (!family || family.length === 0) {
+      return h(
+        "button",
+        { type: "button", onClick: () => navigate("/portal/profile"), className: "mt-4 text-xs text-white/60 underline text-left" },
+        "Bringing your kids? Add them on your Profile."
+      );
+    }
+    return h(
+      "div",
+      { className: "mt-5 pt-5 border-t border-white/15" },
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-white/60 mb-2" }, "Your kids"),
+      h(
+        "div",
+        { className: "flex flex-col gap-2" },
+        family.map((k) =>
+          h(
+            "div",
+            { key: k.id, className: "flex items-center justify-between gap-3 rounded-xl bg-white/10 px-4 py-2.5" },
+            h(
+              "span",
+              { className: "text-sm font-semibold flex items-center gap-2" },
+              k.inSession && h(Icon, { name: "check", size: 14 }),
+              k.name,
+              h("span", { className: "text-xs font-normal text-white/60" }, k.inSession ? "coming" : "not coming")
+            ),
+            k.inSession
+              ? h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: busy, onClick: () => onToggle(k.id, false) }, "Can't make it")
+              : closed
+              ? h("span", { className: "text-xs text-white/60" }, "Closed")
+              : h(Button, { size: "sm", disabled: busy, onClick: () => onToggle(k.id, true) }, "Bring " + k.firstName)
+          )
+        )
+      ),
+      h("button", { type: "button", onClick: () => navigate("/portal/profile"), className: "mt-3 text-xs text-white/60 underline" }, "Edit kids on your Profile")
+    );
+  }
+
   function RealDashboardPage() {
     const [user, setUser] = React.useState(() => GUWH.Identity.currentUser());
     const [status, setStatus] = React.useState(null);
@@ -559,6 +601,21 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    async function setKidIn(kidId, wantsIn) {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: wantsIn, dependantId: kidId }) });
+        const data = await res.json();
+        if (data.ok) setStatus(data);
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
     if (!user) return null;
     // Greeting name (2 Oct 2026): nickname if set on the Profile page,
     // otherwise the real first name. Identity's own name is only a
@@ -604,8 +661,6 @@ GUWH.Pages = GUWH.Pages || {};
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
 
-      h(GettingStartedCard, { key: profile ? profile.id : "none", profile, status, invites, forumMe, booking: loading, onBook: () => setIn(true), onProfile: setProfile }),
-
       h(
         "div",
         { className: "grid lg:grid-cols-[1.3fr_0.7fr] gap-6 mb-6" },
@@ -637,7 +692,8 @@ GUWH.Pages = GUWH.Pages || {};
                           : h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "I'm Coming"),
                         h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white" }, status.confirmedCount), " members confirmed")
                       ),
-                      h(BookingCountdown, { cutoffAt: status.cutoffAt })
+                      h(BookingCountdown, { cutoffAt: status.cutoffAt }),
+                      h(FamilyBooking, { family: status.family, closed: status.bookingClosed, busy: loading, onToggle: setKidIn })
                     )
                   : h(
                       React.Fragment,
@@ -658,7 +714,8 @@ GUWH.Pages = GUWH.Pages || {};
                           board && board.published ? "This week's teams and timetable are published — see This Week's Game." : "Teams and timetable not published yet."
                         )
                       ),
-                      h(BookingCountdown, { cutoffAt: status.cutoffAt })
+                      h(BookingCountdown, { cutoffAt: status.cutoffAt }),
+                      h(FamilyBooking, { family: status.family, closed: status.bookingClosed, busy: loading, onToggle: setKidIn })
                     )
               )
             : loading && h("div", { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" }, h("p", { className: "text-sm text-white/70" }, "Loading…")),
@@ -675,6 +732,12 @@ GUWH.Pages = GUWH.Pages || {};
           h(BringAMateButton)
         )
       ),
+
+      // Getting started checklist sits UNDER the attendance card (14 Oct
+      // 2026): on a phone it used to push I'm Coming well below the fold for
+      // new members. The checklist's own first step still has an I'm Coming
+      // button.
+      h(GettingStartedCard, { key: profile ? profile.id : "none", profile, status, invites, forumMe, booking: loading, onBook: () => setIn(true), onProfile: setProfile }),
 
       h(RecapCard, { recap }),
 

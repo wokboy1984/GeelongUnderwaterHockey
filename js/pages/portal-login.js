@@ -120,6 +120,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(Pill, { tone: "accent" }, "Member portal"),
       h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-4" }, signingUp ? "Join the club." : "Welcome back."),
       h("p", { className: "mt-2 text-[var(--ink-soft)]" }, signingUp ? "Members set up an account once, then book in each Wednesday." : "Log in or create an account to book in for Wednesday."),
+      !signingUp && GUWH.confirmFailed && h("p", { className: "mt-4 rounded-xl bg-[var(--warn-10)] p-3 text-sm text-[var(--ink)]" }, "That confirmation link has already been used or has expired. If you've already confirmed, just log in below."),
       signingUp
         ? h(SignupForm, { onCancel: () => setSigningUp(false) })
         : h(

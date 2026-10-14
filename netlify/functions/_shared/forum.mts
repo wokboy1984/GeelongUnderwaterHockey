@@ -15,6 +15,11 @@ import { ageFromDOB } from "./roles.mts";
 
 export const ADULT_AGE = 18;
 
+// Forum access (14 Oct 2026, Cheongy: under-18 members get the forum too,
+// "its a pretty PG crew"). A date of birth must still be on file; there is
+// no minimum age. Posting stays opt-in, and moderation applies to everyone.
+export const FORUM_MIN_AGE = 0;
+
 // A member's real DOB is required to know they're an adult — no DOB on
 // file yet means "not eligible", not "assume adult". Combined with
 // forum_participation.opted_in server-side, this is the whole access gate.

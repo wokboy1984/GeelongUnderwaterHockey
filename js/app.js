@@ -99,7 +99,7 @@
     // nav, not a replacement for it — logged-in members still need About /
     // News / Play one click away (the logo covers Home).
     const identityMember = GUWH.Identity ? GUWH.Identity.currentMember() : null;
-    const showForum = !!(identityMember && identityMember.age !== null && identityMember.age !== undefined && identityMember.age >= 18);
+    const showForum = !!(identityMember && identityMember.age !== null && identityMember.age !== undefined);
     // Member Functions: what every logged-in member sees. Admin Functions:
     // only the staff-role workspaces stacked on top — empty for a plain
     // member, so an administrator (who holds every staff role at once) sees
@@ -458,16 +458,32 @@
   let pendingLandingRedirect = GUWH.Router.currentPath() === "/";
   // Someone clicking the link in their signup confirmation email lands on
   // "/#confirmation_token=..." - the widget logs them in a moment later.
-  // Send them to the Dashboard's Getting started checklist rather than the
-  // public homepage (12 Oct 2026, Cheongy: "it should land on the setup
-  // screen").
+  // Send them to their Profile to fill in their details (14 Oct 2026,
+  // Cheongy: "link back to the profile page"); saving it takes them on to
+  // the Dashboard's Getting started checklist. If the link has already been
+  // used or has expired, the widget reports an error and we show the login
+  // page with a note instead of leaving them on the homepage.
   let pendingConfirmation = /confirmation_token=/.test(window.location.hash);
+  // The widget doesn't reliably raise an event when the link fails, so if
+  // nobody is logged in a few seconds after the link was opened, treat it
+  // as used/expired. A late login still lands on Profile (pendingConfirmation
+  // stays set until a user appears).
+  function confirmationFailed() {
+    if (!pendingConfirmation || (GUWH.Identity && GUWH.Identity.currentUser())) return;
+    pendingLandingRedirect = false;
+    GUWH.confirmFailed = true;
+    navigate("/portal");
+  }
+  if (pendingConfirmation) {
+    if (window.netlifyIdentity) window.netlifyIdentity.on("error", confirmationFailed);
+    setTimeout(confirmationFailed, 6000);
+  }
   function maybeRedirectLanding() {
     if (pendingConfirmation && GUWH.Identity && GUWH.Identity.currentUser()) {
       pendingConfirmation = false;
       pendingLandingRedirect = false;
       GUWH.justJoined = true;
-      navigate("/portal/dashboard");
+      navigate("/portal/profile");
       return;
     }
     if (pendingConfirmation) return; // wait for the login that follows confirmation

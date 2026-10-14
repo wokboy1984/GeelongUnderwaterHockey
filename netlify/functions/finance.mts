@@ -1,12 +1,12 @@
 import { getDatabase } from '@netlify/database';
-import { getVerifiedUser, ensureMember, hasPermission, logAudit, unauthorized, forbidden } from './_shared/roles.mts';
+import { getVerifiedUser, ensureMember, ensureFamilyColumns, hasPermission, logAudit, unauthorized, forbidden } from './_shared/roles.mts';
 import { FEES, cents, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
  if (!['GET','POST'].includes(req.method)) return json({ok:false,error:'Method not allowed'},405);
  const user = await getVerifiedUser(req); if (!user) return unauthorized();
  try {
-  const db = getDatabase(), caller = await ensureMember(db,user);
+  const db = getDatabase(); await ensureFamilyColumns(db); const caller = await ensureMember(db,user);
   const url = new URL(req.url);
   // Self-service summary for the member dashboard: any logged-in member can
   // see their OWN balance (never anyone else's, and never the full roster) —
@@ -20,16 +20,21 @@ export default async (req: Request) => {
    if (!account) return json({ok:true,self:true,month,hasAccount:false});
    const entries = await db.sql`
     with attended as (
-     select sa.member_id,sa.session_date,
+     -- A child's games bill to their parent (bill_to). The first 3 games
+     -- are free per child, then the unwaged (junior) rate.
+     select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.first_name,sa.session_date,
       row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
-     from session_attendance sa where sa.attended=true and sa.member_id=${caller.id}
+     from session_attendance sa join members m on m.id=sa.member_id
+     where sa.attended=true and coalesce(m.parent_id,sa.member_id)=${caller.id}
     ), game_entries as (
      select 'game'::text as kind, to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-      case when fa.trial_eligible and a.attendance_number<=3 then 0
+      case when a.is_child then (case when a.attendance_number<=3 then 0 else 1000 end)
+           when fa.trial_eligible and a.attendance_number<=3 then 0
            when fa.category='waged' then 2000 else 1000 end as amount_cents,
-      case when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
+      case when a.is_child then a.first_name||' (child) — '||(case when a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+           when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
       a.session_date::timestamptz as created_at
-     from attended a join finance_accounts fa on fa.member_id=a.member_id
+     from attended a join finance_accounts fa on fa.member_id=a.bill_to
     ), manual_entries as (
      -- Includes retrospective manual 'game' entries (a game that was never
      -- checked in) alongside joining/annual/payment/custom — finance.mts
@@ -90,22 +95,26 @@ export default async (req: Request) => {
   }
   const month = new URL(req.url).searchParams.get('month') || new Date().toISOString().slice(0,7);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ok:false,error:'Invalid month'},400);
-  const members = await db.sql`select m.id,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id order by m.last_name,m.first_name`;
+  const members = await db.sql`select m.id,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by m.last_name,m.first_name`;
   // Game fees are derived from actual check-ins. Unchecking attendance removes
   // the charge, and setting up an account later automatically includes history.
   const entries = await db.sql`
    with attended as (
-    select sa.member_id,sa.session_date,sa.marked_by,
+    -- A child's games bill to their parent (bill_to). The first 3 games
+    -- are free per child, then the unwaged (junior) rate.
+    select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.first_name,sa.session_date,sa.marked_by,
      row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
-    from session_attendance sa where sa.attended=true
+    from session_attendance sa join members m on m.id=sa.member_id where sa.attended=true
    ), game_entries as (
-    select 'attendance:'||a.member_id||':'||a.session_date::text as id,a.member_id,'game'::text as kind,
+    select 'attendance:'||a.member_id||':'||a.session_date::text as id,a.bill_to as member_id,'game'::text as kind,
      to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-     case when fa.trial_eligible and a.attendance_number<=3 then 0
+     case when a.is_child then (case when a.attendance_number<=3 then 0 else 1000 end)
+          when fa.trial_eligible and a.attendance_number<=3 then 0
           when fa.category='waged' then 2000 else 1000 end as amount_cents,
-     case when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
+     case when a.is_child then a.first_name||' (child) — '||(case when a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+          when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
      a.marked_by as actor_id,a.session_date::timestamptz as created_at
-    from attended a join finance_accounts fa on fa.member_id=a.member_id
+    from attended a join finance_accounts fa on fa.member_id=a.bill_to
    ), manual_entries as (
     -- Includes retrospective manual 'game' entries alongside joining/annual/
     -- payment/custom — finance.mts refuses a manual game entry for any date

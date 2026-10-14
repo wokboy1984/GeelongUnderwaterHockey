@@ -23,7 +23,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureMember, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
-import { ADULT_AGE, forumDisplayName, isNotifyLevel } from "./_shared/forum.mts";
+import { FORUM_MIN_AGE, forumDisplayName, isNotifyLevel } from "./_shared/forum.mts";
 import { loadForumParticipation, isSuspended, isRestricted } from "./_shared/forum-access.mts";
 
 function badRequest(message: string) {
@@ -40,7 +40,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
   const db = getDatabase();
   const caller = await ensureMember(db, user);
-  const eligible = caller.age !== null && caller.age >= ADULT_AGE;
+  const eligible = caller.age !== null && caller.age >= FORUM_MIN_AGE;
 
   try {
     if (req.method === "POST") {
@@ -48,7 +48,7 @@ export default async (req: Request, context: Context) => {
       const action = String(body.action || "");
 
       if (action === "opt_in") {
-        if (!eligible) return badRequest("The forum is for adult members only.");
+        if (!eligible) return badRequest("Add your date of birth on your Profile to use the forum.");
         const existing = await loadForumParticipation(db, caller.id);
         const guidelines = await currentGuidelines(db);
         await db.sql`
@@ -146,7 +146,7 @@ export default async (req: Request, context: Context) => {
         const rows = await db.sql`
           select m.id, m.first_name, m.last_name from members m
           join forum_participation fp on fp.member_id = m.id and fp.opted_in = true
-          where m.date_of_birth is not null and date_part('year', age(m.date_of_birth)) >= ${ADULT_AGE}
+          where m.date_of_birth is not null and m.email not like '%@no-login.guwh'
             and lower(m.first_name) like ${query + "%"}
           order by m.first_name asc
           limit 8
