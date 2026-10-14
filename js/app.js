@@ -50,6 +50,7 @@
     const items = [
       { label: "Home", path: "/portal/dashboard" },
       { label: "This Week's Game", path: "/portal/board" },
+      { label: "Player Stats", path: "/portal/stats" },
     ];
     // Members Forum only ever appears for adult members — juniors get zero
     // trace of it, not just a locked door. Real enforcement happens
@@ -376,6 +377,13 @@
         return h(GUWH.Pages.BringAMate);
       }
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate);
+    }
+    if (path === "/portal/stats") {
+      if (GUWH.Identity) {
+        if (!GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+        return h(GUWH.Pages.PlayerStats);
+      }
+      return h(Container, { className: "py-24 text-center text-[var(--ink-soft)]" }, "Not available in this preview.");
     }
     if (path === "/portal/profile") {
       if (GUWH.Identity) {

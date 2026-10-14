@@ -9,6 +9,10 @@
 // POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
 //        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
+// POST   /api/admin/roles  { action: "delete_member", memberEmail, confirm: true }
+//        -> permanently deletes a member (14 Oct 2026, Cheongy). Refused if
+//        they have attendance or fee history (see historyBlockers below).
+//
 // All three require the caller to already hold the 'administrator' role
 // (checked server-side against the database — never against anything the
 // client sends). This is the only place roles can change; there is no
@@ -16,7 +20,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ageFromDOB, ensureMember, getVerifiedUser, hasRole, isGrade, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { SUPER_ADMIN_EMAIL, ageFromDOB, ensureFamilyColumns, ensureMember, getVerifiedUser, hasRole, isGrade, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -31,6 +35,34 @@ function shapeMember(row: any) {
     roles: (row.roles || []).filter(Boolean),
     waiverSigned: !!row.waiver_accepted_at,
   };
+}
+
+
+// Why a member can't be deleted (14 Oct 2026). Most of what hangs off a
+// member is removed with them by the database (bookings, roles, goals,
+// forum settings...) or just loses its author link (forum posts). Attendance
+// and fee records are different: they are the club's history and the money
+// trail, so a member who has any - or who recorded attendance or fees for
+// others - is not deleted. Returns a list of reasons; empty means safe.
+async function historyBlockers(db: any, id: string): Promise<string[]> {
+  await db.sql`create table if not exists session_attendance_closeouts(
+    session_date date primary key,
+    closed_at timestamptz not null default now(),
+    closed_by text not null references members(id)
+  )`;
+  const [c] = await db.sql`
+    select
+      (select count(*)::int from session_attendance where member_id = ${id}) as attended,
+      (select count(*)::int from session_attendance where marked_by = ${id}) as marked,
+      (select count(*)::int from session_attendance_history where member_id = ${id} or marked_by = ${id}) as hist,
+      (select count(*)::int from finance_entries where member_id = ${id} or actor_id = ${id}) as fees,
+      (select count(*)::int from session_attendance_closeouts where closed_by = ${id}) as closeouts
+  `;
+  const reasons: string[] = [];
+  if (c.attended > 0) reasons.push(`${c.attended} recorded game${c.attended === 1 ? "" : "s"}`);
+  if (c.marked > 0 || c.hist > 0 || c.closeouts > 0) reasons.push("attendance rolls they have taken or changed");
+  if (c.fees > 0) reasons.push(`${c.fees} fee or payment record${c.fees === 1 ? "" : "s"}`);
+  return reasons;
 }
 
 export default async (req: Request, context: Context) => {
@@ -148,6 +180,46 @@ export default async (req: Request, context: Context) => {
         JSON.stringify({ ok: true, member: shapeMember({ ...target, waiver_accepted_at: updated.waiver_accepted_at, roles: roleRows.map((r: any) => r.role) }) }),
         { headers: { "content-type": "application/json" } }
       );
+    }
+
+    // Delete a member for good (14 Oct 2026, Cheongy: "give admin authority to
+    // delete people"). Double-confirmed in the UI; `confirm: true` is also
+    // required here. Never yourself, never the super admin. Their children
+    // (My kids) go with them, and only if the children have no history either.
+    // This removes the club record only - the person's Netlify Identity login
+    // is separate and stays until it is deleted in Netlify.
+    if (req.method === "POST" && body.action === "delete_member") {
+      const fail = (error: string, status = 400) =>
+        new Response(JSON.stringify({ ok: false, error }), { status, headers: { "content-type": "application/json" } });
+      if (!memberEmail || body.confirm !== true) return fail("memberEmail and confirm are required");
+      await ensureFamilyColumns(db);
+      const [target] = await db.sql`select id, email, first_name, last_name from members where email = ${memberEmail}`;
+      if (!target || target.email.endsWith("@no-login.guwh")) return fail("No member found with that email", 404);
+      if (target.id === caller.id) return fail("You can't delete your own account.");
+      if (target.email === SUPER_ADMIN_EMAIL) return fail("The main administrator account can't be deleted.");
+
+      const name = (target.first_name + " " + target.last_name).trim();
+      const kids = await db.sql`select id, first_name from members where parent_id = ${target.id}`;
+      const own = await historyBlockers(db, target.id);
+      if (own.length) return fail(`${name} can't be deleted because they have ${own.join(" and ")}. Deleting them would wipe that club history.`, 409);
+      for (const k of kids) {
+        const kr = await historyBlockers(db, k.id);
+        if (kr.length) return fail(`${name} can't be deleted because their child ${k.first_name} has ${kr.join(" and ")}.`, 409);
+      }
+
+      for (const k of kids) {
+        await db.sql`delete from finance_accounts where member_id = ${k.id}`;
+        await db.sql`delete from members where id = ${k.id}`;
+      }
+      await db.sql`delete from finance_accounts where member_id = ${target.id}`;
+      await db.sql`delete from members where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "member_deleted",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { email: target.email, name, children: kids.length },
+        note: `${caller.email} deleted member ${target.email}${kids.length ? ` and ${kids.length} child record${kids.length === 1 ? "" : "s"}` : ""}`,
+      });
+      return new Response(JSON.stringify({ ok: true, deleted: target.id }), { headers: { "content-type": "application/json" } });
     }
 
     const role = String(body.role || "").trim();

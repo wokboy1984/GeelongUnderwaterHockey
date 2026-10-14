@@ -29,7 +29,14 @@ export async function listKids(db: any, parentId: string) {
   const rows = await db.sql`
     select m.id, m.first_name, m.last_name, m.date_of_birth, m.position,
       (select count(*)::int from bookings b join sessions s on s.id = b.session_id
-        where b.member_id = m.id and b.status = 'in' and s.session_date < current_date) as games
+        where b.member_id = m.id and b.status = 'in' and s.session_date < current_date) as games,
+      (select coalesce(sum(gg.goals), 0)::int from game_goals gg where gg.member_id = m.id) as career_goals,
+      (select coalesce(sum(gg.goals), 0)::int
+        from game_goals gg
+        join timetable_pool_games tpg on tpg.id = gg.pool_game_id
+        join timetable_rows tr on tr.id = tpg.row_id
+        join sessions s2 on s2.id = tr.session_id
+        where gg.member_id = m.id and extract(year from s2.session_date) = extract(year from current_date)) as season_goals
     from members m
     where m.parent_id = ${parentId} and m.dependant_removed_at is null
     order by m.created_at asc, m.id
@@ -42,6 +49,8 @@ export async function listKids(db: any, parentId: string) {
     age: ageFromDOB(r.date_of_birth),
     position: r.position || "Unknown",
     gamesPlayed: r.games,
+    careerGoals: r.career_goals,
+    seasonGoals: r.season_goals,
   }));
 }
 

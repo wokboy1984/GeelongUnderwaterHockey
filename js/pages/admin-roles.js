@@ -28,6 +28,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [note, setNote] = React.useState({}); // memberId -> note text
     const [busy, setBusy] = React.useState(null); // "memberId:role" while a request is in flight
     const [roleChoice, setRoleChoice] = React.useState({}); // memberId -> role currently selected in that row's dropdown
+    const [confirmDeleteId, setConfirmDeleteId] = React.useState(null); // member whose Delete is awaiting the second click
 
     function selectedRoleFor(m) {
       return roleChoice[m.id] || ROLE_ORDER[0];
@@ -92,6 +93,33 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Permanently delete a member (14 Oct 2026, Cheongy). Two clicks: Delete,
+    // then "Yes, delete". The server refuses if they have attendance or fee
+    // history, and says why. It does not remove their Netlify Identity login.
+    async function deleteMember(member) {
+      const key = member.id + ":delete";
+      setBusy(key);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          body: JSON.stringify({ action: "delete_member", memberEmail: member.email, confirm: true }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setMembers((prev) => prev.filter((m) => m.id !== member.id));
+          setConfirmDeleteId(null);
+        } else {
+          setError(data.error || "Something went wrong");
+          setConfirmDeleteId(null);
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(null);
+      }
+    }
+
     async function setGrade(member, grade) {
       const key = member.id + ":grade";
       setBusy(key);
@@ -131,116 +159,123 @@ GUWH.Pages = GUWH.Pages || {};
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No members found.")
         : h(
             "div",
-            { className: "rounded-2xl bg-white ring-1 ring-black/5 overflow-x-auto" },
-            h(
-              "table",
-              { className: "w-full text-sm min-w-[920px]" },
-              h(
-                "thead",
-                null,
+            { className: "rounded-2xl bg-white ring-1 ring-black/5 divide-y divide-black/5" },
+            members.map((m) => {
+              const role = selectedRoleFor(m);
+              const hasIt = m.roles.includes(role);
+              const key = m.id + ":" + role;
+              const isSelf = GUWH.Identity.currentMember() && GUWH.Identity.currentMember().id === m.id;
+              const label = (t) => h("p", { className: "text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-1" }, t);
+              // Stacked cards, not a wide table (14 Oct 2026): the table needed a
+              // horizontal scroll on anything narrower than ~920px.
+              return h(
+                "div",
+                { key: m.id, className: "p-4 sm:p-5 flex flex-col gap-4" },
                 h(
-                  "tr",
-                  { className: "text-left text-xs font-mono uppercase tracking-wide text-[var(--ink-soft)] border-b border-black/5" },
-                  ["Member", "Age", "Grade", "Waiver", "Current roles", "Change role"].map((c) => h("th", { key: c, className: "px-4 py-3 font-semibold" }, c))
-                )
-              ),
-              h(
-                "tbody",
-                null,
-                members.map((m) => {
-                  const role = selectedRoleFor(m);
-                  const hasIt = m.roles.includes(role);
-                  const key = m.id + ":" + role;
-                  return h(
-                    "tr",
-                    { key: m.id, className: "border-b border-black/5 last:border-0 align-top" },
-                    h(
-                      "td",
-                      { className: "px-4 py-3" },
-                      h("p", { className: "font-semibold text-[var(--ink)]" }, m.firstName + " " + m.lastName),
-                      h("p", { className: "text-xs text-[var(--ink-soft)]" }, m.email)
-                    ),
-                    h("td", { className: "px-4 py-3 text-[var(--ink-soft)] tabular-nums" }, typeof m.age === "number" ? m.age : "—"),
-                    h(
-                      "td",
-                      { className: "px-4 py-3" },
-                      h(
-                        "select",
-                        {
-                          className: inputCls + " !py-1.5 !text-xs !w-auto",
-                          value: m.grade || "",
-                          disabled: busy === m.id + ":grade",
-                          onChange: (e) => setGrade(m, e.target.value),
-                        },
-                        h("option", { value: "" }, "No grade"),
-                        GRADES.map((g) => h("option", { key: g, value: g }, g))
-                      )
-                    ),
-                    h(
-                      "td",
-                      { className: "px-4 py-3" },
-                      m.waiverSigned
-                        ? h(
-                            "div",
-                            { className: "flex flex-col items-start gap-1" },
-                            h(Pill, { tone: "good", className: "!py-0.5 !px-2 !text-[10px]" }, "Signed"),
-                            h("button", { type: "button", className: "text-[11px] text-[var(--ink-soft)] underline disabled:opacity-40", disabled: busy === m.id + ":waiver", onClick: () => setWaiver(m, false) }, "Undo")
-                          )
-                        : h(
-                            "div",
-                            { className: "flex flex-col items-start gap-1" },
-                            h(Pill, { tone: "warn", className: "!py-0.5 !px-2 !text-[10px]" }, "Not signed"),
-                            h(Button, { type: "button", size: "sm", variant: "secondary", className: "!py-1 !px-2.5 !text-xs whitespace-nowrap", disabled: busy === m.id + ":waiver", onClick: () => setWaiver(m, true) }, "Mark signed")
-                          )
-                    ),
-                    h(
-                      "td",
-                      { className: "px-4 py-3" },
-                      m.roles.length
-                        ? h(
-                            "div",
-                            { className: "flex flex-wrap gap-1" },
-                            m.roles.map((r) => h(Pill, { key: r, tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, ROLE_LABELS[r] || r))
-                          )
-                        : h("span", { className: "text-xs text-[var(--ink-soft)]" }, "—")
-                    ),
-                    h(
-                      "td",
-                      { className: "px-4 py-3" },
-                      h(
+                  "div",
+                  { className: "flex items-start justify-between gap-3" },
+                  h(
+                    "div",
+                    { className: "min-w-0" },
+                    h("p", { className: "font-semibold text-[var(--ink)]" }, m.firstName + " " + m.lastName, typeof m.age === "number" && h("span", { className: "ml-2 text-xs font-normal text-[var(--ink-soft)]" }, "Age " + m.age)),
+                    h("p", { className: "text-xs text-[var(--ink-soft)] break-all" }, m.email)
+                  ),
+                  !isSelf && (confirmDeleteId === m.id
+                    ? h(
                         "div",
-                        { className: "flex gap-2" },
-                        h(
-                          "select",
-                          {
-                            className: inputCls + " !py-1.5 !text-xs !w-auto",
-                            value: role,
-                            onChange: (e) => setRoleChoice((prev) => Object.assign({}, prev, { [m.id]: e.target.value })),
-                          },
-                          ROLE_ORDER.map((r) => h("option", { key: r, value: r }, ROLE_LABELS[r]))
-                        ),
-                        h(
-                          Button,
-                          {
-                            size: "sm",
-                            variant: hasIt ? "secondary" : "dark",
-                            disabled: busy === key,
-                            onClick: () => toggleRole(m, role, hasIt),
-                          },
-                          hasIt ? "Revoke" : "Grant"
-                        )
-                      ),
-                      h("input", {
-                        className: inputCls + " !py-1 !text-xs mt-1.5",
-                        value: note[m.id] || "",
-                        onChange: (e) => setNote((prev) => Object.assign({}, prev, { [m.id]: e.target.value })),
-                        placeholder: "Note (optional) — e.g. Elected at AGM",
-                      })
+                        { className: "flex items-center gap-1 shrink-0" },
+                        h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy === m.id + ":delete", onClick: () => setConfirmDeleteId(null) }, "Cancel"),
+                        h(Button, { type: "button", size: "sm", className: "!bg-[var(--bad)] !text-white", disabled: busy === m.id + ":delete", onClick: () => deleteMember(m) }, busy === m.id + ":delete" ? "Deleting…" : "Yes, delete")
+                      )
+                    : h(Button, { type: "button", size: "sm", variant: "ghost", className: "shrink-0 !text-[var(--bad)]", onClick: () => setConfirmDeleteId(m.id) }, "Delete"))
+                ),
+                confirmDeleteId === m.id && h("p", { className: "text-xs text-[var(--bad)] -mt-2" }, "Permanently deletes " + m.firstName + " and everything linked only to them (bookings, roles, goals, forum settings). This can't be undone."),
+                h(
+                  "div",
+                  { className: "grid gap-4 sm:grid-cols-3" },
+                  h(
+                    "div",
+                    null,
+                    label("Grade"),
+                    h(
+                      "select",
+                      {
+                        className: inputCls + " !py-1.5 !text-xs !w-auto",
+                        value: m.grade || "",
+                        disabled: busy === m.id + ":grade",
+                        onChange: (e) => setGrade(m, e.target.value),
+                      },
+                      h("option", { value: "" }, "No grade"),
+                      GRADES.map((g) => h("option", { key: g, value: g }, g))
                     )
-                  );
-                })
-              )
-            )
+                  ),
+                  h(
+                    "div",
+                    null,
+                    label("Waiver"),
+                    m.waiverSigned
+                      ? h(
+                          "div",
+                          { className: "flex items-center gap-2" },
+                          h(Pill, { tone: "good", className: "!py-0.5 !px-2 !text-[10px]" }, "Signed"),
+                          h("button", { type: "button", className: "text-[11px] text-[var(--ink-soft)] underline disabled:opacity-40", disabled: busy === m.id + ":waiver", onClick: () => setWaiver(m, false) }, "Undo")
+                        )
+                      : h(
+                          "div",
+                          { className: "flex items-center gap-2 flex-wrap" },
+                          h(Pill, { tone: "warn", className: "!py-0.5 !px-2 !text-[10px]" }, "Not signed"),
+                          h(Button, { type: "button", size: "sm", variant: "secondary", className: "!py-1 !px-2.5 !text-xs whitespace-nowrap", disabled: busy === m.id + ":waiver", onClick: () => setWaiver(m, true) }, "Mark signed")
+                        )
+                  ),
+                  h(
+                    "div",
+                    null,
+                    label("Current roles"),
+                    m.roles.length
+                      ? h(
+                          "div",
+                          { className: "flex flex-wrap gap-1" },
+                          m.roles.map((r) => h(Pill, { key: r, tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, ROLE_LABELS[r] || r))
+                        )
+                      : h("span", { className: "text-xs text-[var(--ink-soft)]" }, "None")
+                  )
+                ),
+                h(
+                  "div",
+                  null,
+                  label("Change role"),
+                  h(
+                    "div",
+                    { className: "flex flex-wrap gap-2" },
+                    h(
+                      "select",
+                      {
+                        className: inputCls + " !py-1.5 !text-xs !w-auto",
+                        value: role,
+                        onChange: (e) => setRoleChoice((prev) => Object.assign({}, prev, { [m.id]: e.target.value })),
+                      },
+                      ROLE_ORDER.map((r) => h("option", { key: r, value: r }, ROLE_LABELS[r]))
+                    ),
+                    h(
+                      Button,
+                      {
+                        size: "sm",
+                        variant: hasIt ? "secondary" : "dark",
+                        disabled: busy === key,
+                        onClick: () => toggleRole(m, role, hasIt),
+                      },
+                      hasIt ? "Revoke" : "Grant"
+                    ),
+                    h("input", {
+                      className: inputCls + " !py-1 !text-xs !w-full sm:!w-64",
+                      value: note[m.id] || "",
+                      onChange: (e) => setNote((prev) => Object.assign({}, prev, { [m.id]: e.target.value })),
+                      placeholder: "Note (optional) — e.g. Elected at AGM",
+                    })
+                  )
+                )
+              );
+            })
           ),
 
       h(

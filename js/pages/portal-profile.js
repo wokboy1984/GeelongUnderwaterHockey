@@ -64,21 +64,25 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Photo sits beside the name at the top of the page (14 Oct 2026): small
+    // Change photo / Remove buttons with the note underneath, to the right.
     return h(
       "div",
-      { className: "flex items-center gap-4" },
-      h(MemberPhoto, { memberId: member.id, version: member.photoVersion, size: 72 }),
+      { className: "flex items-center gap-4 mb-8" },
+      h(MemberPhoto, { memberId: member.id, version: member.photoVersion, size: 80 }),
       h(
         "div",
-        { className: "flex flex-col gap-2" },
+        { className: "min-w-0 flex flex-col gap-1.5" },
+        h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)]" }, "My profile"),
+        h("h1", { className: "font-display text-2xl sm:text-3xl font-bold text-[var(--ink)] leading-tight" }, (member.firstName + " " + (member.lastName || "")).trim()),
         h(
           "div",
-          { className: "flex items-center gap-2" },
-          h(Button, { type: "button", variant: "secondary", size: "sm", disabled: busy, onClick: () => inputRef.current && inputRef.current.click() }, member.photoVersion ? "Change photo" : "Add photo"),
-          member.photoVersion > 0 && h(Button, { type: "button", variant: "ghost", size: "sm", disabled: busy, onClick: onRemove }, "Remove")
+          { className: "flex items-center gap-1" },
+          h(Button, { type: "button", variant: "secondary", size: "sm", className: "!py-1 !px-3 !text-xs", disabled: busy, onClick: () => inputRef.current && inputRef.current.click() }, member.photoVersion ? "Change photo" : "Add photo"),
+          member.photoVersion > 0 && h(Button, { type: "button", variant: "ghost", size: "sm", className: "!py-1 !px-2 !text-xs", disabled: busy, onClick: onRemove }, "Remove")
         ),
         h("input", { ref: inputRef, type: "file", accept: "image/jpeg,image/png,image/webp", className: "hidden", onChange: onPick }),
-        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "JPEG, PNG or WEBP, 2MB max. Visible to other logged-in members only."),
+        h("p", { className: "text-[11px] text-[var(--ink-soft)]" }, "JPEG, PNG or WEBP, 2MB max. Visible to other logged-in members only."),
         error && h("p", { className: "text-xs text-[var(--bad)]" }, error)
       )
     );
@@ -265,7 +269,7 @@ GUWH.Pages = GUWH.Pages || {};
                 "div",
                 { className: "min-w-0" },
                 h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, (k.firstName + " " + (k.lastName || "")).trim()),
-                h("p", { className: "text-xs text-[var(--ink-soft)]" }, (k.age !== null ? "Age " + k.age : "Age not set") + " · " + k.position + (k.gamesPlayed ? " · " + k.gamesPlayed + (k.gamesPlayed === 1 ? " game" : " games") : ""))
+                h("p", { className: "text-xs text-[var(--ink-soft)]" }, (k.age !== null ? "Age " + k.age : "Age not set") + " · " + k.position)
               ),
               h(
                 "div",
@@ -403,7 +407,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-3xl" },
-      h(SectionHeading, { eyebrow: "My profile", title: member.firstName + " " + member.lastName }),
+      h(PhotoUploader, { member, onChange: (photoVersion) => setMember((m) => Object.assign({}, m, { photoVersion })) }),
       GUWH.justJoined && !GUWH.joinedSaved && h(
         "div",
         { className: "rounded-2xl bg-[var(--good-15)] p-4 mb-6" },
@@ -435,19 +439,13 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
           h(FormField, { label: "Phone" }, h("input", { type: "tel", className: inputCls, value: form.phone, onChange: (e) => set("phone", e.target.value) })),
-          h(FormField, { label: "Games played" }, h("input", { className: inputCls, value: member.gamesPlayed, disabled: true }))
+          h(FormField, { label: "Date of birth *" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) }))
         ),
+        // Read-only numbers (games played, goals) live on the Player Stats
+        // page now (14 Oct 2026) - this page is only things you can edit.
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "Goals this season", hint: "Recorded by the Game Coordinator after each session" }, h("input", { className: inputCls, value: member.seasonGoals || 0, disabled: true })),
-          h(FormField, { label: "Career goals" }, h("input", { className: inputCls, value: member.careerGoals || 0, disabled: true }))
-        ),
-
-        h(
-          "div",
-          { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "Date of birth *" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) })),
           h(
             FormField,
             { label: "Grade" },
@@ -457,22 +455,21 @@ GUWH.Pages = GUWH.Pages || {};
               h("option", { value: "" }, "Not set"),
               REAL_GRADES.map((g) => h("option", { key: g, value: g }, g))
             )
+          ),
+          h(
+            FormField,
+            { label: "Preferred position" },
+            h(
+              "select",
+              { className: inputCls, value: form.position, onChange: (e) => set("position", e.target.value) },
+              REAL_POSITIONS.map((p) => h("option", { key: p, value: p }, p))
+            )
           )
         ),
         h(
           "p",
           { className: "text-xs text-[var(--ink-soft)] -mt-3" },
           "Pick your own grade to start — a Game Coordinator or Administrator may adjust it once they've seen you play."
-        ),
-
-        h(
-          FormField,
-          { label: "Preferred position" },
-          h(
-            "select",
-            { className: inputCls, value: form.position, onChange: (e) => set("position", e.target.value) },
-            REAL_POSITIONS.map((p) => h("option", { key: p, value: p }, p))
-          )
         ),
 
         h("hr", { className: "border-black/5" }),
@@ -492,12 +489,6 @@ GUWH.Pages = GUWH.Pages || {};
           h(Button, { type: "submit" }, "Save profile"),
           savedFlash && h("span", { className: "text-sm text-[var(--good-dark)] flex items-center gap-1.5" }, h(Icon, { name: "check", size: 14 }), "Saved")
         )
-      ),
-
-      h(
-        "div",
-        { className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 mt-6" },
-        h(PhotoUploader, { member, onChange: (photoVersion) => setMember((m) => Object.assign({}, m, { photoVersion })) })
       ),
 
       h("div", { className: "mt-6" }, h(FamilyCard)),
