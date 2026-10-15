@@ -114,30 +114,6 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  function StickDiagram() {
-    const label = (x, y, t, anchor) => h("text", { x, y, fontSize: 14, fontWeight: 700, fill: "#1d2b3a", fontFamily: "sans-serif", textAnchor: anchor || "start" }, t);
-    const line = (x1, y1, x2, y2) => h("line", { x1, y1, x2, y2, stroke: "#ff7a45", strokeWidth: 2 });
-    return h(
-      "figure",
-      { className: "rounded-2xl bg-white ring-1 ring-black/5 p-4 sm:p-6" },
-      h(
-        "svg",
-        { viewBox: "0 0 600 240", className: "w-full h-auto", role: "img", "aria-label": "Side view of an underwater hockey stick with the handle, front face, back and hook labelled." },
-        // handle
-        h("rect", { x: 60, y: 110, width: 190, height: 34, rx: 10, fill: "#1d2b3a" }),
-        // blade with a curved front edge and a hooked tip
-        h("path", { d: "M250 110 L420 110 C470 110 500 125 512 150 C520 168 514 186 498 192 C488 196 478 190 476 180 C472 160 452 144 420 144 L250 144 Z", fill: "#f4f6f8", stroke: "#1d2b3a", strokeWidth: 3 }),
-        // puck
-        h("ellipse", { cx: 455, cy: 166, rx: 18, ry: 8, fill: "#ff7a45" }),
-        line(150, 108, 150, 62), label(150, 54, "Handle", "middle"),
-        line(330, 144, 330, 196), label(330, 214, "Front (playing face)", "middle"),
-        line(330, 110, 330, 62), label(330, 54, "Back", "middle"),
-        line(506, 176, 556, 176), label(560, 181, "Hook", "start")
-      ),
-      h("figcaption", { className: "text-xs text-[var(--ink-soft)] mt-2" }, "Simplified side view. Shapes vary by maker, but every stick has these parts.")
-    );
-  }
-
   const GEAR = [
     { name: "Mask", body: "A low-volume, twin-lens mask that seals well. Test it in the shop: press it to your face, breathe in gently through your nose, and it should stay on by itself. Swimming goggles don't work, as you can't equalise in them." },
     { name: "Snorkel", body: "A simple, wide-bore snorkel with a comfortable mouthpiece. A purge valve helps. Skip anything with dry-tops or splash guards - you want to clear it fast." },
@@ -146,13 +122,6 @@ GUWH.Pages = GUWH.Pages || {};
     { name: "Stick", body: "Short, one-handed and coloured black or white for your team. Sticks come in left and right-handed versions - more on the stick below." },
     { name: "Cap", body: "A water polo cap with ear guards. Protects your ears and shows your team colour." },
     { name: "Mouthguard", body: "Recommended. Sticks and elbows move fast near your face." },
-  ];
-
-  const STICK_PARTS = [
-    { name: "Front (playing face)", body: "The inside of the curve. This is where the puck lives most of the time: carrying, pushing, passing and flicking all happen off the front." },
-    { name: "Back", body: "The outside of the blade. Used for backhand pushes, quick taps the other way, and blocking. Good players use both sides without thinking about it." },
-    { name: "Hook", body: "The curled tip. It lets you wrap around the puck to pull it back, steal it off an opponent's stick, and turn with it without losing contact." },
-    { name: "Handle", body: "Hold it firmly with your gloved hand, close to the blade for control. Sticks are short - they must fit inside a box 350 mm long." },
   ];
 
   const SKILLS = [
@@ -269,14 +238,8 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         Section,
         { id: "stick", eyebrow: "The stick", title: "Know your stick" },
-        P("Underwater hockey sticks are short and held in one hand, usually your stronger hand. Each part of the stick has a job."),
-        h("div", { className: "grid gap-5" },
-          h(StickDiagram),
-          h("div", { className: "grid sm:grid-cols-2 gap-3" },
-            STICK_PARTS.map((s) => h("div", { key: s.name, className: "rounded-2xl bg-[var(--sand)] p-4" },
-              h("p", { className: "font-display font-bold text-[var(--ink)]" }, s.name),
-              h("p", { className: "text-sm text-[var(--ink-soft)] mt-1 leading-relaxed" }, s.body)))),
-          h("div", { className: "max-w-2xl" }, h(Video, { id: "LAAxGI-rIrk", title: "The stick explained" })))
+        P("Underwater hockey sticks are short and held in one hand, usually your stronger hand."),
+        h("div", { className: "max-w-2xl" }, h(Video, { id: "LAAxGI-rIrk", title: "The stick explained" }))
       ),
 
       h(
