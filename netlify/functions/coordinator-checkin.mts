@@ -1,5 +1,5 @@
 import {getDatabase} from '@netlify/database';
-import {ensureFamilyColumns,getVerifiedUser,ensureMember,hasPermission,logAudit,unauthorized,forbidden} from './_shared/roles.mts';
+import {ensureFamilyColumns,ensureNicknameColumn,getVerifiedUser,ensureMember,hasPermission,logAudit,shortName,unauthorized,forbidden} from './_shared/roles.mts';
 import {clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
 const json=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 
@@ -31,7 +31,7 @@ export default async(req:Request)=>{
  if(!['GET','POST'].includes(req.method))return json({ok:false,error:'Method not allowed'},405);
  const user=await getVerifiedUser(req);if(!user)return unauthorized();
  try{
-  const db=getDatabase(),caller=await ensureMember(db,user);
+  const db=getDatabase();await ensureNicknameColumn(db);const caller=await ensureMember(db,user);
   if(!hasPermission(caller.roles,'mark_actual_attendance'))return forbidden();
   await ensureCloseoutTable(db);
   await ensureFamilyColumns(db);
@@ -100,13 +100,14 @@ export default async(req:Request)=>{
     select session_date,member_id,attended,marked_by from changed`;
    }
   }
-  const players=await db.sql`select m.id,m.first_name as "firstName",m.last_name as "lastName",
+  const players=await db.sql`select m.id,m.nickname,m.first_name as "firstName",m.last_name as "lastName",
    nullif(trim(coalesce(pp.first_name,'')||' '||coalesce(pp.last_name,'')),'') as "parentName",
    coalesce(a.attended,false) as attended,
    exists(select 1 from bookings b join sessions s on s.id=b.session_id where b.member_id=m.id and b.status='in' and s.session_date=${sessionDate}::date) as booked
    from members m left join members pp on pp.id=m.parent_id left join session_attendance a on a.member_id=m.id and a.session_date=${sessionDate}::date
    where m.dependant_removed_at is null or a.attended is not null
    order by m.first_name,m.last_name,m.id`;
+  players.forEach((p:any)=>{p.displayName=shortName(p.nickname,p.firstName,p.lastName);delete p.nickname;});
   const closeout=await closeoutFor(db,sessionDate);
   return json({ok:true,sessionDate,today,upcoming:nextSessionDateISO(),players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null});
  }catch(error){console.error('Attendance request failed',error);return json({ok:false,error:'Could not load or save attendance. Please try again.'},500);}

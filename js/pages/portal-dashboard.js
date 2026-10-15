@@ -26,7 +26,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "flex-1 min-w-0" },
-        h("p", { className: "font-display font-bold text-[var(--ink)] truncate" }, profile.firstName + (profile.lastName ? " " + profile.lastName : "")),
+        h("p", { className: "font-display font-bold text-[var(--ink)] truncate" }, GUWH.displayName(profile)),
         h("p", { className: "text-xs text-[var(--ink-soft)]" }, (profile.grade || "Grade not set") + " · " + profile.position),
         // Games played stays visible but small — it's real (counted from
         // attendance history), just not important enough to be a big stat.

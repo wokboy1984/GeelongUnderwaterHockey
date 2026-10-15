@@ -89,7 +89,7 @@ GUWH.Pages = GUWH.Pages || {};
   }
 
   function refNames(list) {
-    return (list || []).map((p) => p.firstName + " " + p.lastName).join(", ");
+    return (list || []).map((p) => GUWH.displayName(p)).join(", ");
   }
 
   // Shared five-column public timetable — used by the real Game Board page
@@ -350,7 +350,7 @@ GUWH.Pages = GUWH.Pages || {};
           "select",
           { className: inputCls, value: nomineeId, onChange: (e) => setNomineeId(e.target.value) },
           h("option", { value: "" }, "Choose a player…"),
-          mvp.nominees.map((p) => h("option", { key: p.id, value: p.id }, p.firstName + " " + p.lastName))
+          mvp.nominees.map((p) => h("option", { key: p.id, value: p.id }, GUWH.displayName(p)))
         ),
         h("input", { type: "text", maxLength: 280, placeholder: "Optional note (e.g. why)", className: inputCls, value: note, onChange: (e) => setNote(e.target.value) }),
         h(Button, { type: "submit", disabled: !nomineeId || saving }, mvp.myNomination ? "Update nomination" : "Submit nomination")
@@ -492,7 +492,7 @@ GUWH.Pages = GUWH.Pages || {};
                         : h(
                             "div",
                             { className: "flex flex-col gap-1.5" },
-                            team.players.map((p) => h("p", { key: p.id, className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName, p.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")))
+                            team.players.map((p) => h("p", { key: p.id, className: "text-sm text-[var(--ink)]" }, GUWH.displayName(p), p.isNew && h(Pill, { tone: "accent", className: "ml-2 !py-0.5 !px-2 !text-[10px]" }, "New")))
                           )
                     );
                   })

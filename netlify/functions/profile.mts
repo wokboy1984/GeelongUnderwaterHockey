@@ -11,7 +11,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, unauthorized } from "./_shared/roles.mts";
+import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, shortName, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -69,6 +69,7 @@ async function shapeProfile(db: any, memberId: string) {
     firstName: row.first_name,
     lastName: row.last_name,
     nickname: row.nickname || "",
+    displayName: shortName(row.nickname, row.first_name, row.last_name),
     dateOfBirth: dobToInputString(row.date_of_birth),
     age: ageFromDOB(row.date_of_birth),
     emergencyName: row.emergency_name,

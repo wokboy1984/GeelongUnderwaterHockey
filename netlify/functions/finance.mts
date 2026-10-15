@@ -1,12 +1,12 @@
 import { getDatabase } from '@netlify/database';
-import { getVerifiedUser, ensureMember, ensureFamilyColumns, hasPermission, logAudit, unauthorized, forbidden } from './_shared/roles.mts';
+import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, hasPermission, logAudit, shortName, unauthorized, forbidden } from './_shared/roles.mts';
 import { FEES, cents, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
  if (!['GET','POST'].includes(req.method)) return json({ok:false,error:'Method not allowed'},405);
  const user = await getVerifiedUser(req); if (!user) return unauthorized();
  try {
-  const db = getDatabase(); await ensureFamilyColumns(db); const caller = await ensureMember(db,user);
+  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); const caller = await ensureMember(db,user);
   const url = new URL(req.url);
   // Self-service summary for the member dashboard: any logged-in member can
   // see their OWN balance (never anyone else's, and never the full roster) —
@@ -21,17 +21,18 @@ export default async (req: Request) => {
    const entries = await db.sql`
     with attended as (
      -- A child's games bill to their parent (bill_to). The first 3 games
-     -- are free per child, then the unwaged (junior) rate.
-     select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.first_name,sa.session_date,
+     -- are free only for a child ticked as a Try Underwater Hockey trial
+    -- (members.trial_free); otherwise the unwaged (junior) rate.
+     select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.trial_free,m.first_name,sa.session_date,
       row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
      from session_attendance sa join members m on m.id=sa.member_id
      where sa.attended=true and coalesce(m.parent_id,sa.member_id)=${caller.id}
     ), game_entries as (
      select 'game'::text as kind, to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-      case when a.is_child then (case when a.attendance_number<=3 then 0 else 1000 end)
+      case when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
            when fa.trial_eligible and a.attendance_number<=3 then 0
            when fa.category='waged' then 2000 else 1000 end as amount_cents,
-      case when a.is_child then a.first_name||' (child) — '||(case when a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+      case when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
            when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
       a.session_date::timestamptz as created_at
      from attended a join finance_accounts fa on fa.member_id=a.bill_to
@@ -52,11 +53,28 @@ export default async (req: Request) => {
    if (b.action === 'account') {
     if (!['waged','unwaged'].includes(b.category) || typeof b.trialEligible !== 'boolean') return json({ok:false,error:'Select a fee category and trial eligibility'},400);
     const evidence = String(b.evidence || '').trim();
-    if(b.trialEligible && !evidence) return json({ok:false,error:'Record evidence of Try Underwater Hockey enrolment'},400);
     // Freeze the classification after the first entry so historic fees cannot be silently rewritten.
     const rows = await db.sql`insert into finance_accounts(member_id,category,trial_eligible,trial_evidence)
      values(${b.memberId},${b.category},${b.trialEligible},${evidence}) on conflict(member_id) do nothing returning member_id`;
     if (!rows.length) return json({ok:false,error:'This player already has a finance account'},409);
+   } else if(b.action === 'member_trial') {
+    // Tick or untick "first 3 sessions free" for any member with a fee account
+    // (16 Oct 2026). Optional note/evidence; editable at any time and audit-logged.
+    if (typeof b.free !== 'boolean') return json({ok:false,error:'Choose free or not free'},400);
+    const [acct] = await db.sql`select member_id,trial_eligible from finance_accounts where member_id=${String(b.memberId||'')}`;
+    if (!acct) return json({ok:false,error:'Set up the player fee category first'},400);
+    await db.sql`update finance_accounts set trial_eligible=${b.free} where member_id=${acct.member_id}`;
+    await logAudit(db,{actorId:caller.id,actorEmail:caller.email,action:'member_trial_changed',resourceType:'finance_accounts',resourceId:acct.member_id,previousValue:{trialEligible:acct.trial_eligible},newValue:{trialEligible:b.free},note:`${caller.email} ${b.free?'ticked':'unticked'} first 3 sessions free for a member`});
+   } else if(b.action === 'child_trial') {
+    // Tick or untick "3 free Try Underwater Hockey sessions" for one child
+    // (16 Oct 2026). Not automatic: only ticked children get free sessions.
+    // Fees are worked out from attendance, so changing it re-prices that
+    // child's games straight away; every change is audit-logged.
+    if (typeof b.free !== 'boolean') return json({ok:false,error:'Choose free or not free'},400);
+    const [kid] = await db.sql`select id,first_name,parent_id,trial_free from members where id=${String(b.childId||'')} and parent_id is not null`;
+    if (!kid) return json({ok:false,error:'Child not found'},404);
+    await db.sql`update members set trial_free=${b.free} where id=${kid.id}`;
+    await logAudit(db,{actorId:caller.id,actorEmail:caller.email,action:'child_trial_changed',resourceType:'member',resourceId:kid.id,previousValue:{trialFree:kid.trial_free},newValue:{trialFree:b.free},note:`${caller.email} ${b.free?'ticked':'unticked'} free trial sessions for child ${kid.first_name}`});
    } else if(b.action === 'entry') {
     const date = String(b.date), today = new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Melbourne',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
     if(!validDate(date) || date > today || !['joining','annual','payment','game','custom'].includes(b.kind) || !/^[0-9a-f-]{36}$/i.test(b.id || '')) return json({ok:false,error:'Invalid entry, date or request ID'},400);
@@ -95,23 +113,24 @@ export default async (req: Request) => {
   }
   const month = new URL(req.url).searchParams.get('month') || new Date().toISOString().slice(0,7);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ok:false,error:'Invalid month'},400);
-  const members = await db.sql`select m.id,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by m.last_name,m.first_name`;
+  const members = await db.sql`select m.id,m.nickname,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by m.last_name,m.first_name`;
   // Game fees are derived from actual check-ins. Unchecking attendance removes
   // the charge, and setting up an account later automatically includes history.
   const entries = await db.sql`
    with attended as (
     -- A child's games bill to their parent (bill_to). The first 3 games
-    -- are free per child, then the unwaged (junior) rate.
-    select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.first_name,sa.session_date,sa.marked_by,
+    -- are free only for a child ticked as a Try Underwater Hockey trial
+    -- (members.trial_free); otherwise the unwaged (junior) rate.
+    select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.trial_free,m.first_name,sa.session_date,sa.marked_by,
      row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
     from session_attendance sa join members m on m.id=sa.member_id where sa.attended=true
    ), game_entries as (
     select 'attendance:'||a.member_id||':'||a.session_date::text as id,a.bill_to as member_id,'game'::text as kind,
      to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-     case when a.is_child then (case when a.attendance_number<=3 then 0 else 1000 end)
+     case when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
           when fa.trial_eligible and a.attendance_number<=3 then 0
           when fa.category='waged' then 2000 else 1000 end as amount_cents,
-     case when a.is_child then a.first_name||' (child) — '||(case when a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+     case when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
           when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
      a.marked_by as actor_id,a.session_date::timestamptz as created_at
     from attended a join finance_accounts fa on fa.member_id=a.bill_to
@@ -125,7 +144,26 @@ export default async (req: Request) => {
    ) select id,member_id,kind,entry_date,amount_cents,note,actor_id from (
     select * from game_entries union all select * from manual_entries
    ) all_entries order by entry_date,created_at`;
-  return json({ok:true,month,members:members.map((m:any)=>({...m,...totals(entries.filter((e:any)=>e.member_id===m.id),month)})),entries});
+  // Attended games that can't be charged because whoever pays (the player, or
+  // a child's parent) has no fee account yet. Without this they just vanish
+  // from the totals above. One row per payer.
+  const unbilled = await db.sql`
+   select coalesce(m.parent_id,sa.member_id) as payer_id,p.nickname,p.first_name,p.last_name,count(*)::int as games,
+    count(*) filter (where m.parent_id is not null)::int as child_games
+   from session_attendance sa join members m on m.id=sa.member_id
+   join members p on p.id=coalesce(m.parent_id,sa.member_id)
+   left join finance_accounts fa on fa.member_id=coalesce(m.parent_id,sa.member_id)
+   where sa.attended=true and fa.member_id is null
+   group by 1,2,3,4 order by games desc,p.first_name`;
+  // Children of each payer, for the "free trial sessions" tick box.
+  const kids = await db.sql`
+   select m.id,m.parent_id,m.nickname,m.first_name,m.last_name,m.trial_free,
+    (select count(*)::int from session_attendance sa where sa.member_id=m.id and sa.attended=true) as games
+   from members m where m.parent_id is not null and (m.dependant_removed_at is null or exists(select 1 from session_attendance sa where sa.member_id=m.id and sa.attended=true))
+   order by m.created_at,m.id`;
+  return json({ok:true,month,members:members.map((m:any)=>({...m,displayName:shortName(m.nickname,m.first_name,m.last_name),...totals(entries.filter((e:any)=>e.member_id===m.id),month)})),entries,
+   kids:kids.map((k:any)=>({id:k.id,parentId:k.parent_id,displayName:shortName(k.nickname,k.first_name,k.last_name),trialFree:k.trial_free,games:k.games})),
+   unbilled:unbilled.map((u:any)=>({memberId:u.payer_id,displayName:shortName(u.nickname,u.first_name,u.last_name),games:u.games,childGames:u.child_games}))});
  } catch(error) {
   console.error('Finance request failed',error);
   return json({ok:false,error: error instanceof Error && error.message.startsWith('Payment') ? error.message : 'Could not save or load finance records. Check the database migration and input.'},400);

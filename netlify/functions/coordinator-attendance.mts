@@ -15,7 +15,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureFamilyColumns, ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
@@ -25,7 +25,7 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
 
 async function playerList(db: any, sessionId: number) {
   const rows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new, m.grade,
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade,
            nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '') as parent_name
     from bookings b
     join members m on m.id = b.member_id
@@ -33,7 +33,7 @@ async function playerList(db: any, sessionId: number) {
     where b.session_id = ${sessionId} and b.status = 'in'
     order by b.created_at asc
   `;
-  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new, grade: r.grade, parentName: r.parent_name || null }));
+  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new, grade: r.grade, parentName: r.parent_name || null }));
 }
 
 export default async (req: Request, context: Context) => {
@@ -41,6 +41,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
 
   const db = getDatabase();
+  await ensureNicknameColumn(db);
   await ensureFamilyColumns(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "manage_others_attendance")) {
@@ -57,7 +58,7 @@ export default async (req: Request, context: Context) => {
       const query = q.trim();
       if (query.length < 2) return new Response(JSON.stringify({ ok: true, matches: [] }), { headers: { "content-type": "application/json" } });
       const rows = await db.sql`
-        select id, email, first_name, last_name
+        select id, email, nickname, first_name, last_name
         from members
         where email not like '%@no-login.guwh'
           and (first_name ilike ${"%" + query + "%"} or last_name ilike ${"%" + query + "%"} or (first_name || ' ' || last_name) ilike ${"%" + query + "%"})
@@ -65,7 +66,7 @@ export default async (req: Request, context: Context) => {
         limit 8
       `;
       return new Response(
-        JSON.stringify({ ok: true, matches: rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name })) }),
+        JSON.stringify({ ok: true, matches: rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) })) }),
         { headers: { "content-type": "application/json" } }
       );
     }

@@ -10,6 +10,7 @@ GUWH.Pages = GUWH.Pages || {};
 
 (function () {
   const { Container, Button, Pill, SectionHeading, inputCls } = GUWH.UI;
+  const { navigate } = GUWH.Router;
 
   const ROLE_LABELS = {
     game_coordinator: "Game Coordinator",
@@ -177,8 +178,8 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "div",
                     { className: "min-w-0" },
-                    h("p", { className: "font-semibold text-[var(--ink)]" }, m.firstName + " " + m.lastName, typeof m.age === "number" && h("span", { className: "ml-2 text-xs font-normal text-[var(--ink-soft)]" }, "Age " + m.age)),
-                    h("p", { className: "text-xs text-[var(--ink-soft)] break-all" }, m.email)
+                    h("button", { type: "button", className: "font-semibold text-[var(--ink)] hover:text-[var(--accent-dark)] hover:underline text-left", onClick: () => navigate("/admin/member?id=" + encodeURIComponent(m.id)) }, GUWH.displayName(m)),
+                    h("p", { className: "text-xs text-[var(--ink-soft)] break-all" }, m.email + (typeof m.age === "number" ? " · Age " + m.age : ""))
                   ),
                   !isSelf && (confirmDeleteId === m.id
                     ? h(
@@ -189,7 +190,7 @@ GUWH.Pages = GUWH.Pages || {};
                       )
                     : h(Button, { type: "button", size: "sm", variant: "ghost", className: "shrink-0 !text-[var(--bad)]", onClick: () => setConfirmDeleteId(m.id) }, "Delete"))
                 ),
-                confirmDeleteId === m.id && h("p", { className: "text-xs text-[var(--bad)] -mt-2" }, "Permanently deletes " + m.firstName + " and everything linked only to them (bookings, roles, goals, forum settings). This can't be undone."),
+                confirmDeleteId === m.id && h("p", { className: "text-xs text-[var(--bad)] -mt-2" }, "Permanently deletes " + GUWH.displayName(m) + " and everything linked only to them (bookings, roles, goals, forum settings). This can't be undone."),
                 h(
                   "div",
                   { className: "grid gap-4 sm:grid-cols-3" },

@@ -411,6 +411,18 @@ window.GUWH = window.GUWH || {};
     );
   }
 
+  // How a person is named anywhere on the site (16 Oct 2026): nickname if
+  // they have one, otherwise first name + last initial ("Sam T."). The
+  // server sends displayName; this is the fallback for older payloads.
+  GUWH.displayName = function (p) {
+    if (!p) return "";
+    if (p.displayName) return p.displayName;
+    if (p.nickname && String(p.nickname).trim()) return String(p.nickname).trim();
+    const f = (p.firstName || "").trim();
+    const l = (p.lastName || "").trim();
+    return l ? f + " " + l.charAt(0).toUpperCase() + "." : f;
+  };
+
   GUWH.UI = {
     Icon, Container, Button, Pill, SectionHeading, Avatar, PlayerChip, MemberPhoto,
     MilestoneCard, AttendanceCounter, EventCard, TeamBoard, ScheduleList,

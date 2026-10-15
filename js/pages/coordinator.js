@@ -241,7 +241,7 @@ GUWH.Pages = GUWH.Pages || {};
                   onClick: () => setAttendance(m.email, true),
                   className: "w-full text-left px-4 py-2.5 text-sm hover:bg-[var(--sand)] flex items-center justify-between",
                 },
-                h("span", null, m.firstName + " " + m.lastName),
+                h("span", null, GUWH.displayName(m)),
                 h("span", { className: "text-xs text-[var(--ink-soft)]" }, m.email)
               )
             )
@@ -297,7 +297,7 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "div",
                     null,
-                    h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, (p.firstName + " " + p.lastName).trim(), p.isNew && h(Pill, { tone: "accent" }, "New")),
+                    h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, GUWH.displayName(p), p.isNew && h(Pill, { tone: "accent" }, "New")),
                     h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.parentName ? "Child of " + p.parentName : p.email && p.email.endsWith("@no-login.guwh") ? "Walk-in — no account" : p.email)
                   ),
                   h(
@@ -463,7 +463,7 @@ GUWH.Pages = GUWH.Pages || {};
                         h(
                           "div",
                           { key: i, className: "px-5 py-3" },
-                          h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, p.firstName + " " + p.lastName),
+                          h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, GUWH.displayName(p)),
                           h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency contact: " + (p.emergencyName ? p.emergencyName + (p.emergencyPhone ? " · " + p.emergencyPhone : "") : "Not on file"))
                         )
                       )
@@ -487,7 +487,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "flex-1 flex items-center gap-2 flex-wrap min-w-0" },
-        h("span", { className: "text-sm text-[var(--ink)]" }, player.firstName + " " + player.lastName),
+        h("span", { className: "text-sm text-[var(--ink)]" }, GUWH.displayName(player)),
         player.isNew && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, "New"),
         player.grade && h(Pill, { tone: "dark", className: "!py-0.5 !px-2 !text-[10px]" }, "Grade " + player.grade),
         player.position && h("span", { className: "text-xs text-[var(--ink-soft)]" }, player.position),
@@ -682,7 +682,7 @@ GUWH.Pages = GUWH.Pages || {};
                                 {
                                   className: inputCls + " !w-auto !py-1 text-xs",
                                   value: String(team.id),
-                                  "aria-label": "Move " + p.firstName + " to",
+                                  "aria-label": "Move " + GUWH.displayName(p) + " to",
                                   onChange: (e) => moveTo(p, e.target.value),
                                 },
                                 board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
@@ -865,7 +865,7 @@ GUWH.Pages = GUWH.Pages || {};
               h(
                 Pill,
                 { key: p.id, tone: "dark", className: "!py-0.5 !text-xs flex items-center gap-1" },
-                p.firstName + " " + (p.lastName ? p.lastName.charAt(0) + "." : ""),
+                GUWH.displayName(p),
                 h("button", { type: "button", onClick: () => onUnassign(rowId, pool, p.id), className: "opacity-70 hover:opacity-100", title: "Remove" }, h(Icon, { name: "x", size: 10 }))
               )
             )
@@ -882,7 +882,7 @@ GUWH.Pages = GUWH.Pages || {};
                 h(
                   "option",
                   { key: p.id, value: p.id },
-                  p.firstName + " " + p.lastName + (p.refereedTonight > 0 ? " (reffed once already tonight)" : "")
+                  GUWH.displayName(p) + (p.refereedTonight > 0 ? " (reffed once already tonight)" : "")
                 )
               )
             ),
@@ -906,7 +906,7 @@ GUWH.Pages = GUWH.Pages || {};
             h(
               "p",
               { key: p.id, className: "text-[10px] text-[var(--ink-soft)]" },
-              p.firstName + " " + p.lastName + " — " + (REASON_LABEL[p.reason] || p.detail)
+              GUWH.displayName(p) + " — " + (REASON_LABEL[p.reason] || p.detail)
             )
           )
         )
@@ -1405,7 +1405,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { key: p.id, className: "flex items-center justify-between gap-2" },
-            h("span", { className: "text-sm text-[var(--ink)]" }, p.firstName + " " + p.lastName),
+            h("span", { className: "text-sm text-[var(--ink)]" }, GUWH.displayName(p)),
             h("input", {
               type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center",
               value: goals[p.id] || 0,

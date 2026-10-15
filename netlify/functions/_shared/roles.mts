@@ -111,6 +111,7 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   if (familyColumnsReady) return;
   await db.sql`alter table members add column if not exists parent_id text references members(id)`;
   await db.sql`alter table members add column if not exists dependant_removed_at timestamptz`;
+  await db.sql`alter table members add column if not exists trial_free boolean not null default false`;
   familyColumnsReady = true;
 }
 
@@ -124,11 +125,20 @@ export async function ensureGameCountColumn(db: any): Promise<void> {
   gameCountColumnReady = true;
 }
 
-// The name other members see: nickname if set, otherwise real first + last.
-export function memberDisplayName(row: { nickname?: string | null; first_name?: string | null; last_name?: string | null }): string {
-  const nick = (row.nickname || "").trim();
+// The name shown for a member anywhere on the site (16 Oct 2026, Cheongy):
+// their nickname if they have one, otherwise first name + the first letter of
+// their last name ("Sam T."). Full names only appear on the Administration
+// member page. Admins can change a nickname there (e.g. an offensive one).
+export function shortName(nickname: string | null | undefined, first: string | null | undefined, last: string | null | undefined): string {
+  const nick = (nickname || "").trim();
   if (nick) return nick;
-  return [row.first_name, row.last_name].filter((x) => x && String(x).trim()).join(" ").trim() || "Member";
+  const f = (first || "").trim();
+  const initial = (last || "").trim().charAt(0).toUpperCase();
+  if (!f) return "Member";
+  return initial ? `${f} ${initial}.` : f;
+}
+export function memberDisplayName(row: { nickname?: string | null; first_name?: string | null; last_name?: string | null }): string {
+  return shortName(row.nickname, row.first_name, row.last_name);
 }
 
 export type Member = {

@@ -20,7 +20,8 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, ageFromDOB, ensureFamilyColumns, ensureMember, getVerifiedUser, hasRole, isGrade, isRole, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { SUPER_ADMIN_EMAIL, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -30,6 +31,8 @@ function shapeMember(row: any) {
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
+    nickname: row.nickname || "",
+    displayName: shortName(row.nickname, row.first_name, row.last_name),
     age: ageFromDOB(row.date_of_birth),
     grade: row.grade,
     roles: (row.roles || []).filter(Boolean),
@@ -65,17 +68,145 @@ async function historyBlockers(db: any, id: string): Promise<string[]> {
   return reasons;
 }
 
+// One member's full page for Administrators (16 Oct 2026): real name,
+// nickname, contact and emergency details, roles, waiver, family, games
+// and goals, and their fee statement. Fees mirror /api/finance?self=1:
+// games are worked out from session_attendance, a child's games bill to
+// their parent, and none of it counts unless the person being billed has a
+// finance account (set up by the Treasurer) - `unbilledGames` flags that gap.
+async function memberDetail(db: any, id: string) {
+  const json = (data: any, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  const [m] = await db.sql`
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
+           m.emergency_name, m.emergency_phone, m.waiver_accepted_at, m.waiver_signed_name, m.created_at,
+           m.parent_id, m.dependant_removed_at,
+           array_remove(array_agg(mr.role), null) as roles
+    from members m left join member_roles mr on mr.member_id = m.id
+    where m.id = ${id}
+    group by m.id
+  `;
+  if (!m) return json({ ok: false, error: "Member not found" }, 404);
+
+  const [parent] = m.parent_id
+    ? await db.sql`select id, nickname, first_name, last_name, email from members where id = ${m.parent_id}`
+    : [];
+  const kids = await db.sql`
+    select id, nickname, first_name, last_name, date_of_birth, dependant_removed_at
+    from members where parent_id = ${m.id} order by created_at asc, id
+  `;
+
+  const [games] = await db.sql`select count(*)::int as n from session_attendance where member_id = ${m.id} and attended = true`;
+  const [lastGame] = await db.sql`select to_char(max(session_date), 'YYYY-MM-DD') as d from session_attendance where member_id = ${m.id} and attended = true`;
+  const [{ career }] = await db.sql`select coalesce(sum(goals), 0)::int as career from game_goals where member_id = ${m.id}`;
+  const [{ season }] = await db.sql`
+    select coalesce(sum(gg.goals), 0)::int as season
+    from game_goals gg
+    join timetable_pool_games tpg on tpg.id = gg.pool_game_id
+    join timetable_rows tr on tr.id = tpg.row_id
+    join sessions s on s.id = tr.session_id
+    where gg.member_id = ${m.id} and extract(year from s.session_date) = ${new Date().getFullYear()}
+  `;
+
+  // Fees are billed to this person's own account, so a child has none.
+  let finance: any = null;
+  if (!m.parent_id) {
+    const [account] = await db.sql`select category, trial_eligible, trial_evidence from finance_accounts where member_id = ${m.id}`;
+    const month = new Date().toISOString().slice(0, 7);
+    const entries = account
+      ? await db.sql`
+          with attended as (
+            select sa.member_id, (mm.parent_id is not null) as is_child, mm.trial_free, mm.first_name, sa.session_date,
+              row_number() over (partition by sa.member_id order by sa.session_date) as attendance_number
+            from session_attendance sa join members mm on mm.id = sa.member_id
+            where sa.attended = true and coalesce(mm.parent_id, sa.member_id) = ${m.id}
+          ), game_entries as (
+            select 'game'::text as kind, to_char(a.session_date, 'YYYY-MM-DD') as entry_date,
+              case when a.is_child then (case when a.trial_free and a.attendance_number <= 3 then 0 else 1000 end)
+                   when fa.trial_eligible and a.attendance_number <= 3 then 0
+                   when fa.category = 'waged' then 2000 else 1000 end as amount_cents,
+              case when a.is_child then a.first_name || ' (child) - ' || (case when a.trial_free and a.attendance_number <= 3 then 'free session' else 'confirmed attendance' end)
+                   when fa.trial_eligible and a.attendance_number <= 3 then 'Try Underwater Hockey - free session' else 'Confirmed attendance' end as note,
+              a.session_date::timestamptz as created_at
+            from attended a join finance_accounts fa on fa.member_id = ${m.id}
+          ), manual_entries as (
+            select kind, to_char(entry_date, 'YYYY-MM-DD') as entry_date, amount_cents, note, created_at
+            from finance_entries where member_id = ${m.id}
+          ) select * from (select * from game_entries union all select * from manual_entries) all_entries order by entry_date desc, created_at desc
+        `
+      : [];
+    const charged = entries.filter((e: any) => e.kind !== "payment").reduce((a: number, e: any) => a + Number(e.amount_cents), 0);
+    const paid = entries.filter((e: any) => e.kind === "payment").reduce((a: number, e: any) => a + Number(e.amount_cents), 0);
+    // Games that would bill to this person but can't, because they have no account.
+    const [{ unbilled }] = account
+      ? [{ unbilled: 0 }]
+      : await db.sql`
+          select count(*)::int as unbilled
+          from session_attendance sa join members mm on mm.id = sa.member_id
+          where sa.attended = true and coalesce(mm.parent_id, sa.member_id) = ${m.id}
+        `;
+    finance = {
+      hasAccount: !!account,
+      category: account ? account.category : null,
+      trialEligible: account ? account.trial_eligible : false,
+      month,
+      thisMonth: totals(entries, month),
+      chargedCents: charged,
+      paidCents: paid,
+      balanceCents: charged - paid,
+      unbilledGames: unbilled,
+      entries: entries.slice(0, 60).map((e: any) => ({ kind: e.kind, date: e.entry_date, amountCents: Number(e.amount_cents), note: e.note })),
+    };
+  }
+
+  return json({
+    ok: true,
+    member: {
+      id: m.id,
+      email: m.email.endsWith("@no-login.guwh") ? null : m.email,
+      firstName: m.first_name,
+      lastName: m.last_name,
+      nickname: m.nickname || "",
+      displayName: shortName(m.nickname, m.first_name, m.last_name),
+      age: ageFromDOB(m.date_of_birth),
+      dateOfBirth: m.date_of_birth ? new Date(m.date_of_birth).toISOString().slice(0, 10) : null,
+      grade: m.grade,
+      position: m.position || null,
+      phone: m.phone || null,
+      emergencyName: m.emergency_name || null,
+      emergencyPhone: m.emergency_phone || null,
+      roles: (m.roles || []).filter(Boolean),
+      waiverSigned: !!m.waiver_accepted_at,
+      waiverNote: m.waiver_signed_name || null,
+      joined: m.created_at,
+      removedChild: !!m.dependant_removed_at,
+      parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" ") } : null,
+      kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
+      gamesPlayed: games.n,
+      lastGame: lastGame.d || null,
+      seasonGoals: season,
+      careerGoals: career,
+      finance,
+    },
+  });
+}
+
 export default async (req: Request, context: Context) => {
   const user = await getVerifiedUser(req);
   if (!user) return unauthorized();
 
   const db = getDatabase();
+  await ensureNicknameColumn(db);
+  await ensureFamilyColumns(db);
   const caller = await ensureMember(db, user);
   if (!hasRole(caller.roles, "administrator")) {
     return forbidden("Only Administrators can manage roles");
   }
 
   try {
+    if (req.method === "GET" && new URL(req.url).searchParams.get("id")) {
+      return await memberDetail(db, new URL(req.url).searchParams.get("id") as string);
+    }
+
     if (req.method === "GET") {
       const q = new URL(req.url).searchParams.get("q")?.trim() || "";
       // Walk-in players added via the coordinator's "Add Player" (no
@@ -84,7 +215,7 @@ export default async (req: Request, context: Context) => {
       // real identity to grant a role to, so they're excluded here.
       const rows = q
         ? await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
+            select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -95,7 +226,7 @@ export default async (req: Request, context: Context) => {
             limit 25
           `
         : await db.sql`
-            select m.id, m.email, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
+            select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
                    array_remove(array_agg(mr.role), null) as roles
             from members m
             left join member_roles mr on mr.member_id = m.id
@@ -113,6 +244,26 @@ export default async (req: Request, context: Context) => {
     const memberEmail = String(body.memberEmail || "").trim();
     const note = body.note ? String(body.note).trim() : null;
 
+    // Nickname (16 Oct 2026, Cheongy): members set their own on Profile; an
+    // Administrator can change or clear it here (e.g. one that's offensive).
+    // Clearing it puts the person back to "First L." everywhere.
+    if (req.method === "POST" && body.action === "set_nickname") {
+      const id = String(body.memberId || "").trim();
+      const nickname = String(body.nickname || "").trim().slice(0, 30) || null;
+      const [target] = await db.sql`select id, email, nickname, first_name, last_name from members where id = ${id}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      await db.sql`update members set nickname = ${nickname} where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "nickname_changed",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { nickname: target.nickname || null }, newValue: { nickname },
+        note: `${caller.email} changed ${target.email}'s nickname from "${target.nickname || ""}" to "${nickname || ""}"`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
     if (req.method === "POST" && body.action === "grade") {
       if (!memberEmail) {
         return new Response(JSON.stringify({ ok: false, error: "memberEmail is required" }), { status: 400, headers: { "content-type": "application/json" } });
@@ -122,7 +273,7 @@ export default async (req: Request, context: Context) => {
         return new Response(JSON.stringify({ ok: false, error: "Not a valid grade" }), { status: 400, headers: { "content-type": "application/json" } });
       }
       const grade = rawGrade || null;
-      const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, waiver_accepted_at from members where email = ${memberEmail}`;
+      const [target] = await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, waiver_accepted_at from members where email = ${memberEmail}`;
       if (!target || target.email.endsWith("@no-login.guwh")) {
         return new Response(
           JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
@@ -151,7 +302,7 @@ export default async (req: Request, context: Context) => {
         return new Response(JSON.stringify({ ok: false, error: "memberEmail is required" }), { status: 400, headers: { "content-type": "application/json" } });
       }
       const signed = !!body.signed;
-      const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, grade from members where email = ${memberEmail}`;
+      const [target] = await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, grade from members where email = ${memberEmail}`;
       if (!target || target.email.endsWith("@no-login.guwh")) {
         return new Response(
           JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
@@ -231,7 +382,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    const [target] = await db.sql`select id, email, first_name, last_name, date_of_birth, grade, waiver_accepted_at from members where email = ${memberEmail}`;
+    const [target] = await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, grade, waiver_accepted_at from members where email = ${memberEmail}`;
     if (!target || target.email.endsWith("@no-login.guwh")) {
       return new Response(
         JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),

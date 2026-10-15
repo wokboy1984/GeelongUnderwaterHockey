@@ -5,16 +5,19 @@
   const { Container, Button, Icon, Pill } = GUWH.UI;
   const { navigate, useRoute } = GUWH.Router;
 
-  // "Try It Free" is deliberately not in this list — it's the highlighted
-  // CTA button in the nav bar instead (see NavBar), not a plain text link.
-  // No separate "Home" link — the logo already goes there. "Play" reuses
-  // the existing /about route (its "How it works" section — rules, kit,
-  // positions — is the first thing on that page) rather than a new page.
+  // "Members" is deliberately not in this list - it's the highlighted CTA
+  // button in the nav bar instead (see NavBar), and "Try It Free" is a plain
+  // text link like the rest (16 Oct 2026, Cheongy). Both are only for
+  // logged-out visitors. No separate "Home" link - the logo already goes
+  // there. "Play" reuses the existing /about route (its "How it works"
+  // section - rules, kit, positions - is the first thing on that page)
+  // rather than a new page.
   const PUBLIC_NAV = [
     { label: "About", path: "/about" },
     { label: "News", path: "/news" },
     { label: "Play", path: "/about" },
-    { label: "Members", path: "/portal" },
+    { label: "Beginners Guide", path: "/beginners-guide" },
+    { label: "Try It Free", path: "/new-player" },
   ];
 
   const PLAYER_NAV = [
@@ -112,9 +115,9 @@
       : [];
     const adminItems = loggedIn && GUWH.Identity ? adminNavFor(GUWH.Identity.currentRoles()) : [];
     const homeHref = "/"; // logo always goes to the public homepage, logged in or not
-    // Logged in (2 Oct 2026): "Members" goes to the same place as the
-    // member nav's "Home", so it's dropped from the public links.
-    const publicNav = loggedIn ? PUBLIC_NAV.filter((item) => item.path !== "/portal") : PUBLIC_NAV;
+    // Logged in: "Try It Free" is for newcomers, and the Members button goes
+    // to the same place as the member nav's "Home", so both are dropped.
+    const publicNav = loggedIn ? PUBLIC_NAV.filter((item) => item.path !== "/new-player") : PUBLIC_NAV;
     function doLogout() {
       if (GUWH.Identity) GUWH.Identity.logout();
       else GUWH.Store.logout();
@@ -157,7 +160,7 @@
         h(
           "div",
           { className: "hidden lg:flex items-center gap-2" },
-          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/new-player") }, "Try It Free"),
+          !loggedIn && h(Button, { size: "sm", variant: "cta", onClick: () => navigate("/portal") }, "Members"),
           loggedIn && h(Button, { size: "sm", variant: "secondary", className: "!bg-white/10 !text-white !border-white/25", onClick: doLogout }, "Log out")
         ),
         h(
@@ -184,7 +187,7 @@
             Container,
             { className: "flex items-center gap-3 h-11" },
             h("span", { className: "font-mono text-[10px] uppercase tracking-wide text-white/40 shrink-0" }, "Admin functions"),
-            adminItems.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path, small: true }))
+            adminItems.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path || (item.path === "/admin/roles" && path === "/admin/member"), small: true }))
           )
         ),
       open &&
@@ -227,7 +230,7 @@
                 )
               ),
             !loggedIn
-              ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/new-player"); setOpen(false); } }, "Try It Free")
+              ? h(Button, { size: "sm", variant: "cta", className: "mt-2 w-fit", onClick: () => { navigate("/portal"); setOpen(false); } }, "Members")
               : h(Button, { size: "sm", variant: "secondary", className: "mt-2 w-fit !bg-white/10 !text-white !border-white/25", onClick: () => { doLogout(); setOpen(false); } }, "Log out")
           )
         )
@@ -297,7 +300,7 @@
   // Public marketing pages a logged-in-but-unsigned member can still browse
   // without being bounced to the waiver first — everything else under
   // /portal, /coordinator, /attendance etc. is gated below.
-  const WAIVER_EXEMPT_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/portal", "/portal/waiver"];
+  const WAIVER_EXEMPT_PATHS = ["/", "/about", "/beginners-guide", "/news", "/new-player", "/how-it-works", "/portal", "/portal/waiver"];
 
   // Online waiver switched OFF (12 Oct 2026, Cheongy): for now the waiver
   // is signed in person at the pool, so new members go straight to the
@@ -306,7 +309,7 @@
   const ONLINE_WAIVER_REQUIRED = false;
 
   // Pages anyone can see without logging in - they never wait for login.
-  const OPEN_PATHS = ["/", "/about", "/news", "/new-player", "/how-it-works", "/state-titles"];
+  const OPEN_PATHS = ["/", "/about", "/beginners-guide", "/news", "/new-player", "/how-it-works", "/state-titles"];
 
   function Route(path) {
     // Wait until we know who's logged in and what roles they have before
@@ -337,6 +340,7 @@
     if (path === "/how-it-works") { navigate("/about"); return null; }
     if (path === "/wednesday-games") { const r = requireAuth(path); navigate(r || "/portal/board"); return null; }
     if (path === "/about") return h(GUWH.Pages.About);
+    if (path === "/beginners-guide") return h(GUWH.Pages.BeginnersGuide);
     if (path === "/news") return h(GUWH.Pages.News);
     // State Titles interest page removed 2 Oct 2026 (Cheongy: no longer
     // needed). Old links land on the homepage instead of "Page not found".
@@ -450,6 +454,12 @@
       if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
       if (!GUWH.Identity.currentRoles().includes("administrator")) { navigate("/portal/dashboard"); return null; }
       return h(GUWH.Pages.AdminRoles);
+    }
+    // One member's page (16 Oct 2026) - opened from the Administration list.
+    if (path === "/admin/member") {
+      if (!GUWH.Identity || !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      if (!GUWH.Identity.currentRoles().includes("administrator")) { navigate("/portal/dashboard"); return null; }
+      return h(GUWH.Pages.AdminMember);
     }
 
     return h(

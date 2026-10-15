@@ -137,6 +137,42 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    async function setMemberTrial(member, free) {
+      setError("");
+      setNotice("");
+      try {
+        const response = await GUWH.Identity.authFetch("/api/finance", {
+          method: "POST",
+          body: JSON.stringify({ action: "member_trial", memberId: member.id, free }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Could not save");
+        setNotice(free ? "First 3 sessions are now free." : "Free sessions removed, all games are charged.");
+        await load();
+      } catch (err) {
+        setError(err.message || String(err));
+      }
+    }
+
+    // Tick box: this child gets their first 3 sessions free (Try Underwater
+    // Hockey). Off by default - not assumed (16 Oct 2026).
+    async function setChildTrial(kid, free) {
+      setError("");
+      setNotice("");
+      try {
+        const response = await GUWH.Identity.authFetch("/api/finance", {
+          method: "POST",
+          body: JSON.stringify({ action: "child_trial", childId: kid.id, free }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Could not save");
+        setNotice(kid.displayName + (free ? ": first 3 sessions are now free." : ": free sessions removed, all games are charged."));
+        await load();
+      } catch (err) {
+        setError(err.message || String(err));
+      }
+    }
+
     function downloadCsv() {
       if (!data) return;
       const safeCell = (value) => {
@@ -147,7 +183,7 @@ GUWH.Pages = GUWH.Pages || {};
       const rows = [
         ["Player", "Category", "Month", "Opening AUD", "Fees AUD", "Received AUD", "Closing AUD"],
         ...activeMembers.map((member) => [
-          (member.first_name + " " + member.last_name).trim(),
+          (member.displayName || GUWH.displayName({ nickname: member.nickname, firstName: member.first_name, lastName: member.last_name })),
           member.category,
           month,
           (member.opening / 100).toFixed(2),
@@ -166,7 +202,7 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     function accountRow(member) {
-      const name = (member.first_name + " " + member.last_name).trim();
+      const name = (member.displayName || GUWH.displayName({ nickname: member.nickname, firstName: member.first_name, lastName: member.last_name }));
       return h(
         "tr",
         { key: member.id, className: "border-t border-black/5" },
@@ -207,6 +243,20 @@ GUWH.Pages = GUWH.Pages || {};
         h(SummaryCard, { label: "Outstanding total", value: money(reportTotals.closing), tone: reportTotals.closing > 0 ? "text-[var(--bad)]" : "text-[var(--ink)]" }),
         h(SummaryCard, { label: "Accounts to set up", value: setupNeeded })
       ),
+      // Games that were attended but can't be charged because the payer has no
+      // fee account yet (16 Oct 2026). Child games bill to the parent.
+      !loading && data && data.unbilled && data.unbilled.length > 0 && h(
+        "div",
+        { role: "status", className: "mb-6 rounded-xl bg-[var(--warn-10)] p-4 text-sm text-[var(--ink)]" },
+        h("p", { className: "font-semibold" }, "Attended games not being charged"),
+        h("p", { className: "mt-1 text-[var(--ink-soft)]" }, "These people have no fee account, so their games (including their children's) are missing from the totals. Select them below and create the account."),
+        h("ul", { className: "mt-2 flex flex-col gap-1" },
+          data.unbilled.map((u) => h("li", { key: u.memberId },
+            h("button", { type: "button", className: "font-semibold underline text-left", onClick: () => { setSelectedId(u.memberId); requestId.current = null; setNotice(""); } }, u.displayName),
+            " - " + u.games + " game" + (u.games === 1 ? "" : "s") + (u.childGames ? " (" + u.childGames + " by their children)" : "")
+          ))
+        )
+      ),
       loading
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading finance records…")
         : data && h(
@@ -237,9 +287,22 @@ GUWH.Pages = GUWH.Pages || {};
                 { className: inputCls, value: selectedId, onChange: (event) => { setSelectedId(event.target.value); requestId.current = null; setNotice(""); } },
                 h("option", { value: "" }, "Select a player"),
                 data.members.map((member) => h("option", { key: member.id, value: member.id },
-                  (member.first_name + " " + member.last_name).trim() + (member.category ? "" : " — setup required")
+                  (member.displayName || GUWH.displayName({ nickname: member.nickname, firstName: member.first_name, lastName: member.last_name })) + (member.category ? "" : " — setup required")
                 ))
               )),
+              selected && data.kids && data.kids.filter((k) => k.parentId === selected.id).length > 0 && h(
+                "div",
+                { className: "mt-5 rounded-xl bg-[var(--sand)] p-4" },
+                h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Children (fees bill to this account)"),
+                h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5 mb-2" }, "Tick to give a child their first 3 sessions free. Unticked children are charged from the first game."),
+                data.kids.filter((k) => k.parentId === selected.id).map((k) => h(
+                  "label",
+                  { key: k.id, className: "flex items-center gap-2 py-1 text-sm" },
+                  h("input", { type: "checkbox", checked: !!k.trialFree, onChange: (event) => setChildTrial(k, event.target.checked) }),
+                  k.displayName + " - 3 free trial sessions",
+                  h("span", { className: "text-xs text-[var(--ink-soft)]" }, "(" + k.games + " game" + (k.games === 1 ? "" : "s") + " so far)")
+                ))
+              ),
               selected && !selected.category && h(
                 "form",
                 { onSubmit: save, className: "mt-5 grid sm:grid-cols-2 gap-4" },
@@ -251,9 +314,9 @@ GUWH.Pages = GUWH.Pages || {};
                 )),
                 h("label", { className: "flex items-center gap-2 text-sm font-semibold sm:self-end sm:pb-3" },
                   h("input", { type: "checkbox", checked: form.trialEligible, onChange: (event) => setField("trialEligible", event.target.checked) }),
-                  "Joined through Try Underwater Hockey"
+                  "First 3 sessions free (Try Underwater Hockey)"
                 ),
-                form.trialEligible && h(FormField, { label: "Trial enrolment reference", hint: "Required evidence for the first three free sessions.", required: true }, h("input", { className: inputCls, required: true, value: form.evidence, onChange: (event) => setField("evidence", event.target.value) })),
+                form.trialEligible && h(FormField, { label: "Trial note (optional)", hint: "For example: trial booking reference." }, h("input", { className: inputCls, value: form.evidence, onChange: (event) => setField("evidence", event.target.value) })),
                 h("p", { className: "text-sm text-[var(--ink-soft)] sm:col-span-2" }, "Regular registration means an existing member, so their game fee starts with their first confirmed attendance."),
                 h("div", { className: "sm:col-span-2" }, h(Button, { type: "submit", disabled: saving }, saving ? "Saving…" : "Create finance account"))
               ),
@@ -266,6 +329,10 @@ GUWH.Pages = GUWH.Pages || {};
                   h(Pill, { tone: "dark" }, selected.category === "waged" ? "Waged" : "Unwaged / junior"),
                   selected.trial_eligible && h(Pill, { tone: "good" }, "Three trial sessions free"),
                   h("span", { className: "ml-auto font-display text-xl font-bold" }, "Balance " + money(selected.closing))
+                ),
+                h("label", { className: "mt-3 flex items-center gap-2 text-sm font-semibold" },
+                  h("input", { type: "checkbox", checked: !!selected.trial_eligible, onChange: (event) => setMemberTrial(selected, event.target.checked) }),
+                  "First 3 sessions free (Try Underwater Hockey)"
                 ),
                 h(
                   "form",

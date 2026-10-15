@@ -17,12 +17,12 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { POOLS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
-  return { id: r.id, firstName: r.first_name, lastName: r.last_name };
+  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) };
 }
 
 // Weeks that have at least one game row, newest first, up to the upcoming
@@ -50,7 +50,7 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
   teamRows.forEach((t: any) => { teamNames[t.id] = t.name; });
 
   const assignedRows = await db.sql`
-    select ta.team_id, m.id, m.first_name, m.last_name
+    select ta.team_id, m.id, m.nickname, m.first_name, m.last_name
     from team_assignments ta join members m on m.id = ta.member_id
     where ta.session_id = ${sessionId}
   `;
@@ -120,18 +120,18 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
 
   const seasonYear = new Date(sessionDate + "T00:00:00").getFullYear();
   const seasonRows = await db.sql`
-    select gg.member_id, m.first_name, m.last_name, sum(gg.goals)::int as total_goals
+    select gg.member_id, m.nickname, m.first_name, m.last_name, sum(gg.goals)::int as total_goals
     from game_goals gg
     join timetable_pool_games tpg on tpg.id = gg.pool_game_id
     join timetable_rows tr on tr.id = tpg.row_id
     join sessions s on s.id = tr.session_id
     join members m on m.id = gg.member_id
     where extract(year from s.session_date) = ${seasonYear} and gg.goals > 0
-    group by gg.member_id, m.first_name, m.last_name
+    group by gg.member_id, m.nickname, m.first_name, m.last_name
     order by total_goals desc
     limit 20
   `;
-  const seasonLeaders = seasonRows.map((r: any) => ({ memberId: r.member_id, name: `${r.first_name} ${r.last_name}`, totalGoals: r.total_goals }));
+  const seasonLeaders = seasonRows.map((r: any) => ({ memberId: r.member_id, name: shortName(r.nickname, r.first_name, r.last_name), totalGoals: r.total_goals }));
 
   return { ok: true, sessionDate, upcoming, weeks, games, seasonLeaders };
 }
@@ -141,6 +141,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
 
   const db = getDatabase();
+  await ensureNicknameColumn(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "record_scores")) {
     return forbidden("Only Game Coordinators and Administrators can record scores");

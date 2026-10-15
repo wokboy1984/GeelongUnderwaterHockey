@@ -21,12 +21,16 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, unauthorized } from "./_shared/roles.mts";
+import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, shortName, unauthorized } from "./_shared/roles.mts";
 import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
-  return { id: r.id, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };
+  // Member-facing: only the short name ever leaves the server (16 Oct 2026).
+  // firstName carries it too so older client code that joins firstName +
+  // lastName still shows the right thing.
+  const displayName = shortName(r.nickname, r.first_name, r.last_name);
+  return { id: r.id, firstName: displayName, lastName: "", displayName, isNew: r.is_new };
 }
 
 export default async (req: Request, context: Context) => {
@@ -63,7 +67,7 @@ export default async (req: Request, context: Context) => {
     teamRows.forEach((t: any) => { teamNames[t.id] = t.name; });
 
     const assignedRows = await db.sql`
-      select m.id, m.first_name, m.last_name, m.is_new, ta.team_id
+      select m.id, m.nickname, m.first_name, m.last_name, m.is_new, ta.team_id
       from team_assignments ta join members m on m.id = ta.member_id
       where ta.session_id = ${session.id}
     `;
@@ -87,7 +91,7 @@ export default async (req: Request, context: Context) => {
     const poolGameIds = poolGameRows.map((r: any) => r.id);
     const refRows = poolGameIds.length
       ? await db.sql`
-          select tpr.pool_game_id, m.id, m.first_name, m.last_name, m.is_new
+          select tpr.pool_game_id, m.id, m.nickname, m.first_name, m.last_name, m.is_new
           from timetable_pool_referees tpr join members m on m.id = tpr.member_id
           where tpr.pool_game_id = any(${poolGameIds})
         `

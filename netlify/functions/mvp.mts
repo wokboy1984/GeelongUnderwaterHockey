@@ -23,11 +23,11 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized } from "./_shared/roles.mts";
 import { requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
-  return { id: r.id, firstName: r.first_name, lastName: r.last_name };
+  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) };
 }
 
 async function refereeIdsForSession(db: any, sessionId: number): Promise<Set<string>> {
@@ -43,7 +43,7 @@ async function refereeIdsForSession(db: any, sessionId: number): Promise<Set<str
 
 async function confirmedPlayers(db: any, sessionId: number) {
   const rows = await db.sql`
-    select m.id, m.first_name, m.last_name
+    select m.id, m.nickname, m.first_name, m.last_name
     from bookings b join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'in'
     order by b.created_at asc
@@ -74,8 +74,8 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string, ca
 
   if (canViewResults) {
     const detailRows = await db.sql`
-      select mn.nominee_id, nm.first_name as nominee_first, nm.last_name as nominee_last,
-             rm.first_name as ref_first, rm.last_name as ref_last, mn.note, mn.created_at
+      select mn.nominee_id, nm.nickname as nominee_nick, nm.first_name as nominee_first, nm.last_name as nominee_last,
+             rm.nickname as ref_nick, rm.first_name as ref_first, rm.last_name as ref_last, mn.note, mn.created_at
       from mvp_nominations mn
       join members nm on nm.id = mn.nominee_id
       join members rm on rm.id = mn.nominator_id
@@ -85,10 +85,10 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string, ca
     const byNominee: Record<string, { nomineeId: string; name: string; votes: number; notes: { by: string; note: string | null }[] }> = {};
     detailRows.forEach((r: any) => {
       if (!byNominee[r.nominee_id]) {
-        byNominee[r.nominee_id] = { nomineeId: r.nominee_id, name: `${r.nominee_first} ${r.nominee_last}`, votes: 0, notes: [] };
+        byNominee[r.nominee_id] = { nomineeId: r.nominee_id, name: shortName(r.nominee_nick, r.nominee_first, r.nominee_last), votes: 0, notes: [] };
       }
       byNominee[r.nominee_id].votes += 1;
-      byNominee[r.nominee_id].notes.push({ by: `${r.ref_first} ${r.ref_last}`, note: r.note });
+      byNominee[r.nominee_id].notes.push({ by: shortName(r.ref_nick, r.ref_first, r.ref_last), note: r.note });
     });
     out.results = Object.values(byNominee).sort((a, b) => b.votes - a.votes);
   }
@@ -102,6 +102,7 @@ export default async (req: Request, context: Context) => {
 
   try {
     const db = getDatabase();
+    await ensureNicknameColumn(db);
     const caller = await ensureMember(db, user);
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};

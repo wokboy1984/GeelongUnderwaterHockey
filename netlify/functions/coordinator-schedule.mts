@@ -40,7 +40,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureGameCountColumn, ensureMember, getVerifiedUser, hasPermission, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import {
@@ -66,7 +66,7 @@ import {
 const nextWednesdayISO = nextSessionDateISO;
 
 function shapePlayer(r: any) {
-  return { id: r.id, firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };
+  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new };
 }
 
 function badRequest(message: string) {
@@ -82,14 +82,14 @@ function badRequest(message: string) {
 async function loadSnapshot(db: any, sessionId: number) {
   const teamRows = await db.sql`select id, name from game_teams where session_id = ${sessionId} order by created_at asc`;
   const assignmentRows = await db.sql`
-    select ta.team_id, m.id, m.first_name, m.last_name, m.grade
+    select ta.team_id, m.id, m.nickname, m.first_name, m.last_name, m.grade
     from team_assignments ta join members m on m.id = ta.member_id
     where ta.session_id = ${sessionId}
   `;
-  const teamPlayers: Record<number, { id: string; firstName: string; lastName: string; grade: string | null }[]> = {};
+  const teamPlayers: Record<number, { id: string; firstName: string; lastName: string; displayName: string; grade: string | null }[]> = {};
   assignmentRows.forEach((r: any) => {
     if (!teamPlayers[r.team_id]) teamPlayers[r.team_id] = [];
-    teamPlayers[r.team_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, grade: r.grade });
+    teamPlayers[r.team_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), grade: r.grade });
   });
 
   const teams: Record<number, TeamInfo> = {};
@@ -116,7 +116,7 @@ async function loadSnapshot(db: any, sessionId: number) {
   });
 
   const confirmedRows = await db.sql`
-    select m.id, m.email, m.first_name, m.last_name, m.is_new
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new
     from bookings b join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'in'
   `;
@@ -132,9 +132,9 @@ async function loadSnapshot(db: any, sessionId: number) {
   const refereeEligibleIds = new Set<string>(
     confirmedRows.filter((r: any) => !String(r.email || "").endsWith("@no-login.guwh")).map((r: any) => r.id)
   );
-  const memberNames: Record<string, { firstName: string; lastName: string; isNew: boolean }> = {};
+  const memberNames: Record<string, { firstName: string; lastName: string; displayName?: string; isNew: boolean }> = {};
   confirmedRows.forEach((r: any) => {
-    memberNames[r.id] = { firstName: r.first_name, lastName: r.last_name, isNew: r.is_new };
+    memberNames[r.id] = { firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new };
   });
 
   const rowRows = await db.sql`
@@ -149,16 +149,16 @@ async function loadSnapshot(db: any, sessionId: number) {
   const poolGameIds = poolGameRows.map((r: any) => r.id);
   const refRows = poolGameIds.length
     ? await db.sql`
-        select tpr.pool_game_id, m.id, m.first_name, m.last_name
+        select tpr.pool_game_id, m.id, m.nickname, m.first_name, m.last_name
         from timetable_pool_referees tpr join members m on m.id = tpr.member_id
         where tpr.pool_game_id = any(${poolGameIds})
       `
     : [];
 
-  const refsByPoolGame: Record<number, { id: string; firstName: string; lastName: string }[]> = {};
+  const refsByPoolGame: Record<number, { id: string; firstName: string; lastName: string; displayName: string }[]> = {};
   refRows.forEach((r: any) => {
     if (!refsByPoolGame[r.pool_game_id]) refsByPoolGame[r.pool_game_id] = [];
-    refsByPoolGame[r.pool_game_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name });
+    refsByPoolGame[r.pool_game_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) });
   });
 
   const poolGamesByRow: Record<number, any[]> = {};
@@ -284,6 +284,7 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
             id,
             firstName: m.firstName,
             lastName: m.lastName,
+            displayName: m.displayName,
             isNew: m.isNew,
             refereedTonight: snap.refereedTonightCount[id] || 0,
             seasonCount: seasonCounts[id] || 0,
@@ -291,7 +292,7 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
         });
         unavailable = elig.unavailable.map((u) => {
           const m = snap.memberNames[u.memberId] || { firstName: "Unknown", lastName: "", isNew: false };
-          return { id: u.memberId, firstName: m.firstName, lastName: m.lastName, reason: u.reason, detail: u.detail };
+          return { id: u.memberId, firstName: m.firstName, lastName: m.lastName, displayName: m.displayName, reason: u.reason, detail: u.detail };
         });
       }
       return {
@@ -340,6 +341,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
 
   const db = getDatabase();
+  await ensureNicknameColumn(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "arrange_teams")) {
     return forbidden("Only Game Coordinators and Administrators can arrange the timetable");
