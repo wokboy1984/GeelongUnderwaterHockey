@@ -1,9 +1,13 @@
 // Read-only "This Week's Game" for any logged-in member — shows the
-// published timetable, or nothing if the Game Coordinator hasn't published
-// yet. No permission beyond being a registered member is needed to view.
+// timetable and teams, published or still in draft. No permission beyond
+// being a registered member is needed to view.
 //
 // GET /api/game-board[?date=YYYY-MM-DD]
-//   -> { ok, sessionDate, upcoming, weeks[], published, teams?, rows?, mvp? }
+//   -> { ok, sessionDate, upcoming, weeks[], published, hasDraft, teams?, rows?, mvp? }
+//
+// `published` says whether the Game Coordinator has finalised the week;
+// `hasDraft` says whether there is anything built yet at all. Callers show
+// an unpublished board as provisional rather than hiding it (20 Oct 2026).
 //
 // Week by week (2 Oct 2026): ?date picks any past Wednesday (default: the
 // upcoming one), so members can flick back through previous weeks instead
@@ -56,11 +60,21 @@ export default async (req: Request, context: Context) => {
 
     const [session] = await db.sql`select id, published from sessions where session_date = ${sessionDate}`;
 
-    if (!session || !session.published) {
-      return new Response(JSON.stringify({ ok: true, sessionDate, upcoming, weeks, published: false }), {
+    // Nothing started for this week at all — no teams, no timetable. This
+    // is the only case that still returns an empty board.
+    if (!session) {
+      return new Response(JSON.stringify({ ok: true, sessionDate, upcoming, weeks, published: false, hasDraft: false }), {
         headers: { "content-type": "application/json" },
       });
     }
+
+    // Draft visibility (20 Oct 2026): an unpublished session used to stop
+    // here. Members now see the work in progress — which team they're on
+    // and which sticks they're playing — so they can plan their night
+    // before the coordinator finalises. The frontend marks anything
+    // unpublished as not final. `published` still means exactly what it
+    // did, so nothing that keys off it changes behaviour.
+    const published = !!session.published;
 
     const teamRows = await db.sql`select id, name from game_teams where session_id = ${session.id} order by created_at asc`;
     const teamNames: Record<number, string> = {};
@@ -162,17 +176,26 @@ export default async (req: Request, context: Context) => {
 
     // The night's MVP(s): most referee nominations, ties all shown. Names
     // only - the vote breakdown stays on the coordinator's Publish tab.
-    const mvpRows = await db.sql`
-      select m.id, m.nickname, m.first_name, m.last_name, count(*)::int as votes
-      from mvp_nominations mn join members m on m.id = mn.nominee_id
-      where mn.session_id = ${session.id}
-      group by m.id, m.nickname, m.first_name, m.last_name
-      order by votes desc
-    `;
-    const topVotes = mvpRows.length ? mvpRows[0].votes : 0;
-    const mvp = mvpRows.filter((r: any) => r.votes === topVotes).map((r: any) => ({ id: r.id, name: memberDisplayName(r) }));
+    // Nominations only happen after a game has been played, so there is
+    // never anything to show for an unpublished draft.
+    let mvp: any[] = [];
+    if (published) {
+      const mvpRows = await db.sql`
+        select m.id, m.nickname, m.first_name, m.last_name, count(*)::int as votes
+        from mvp_nominations mn join members m on m.id = mn.nominee_id
+        where mn.session_id = ${session.id}
+        group by m.id, m.nickname, m.first_name, m.last_name
+        order by votes desc
+      `;
+      const topVotes = mvpRows.length ? mvpRows[0].votes : 0;
+      mvp = mvpRows.filter((r: any) => r.votes === topVotes).map((r: any) => ({ id: r.id, name: memberDisplayName(r) }));
+    }
 
-    return new Response(JSON.stringify({ ok: true, sessionDate, upcoming, weeks, published: true, teams, rows, mvp }), {
+    // "Is there anything worth showing?" — a session row can exist with no
+    // teams and no timetable yet, which should still read as nothing built.
+    const hasDraft = teams.length > 0 || rows.length > 0;
+
+    return new Response(JSON.stringify({ ok: true, sessionDate, upcoming, weeks, published, hasDraft, teams, rows, mvp }), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

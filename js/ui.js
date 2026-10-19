@@ -423,9 +423,81 @@ window.GUWH = window.GUWH || {};
     return l ? f + " " + l.charAt(0).toUpperCase() + "." : f;
   };
 
+  // Shown above any team or timetable the Game Coordinator hasn't
+  // finalised (20 Oct 2026). Members see drafts now, so every place that
+  // renders one has to say so in the same words — hence one component
+  // rather than the same sentence written three ways. Red text plus the
+  // word "draft" and a warning icon, never colour on its own.
+  function DraftNotice({ className }) {
+    return h(
+      "div",
+      { className: cx("rounded-xl bg-[var(--bad-05)] ring-1 ring-[var(--bad-30)] px-4 py-3 flex items-start gap-2.5", className) },
+      h(Icon, { name: "alert", size: 16, className: "text-[var(--bad)] shrink-0 mt-0.5" }),
+      h(
+        "p",
+        { className: "text-sm font-semibold text-[var(--bad)]" },
+        "Draft only — this timetable hasn't been finalised yet and may still change."
+      )
+    );
+  }
+
+  // "You're in Sharks, playing black sticks" (20 Oct 2026). Used on the
+  // Dashboard and on Profile, from the same derived data, so a member gets
+  // the same answer wherever they look. `colours` comes from
+  // myGameColours() and is one entry per game, because a team can switch
+  // sticks between games.
+  //
+  // The swatch is never the only signal — every game spells out "Black
+  // sticks" or "White sticks" in words beside it.
+  function StickSwatch({ colour }) {
+    return h("span", {
+      className: cx(
+        "inline-block w-3 h-3 rounded-full shrink-0 ring-1",
+        colour === "black" ? "bg-[var(--ink)] ring-black/20" : "bg-white ring-black/30"
+      ),
+      "aria-hidden": "true",
+    });
+  }
+
+  function MyTeamSummary({ team, colours, className }) {
+    if (!team) {
+      return h(
+        "div",
+        { className: cx("rounded-xl bg-white px-4 py-3", className) },
+        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "You're not in a team yet"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "The Game Coordinator sorts teams once the roll closes. Make sure you've marked yourself in.")
+      );
+    }
+    return h(
+      "div",
+      { className: cx("rounded-xl bg-white px-4 py-3 flex flex-col gap-2", className) },
+      h(
+        "p",
+        { className: "text-sm text-[var(--ink)]" },
+        "You're in ",
+        h("span", { className: "font-bold text-[var(--accent-dark)]" }, team.name)
+      ),
+      colours.length === 0
+        ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No games scheduled for your team yet.")
+        : h(
+            "div",
+            { className: "flex flex-col gap-1.5" },
+            colours.map((c, i) =>
+              h(
+                "div",
+                { key: i, className: "flex items-center gap-2 text-sm text-[var(--ink)]" },
+                h(StickSwatch, { colour: c.colour }),
+                h("span", { className: "font-semibold" }, c.colourLabel),
+                colours.length > 1 && h("span", { className: "text-[var(--ink-soft)] text-xs" }, c.pool)
+              )
+            )
+          )
+    );
+  }
+
   GUWH.UI = {
     Icon, Container, Button, Pill, SectionHeading, Avatar, PlayerChip, MemberPhoto,
     MilestoneCard, AttendanceCounter, EventCard, TeamBoard, ScheduleList,
-    ShareCard, FormField, inputCls, Modal, WeekSwitcher,
+    ShareCard, FormField, inputCls, Modal, WeekSwitcher, DraftNotice, MyTeamSummary,
   };
 })();

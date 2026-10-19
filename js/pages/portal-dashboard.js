@@ -55,6 +55,40 @@ GUWH.Pages = GUWH.Pages || {};
   // "This Week's Game") — this is just a link card through to it, not an
   // embedded copy (13 Sept 2026, Cheongy's request: put Teams/Timetable
   // back on their own Members Portal page rather than folded into here).
+
+  // "Your team this week" on the Dashboard (20 Oct 2026). Reads the board
+  // the page already loaded — no extra request — and leans on the shared
+  // MyTeamSummary so Profile and This Week's Game say the same thing.
+  function MyTeamCard({ board, memberId }) {
+    const team = myTeamFor(board, memberId);
+    const colours = myGameColours(board, team);
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+      h(
+        "div",
+        { className: "flex items-baseline justify-between gap-3 flex-wrap" },
+        h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Your team this week"),
+        !board.published && h("span", { className: "text-xs font-semibold text-[var(--bad)]" }, "Draft")
+      ),
+      h(GUWH.UI.MyTeamSummary, { team, colours }),
+      h(
+        "button",
+        { onClick: () => navigate("/portal/board"), className: "text-xs font-semibold text-[var(--accent-dark)] text-left hover:underline" },
+        "See the full timetable →"
+      )
+    );
+  }
+
+  // One sentence about the state of the week's board, used in both places
+  // the Dashboard mentions it. Members see drafts now (20 Oct 2026), so
+  // "not published yet" is only true when nothing has been built at all.
+  function boardBlurb(board) {
+    if (!board || !board.hasDraft) return "Teams and timetable not started yet.";
+    if (!board.published) return "Draft teams and timetable are up — not final, but you can see where you're headed.";
+    return "Teams and timetable are published — see pools, teams and cap colours.";
+  }
+
   function ThisWeeksGameCard({ board }) {
     return h(
       "button",
@@ -63,7 +97,7 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         null,
         h("p", { className: "font-display font-bold text-[var(--ink)]" }, "This Week's Game"),
-        h("p", { className: "text-sm text-[var(--ink-soft)]" }, board && board.published ? "Teams and timetable are published — see pools, teams and cap colours." : "Teams and timetable not published yet.")
+        h("p", { className: "text-sm text-[var(--ink-soft)]" }, boardBlurb(board))
       ),
       h(Icon, { name: "chevronRight", size: 18, className: "text-[var(--ink-soft)] shrink-0" })
     );
@@ -226,8 +260,8 @@ GUWH.Pages = GUWH.Pages || {};
       {
         label: "Book in for Wednesday",
         hint: closed
-          ? "Bookings for this Wednesday have closed - book in for next week."
-          : "Tap I'm Coming before 12pm Wednesday. That's how the coordinator knows to put you in a team.",
+          ? "The roll for this Wednesday has closed - book in for next week."
+          : "Tap I'm Coming before 7:30pm Wednesday. That's how the coordinator knows to put you in a team.",
         done: booked,
         button: !booked && !closed && status ? h(Button, { size: "sm", className: "shrink-0", disabled: booking, onClick: onBook }, "I'm Coming") : null,
       },
@@ -703,7 +737,12 @@ GUWH.Pages = GUWH.Pages || {};
                         "div",
                         { className: "mt-4 flex items-center gap-4 flex-wrap" },
                         h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white text-lg" }, status.confirmedCount), " members confirmed"),
-                        h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "Can't Make It")
+                        // Past 7:30pm the roll is locked both ways (20 Oct
+                        // 2026), so dropping out is no longer self-service —
+                        // hide the button rather than let it fail server-side.
+                        status.bookingClosed
+                          ? h("p", { className: "text-sm text-white/80" }, "The roll is locked — tell the Game Coordinator if you can't make it.")
+                          : h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "Can't Make It")
                       ),
                       h(
                         "div",
@@ -711,7 +750,7 @@ GUWH.Pages = GUWH.Pages || {};
                         h(
                           "p",
                           { className: "text-xs text-white/60" },
-                          board && board.published ? "This week's teams and timetable are published — see This Week's Game." : "Teams and timetable not published yet."
+                          boardBlurb(board)
                         )
                       ),
                       h(BookingCountdown, { cutoffAt: status.cutoffAt }),
@@ -719,6 +758,10 @@ GUWH.Pages = GUWH.Pages || {};
                     )
               )
             : loading && h("div", { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" }, h("p", { className: "text-sm text-white/70" }, "Loading…")),
+          // Your team and stick colour, first thing after the attendance
+          // card — what a member most wants once teams exist (20 Oct 2026).
+          // Shown for drafts too, flagged as provisional.
+          board && board.hasDraft && profile && h("div", { className: "mt-4" }, h(MyTeamCard, { board, memberId: profile.id })),
           // Directly under the attendance card so it's the next thing seen.
           status && h("div", { className: "mt-4" }, h(WhosComingCard, { confirmed: status.confirmed }))
         ),

@@ -31,13 +31,17 @@ export function nextSessionDateISO(now = new Date()): string {
  return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
 }
 
-// Booking cut-off (2 Oct 2026). Members can book "in" for the upcoming
-// Wednesday until this Melbourne wall-clock time on the day itself; after
-// that only a Game Coordinator can add them (cancelling is always allowed).
-// Club decision (Cheongy, 12 Oct 2026): bookings close Wednesday 12:00pm
-// (midday). Change these two numbers to move it.
-export const BOOKING_CUTOFF_HOUR = 12;
-export const BOOKING_CUTOFF_MINUTE = 0;
+// Booking cut-off (2 Oct 2026). Members can change their own attendance
+// for the upcoming Wednesday until this Melbourne wall-clock time on the
+// day itself; after that only a Game Coordinator can move anyone.
+// Club decision (20 Oct 2026): the roll stays open until 7:30pm on game
+// night, so anyone who only finds out late that they can get there can
+// still put themselves in. Supersedes the 12 Oct midday cut-off, which
+// shut people out for the whole afternoon. At 7:30pm it locks in both
+// directions — see booking.mts — so the coordinator has firm numbers to
+// build teams from. Change these two numbers to move it.
+export const BOOKING_CUTOFF_HOUR = 19;
+export const BOOKING_CUTOFF_MINUTE = 30;
 
 // Converts a Melbourne wall-clock date/time to a real UTC instant, DST-safe:
 // guess the instant as if Melbourne were UTC, measure how far Melbourne's

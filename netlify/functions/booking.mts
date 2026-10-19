@@ -93,23 +93,30 @@ export default async (req: Request, context: Context) => {
         targetId = kid.id;
       }
 
-      // The client route already gates the whole portal behind the waiver
-      // (see app.js's WAIVER_EXEMPT_PATHS check), but this is the one
-      // self-service write a brand-new member could otherwise reach
-      // directly — re-checked here server-side rather than trusted from
-      // the client. Cancelling ("out") is always allowed regardless.
-      // Past the cut-off: no new self-service bookings. Cancelling still
-      // works, and a Game Coordinator can still add someone on the day.
-      if (wantsIn && bookingClosed) {
+      // Past the cut-off the roll is locked in both directions (20 Oct
+      // 2026): no self-service booking in and no self-service cancelling,
+      // so the numbers the Game Coordinator builds teams from at 7:30pm
+      // can't move underneath them. Only a Game Coordinator can change
+      // anyone after that, via coordinator-attendance.mts.
+      //
+      // Re-asserting a status you already hold is still allowed, so a
+      // double-tap or a stale tab can't produce a confusing error.
+      if (bookingClosed) {
         const [current] = await db.sql`select status from bookings where session_id = ${sessionId} and member_id = ${targetId}`;
-        if (!current || current.status !== "in") {
-          return new Response(JSON.stringify({ ok: false, error: "Bookings for this Wednesday have closed. Message the Game Coordinator if you can still make it." }), {
+        const currentStatus = current ? current.status : null;
+        if (currentStatus !== (wantsIn ? "in" : "out")) {
+          return new Response(JSON.stringify({ ok: false, error: "The roll closed at 7:30pm. Message the Game Coordinator if you need to be added or taken off." }), {
             status: 403,
             headers: { "content-type": "application/json" },
           });
         }
       }
 
+      // The client route already gates the whole portal behind the waiver
+      // (see app.js's WAIVER_EXEMPT_PATHS check), but this is the one
+      // self-service write a brand-new member could otherwise reach
+      // directly — re-checked here server-side rather than trusted from
+      // the client. Cancelling ("out") never needs a waiver.
       if (wantsIn && ONLINE_WAIVER_REQUIRED) {
         const [waiver] = await db.sql`select waiver_accepted_at from members where id = ${memberId}`;
         if (!waiver || !waiver.waiver_accepted_at) {

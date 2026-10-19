@@ -52,3 +52,40 @@ async function shareOrCopy({ title, text, url }) {
     return "failed";
   }
 }
+
+// ---------------------------------------------------------------------------
+// "Which team am I on, and which sticks am I playing?" (20 Oct 2026)
+// Derived from a /api/game-board payload rather than asked for separately,
+// so the Dashboard, Profile and This Week's Game all agree. Works the same
+// on a published board and an unpublished draft — the caller decides how to
+// label it, these two only read what's there.
+// ---------------------------------------------------------------------------
+
+// The member's team for that board, or null if they haven't been assigned.
+function myTeamFor(board, memberId) {
+  if (!board || !memberId || !Array.isArray(board.teams)) return null;
+  return board.teams.find((t) => (t.players || []).some((p) => p.id === memberId)) || null;
+}
+
+// Every game that team plays, with the stick colour they wear for it.
+// Returns [{ pool, colour: "black" | "white", colourLabel, startMin }].
+// Teams can switch colour between games, so this is per game, never per
+// night. A game the team isn't in simply doesn't appear.
+function myGameColours(board, team) {
+  if (!board || !team || !Array.isArray(board.rows)) return [];
+  const out = [];
+  board.rows.forEach((row) => {
+    if (!row || !row.isGame) return;
+    (row.poolGames || []).forEach((pg) => {
+      const colour = pg.blackTeamName === team.name ? "black" : pg.whiteTeamName === team.name ? "white" : null;
+      if (!colour) return;
+      out.push({
+        pool: pg.pool,
+        colour,
+        colourLabel: colour === "black" ? "Black sticks" : "White sticks",
+        startMin: row.startMin,
+      });
+    });
+  });
+  return out;
+}

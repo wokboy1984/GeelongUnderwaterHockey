@@ -210,6 +210,50 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // A copy of this week's timetable on the member's own page (20 Oct
+  // 2026), so they don't have to go to This Week's Game to check what
+  // they're walking into. Shows the draft as readily as the finalised
+  // version — marked as draft by GUWH.UI.DraftNotice when it isn't final.
+  // Reuses the exact renderer the public board uses (GUWH.Pages.
+  // PublicTimetable), so the two can't drift apart.
+  function MyTimetableCard({ memberId }) {
+    const [board, setBoard] = React.useState(null);
+    const [loaded, setLoaded] = React.useState(false);
+
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/game-board")
+        .then((r) => r.json())
+        .then((d) => { if (d.ok) setBoard(d); })
+        .catch(() => {})
+        .finally(() => setLoaded(true));
+    }, []);
+
+    // Nothing built for the week yet — stay out of the way rather than
+    // showing an empty shell on a page that's already long.
+    if (!loaded || !board || !board.hasDraft) return null;
+
+    const myTeam = myTeamFor(board, memberId);
+    const colours = myGameColours(board, myTeam);
+
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+      h(
+        "div",
+        { className: "flex items-baseline justify-between gap-3 flex-wrap" },
+        h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "This week's timetable"),
+        h("p", { className: "text-xs text-[var(--ink-soft)]" }, GUWH.formatDate(new Date(board.sessionDate + "T00:00:00")))
+      ),
+      !board.published && h(GUWH.UI.DraftNotice),
+      h(GUWH.UI.MyTeamSummary, { team: myTeam, colours }),
+      h(
+        "div",
+        { className: "rounded-2xl bg-white p-4" },
+        h(GUWH.Pages.PublicTimetable, { rows: board.rows, highlightTeamName: myTeam ? myTeam.name : null })
+      )
+    );
+  }
+
   // "My kids" (14 Oct 2026): children a parent brings along, kept under the
   // parent's own profile. They don't get a login. Booking them in for
   // Wednesday happens on the Dashboard; game fees bill to the parent.
@@ -490,6 +534,8 @@ GUWH.Pages = GUWH.Pages || {};
           savedFlash && h("span", { className: "text-sm text-[var(--good-dark)] flex items-center gap-1.5" }, h(Icon, { name: "check", size: 14 }), "Saved")
         )
       ),
+
+      h("div", { className: "mt-6" }, h(MyTimetableCard, { memberId: member.id })),
 
       h("div", { className: "mt-6" }, h(FamilyCard)),
 

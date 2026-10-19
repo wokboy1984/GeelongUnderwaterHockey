@@ -445,8 +445,11 @@ GUWH.Pages = GUWH.Pages || {};
 
     const isPast = !!(data && data.upcoming && data.sessionDate < data.upcoming);
 
-    const myTeam = data && data.published && myId ? (data.teams || []).find((t) => (t.players || []).some((p) => p.id === myId)) : null;
+    // Highlighting works on drafts too (20 Oct 2026) — knowing your team
+    // early is most of the point of showing an unfinished board.
+    const myTeam = myId ? myTeamFor(data, myId) : null;
     const myTeamName = myTeam ? myTeam.name : null;
+    const showBoard = !!(data && data.hasDraft);
 
     return h(
       Container,
@@ -456,17 +459,18 @@ GUWH.Pages = GUWH.Pages || {};
         h("div", { className: "max-w-md mb-8" }, h(GUWH.UI.WeekSwitcher, { date: data.sessionDate, weeks: data.weeks, upcoming: data.upcoming, onChange: load })),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
       loading && h("p", { className: "text-sm text-[var(--ink-soft)] mb-4" }, "Loading…"),
-      data && !data.published &&
+      data && !showBoard &&
         h(
           "div",
           { className: "rounded-2xl border-2 border-dashed border-black/10 p-10 text-center text-[var(--ink-soft)]" },
-          isPast ? "No game board was published for this week." : "Check back soon — the Game Coordinator is still sorting teams for this week."
+          isPast ? "No game board was published for this week." : "Check back soon — the Game Coordinator hasn't started teams for this week."
         ),
-      data && data.published &&
+      showBoard && !data.published && h(GUWH.UI.DraftNotice, { className: "mb-6" }),
+      showBoard &&
         h(
           React.Fragment,
           null,
-          h(ResultsCard, { rows: data.rows, mvp: data.mvp, highlightTeamName: myTeamName }),
+          data.published && h(ResultsCard, { rows: data.rows, mvp: data.mvp, highlightTeamName: myTeamName }),
           h(
             "div",
             { className: "mb-10" },
