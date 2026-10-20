@@ -32,8 +32,17 @@ GUWH.Pages = GUWH.Pages || {};
   function deletable(entry) {
     return entry.kind !== "payment" && !isAutomaticGameCharge(entry);
   }
+  // An automatic game fee can't be deleted — it's computed from attendance,
+  // so it would simply come back. It can be waived instead (20 Oct 2026),
+  // which records the billing decision without making the roll lie about
+  // who turned up. Waiving is reversible from the same spot.
+  function waivable(entry) {
+    return isAutomaticGameCharge(entry) && !entry.waived;
+  }
+  function restorable(entry) {
+    return isAutomaticGameCharge(entry) && !!entry.waived;
+  }
   function deletableReason(entry) {
-    if (isAutomaticGameCharge(entry)) return "Automatic game fee — untick this player's attendance on the Game Coordination tab to remove it.";
     return "Payments can't be deleted — record a correcting entry instead.";
   }
 
@@ -134,6 +143,37 @@ GUWH.Pages = GUWH.Pages || {};
         const body = await res.json();
         if (!body.ok) { setError(body.error || "Could not delete that record."); return; }
         setNotice("Deleted the " + label + " of " + money(entry.amount_cents) + ".");
+        await load();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setDeleting("");
+      }
+    }
+
+    // Waive or restore an automatic game fee. Attendance is never touched:
+    // the player still counts as having turned up, the club has just decided
+    // not to charge them for it.
+    async function setGameFeeWaived(entry, waive) {
+      const who = selected ? selected.displayName : "this player";
+      let reason = null;
+      if (waive) {
+        reason = window.prompt("Waive the " + money(entry.amount_cents) + " game fee for " + who + " on " + entry.entry_date + "?\n\nThis leaves their attendance as it is. Add a short reason (optional):", "");
+        if (reason === null) return; // cancelled
+      } else if (!window.confirm("Put the game fee back for " + who + " on " + entry.entry_date + "?")) {
+        return;
+      }
+      setDeleting(entry.id);
+      setError("");
+      setNotice("");
+      try {
+        const res = await GUWH.Identity.authFetch("/api/finance", {
+          method: "POST",
+          body: JSON.stringify({ action: waive ? "waive_game" : "restore_game", id: entry.id, reason: reason || "" }),
+        });
+        const body = await res.json();
+        if (!body.ok) { setError(body.error || "Could not update that fee."); return; }
+        setNotice(waive ? "Game fee waived for " + entry.entry_date + "." : "Game fee restored for " + entry.entry_date + ".");
         await load();
       } catch (e) {
         setError(String(e));
@@ -441,6 +481,23 @@ GUWH.Pages = GUWH.Pages || {};
                                 onClick: () => deleteEntry(entry),
                                 className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
                               }, h(Icon, { name: "x", size: 15 }))
+                            : waivable(entry)
+                            ? h("button", {
+                                type: "button",
+                                "aria-label": "Waive this game fee",
+                                title: "Waive this fee — leaves their attendance as it is",
+                                disabled: deleting === entry.id,
+                                onClick: () => setGameFeeWaived(entry, true),
+                                className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
+                              }, h(Icon, { name: "x", size: 15 }))
+                            : restorable(entry)
+                            ? h("button", {
+                                type: "button",
+                                title: "Put this fee back",
+                                disabled: deleting === entry.id,
+                                onClick: () => setGameFeeWaived(entry, false),
+                                className: "text-[10px] font-semibold text-[var(--accent-dark)] hover:underline disabled:opacity-40 transition",
+                              }, "Restore")
                             : h("span", {
                                 className: "text-[10px] text-[var(--ink-soft)] w-[15px] text-center cursor-help",
                                 title: deletableReason(entry),

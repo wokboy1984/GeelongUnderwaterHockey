@@ -1,12 +1,12 @@
 import { getDatabase } from '@netlify/database';
-import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, hasPermission, logAudit, shortName, unauthorized, forbidden } from './_shared/roles.mts';
+import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, ensureWaivedGames, hasPermission, logAudit, shortName, unauthorized, forbidden } from './_shared/roles.mts';
 import { FEES, cents, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
  if (!['GET','POST'].includes(req.method)) return json({ok:false,error:'Method not allowed'},405);
  const user = await getVerifiedUser(req); if (!user) return unauthorized();
  try {
-  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); const caller = await ensureMember(db,user);
+  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); await ensureWaivedGames(db); const caller = await ensureMember(db,user);
   const url = new URL(req.url);
   // Self-service summary for the member dashboard: any logged-in member can
   // see their OWN balance (never anyone else's, and never the full roster) —
@@ -95,6 +95,32 @@ export default async (req: Request) => {
     const result = await db.sql`select record_finance_entry(${b.id},${b.memberId},${b.kind},${date}::date,${amount},${note},${caller.id}) as id`;
     const inserted = result.filter((r: any) => r.id);
     if(!inserted.length) return json({ok:false,error:'Already recorded for this player and date.'},409);
+   } else if(b.action === 'waive_game' || b.action === 'restore_game') {
+    // Clearing an automatic game fee (20 Oct 2026). These aren't rows, so
+    // there's nothing to delete — the fee is computed from attendance. The
+    // old answer was "untick their attendance", which made the roll lie
+    // about who turned up in order to fix a billing decision. A waiver
+    // records the billing decision on its own.
+    //
+    // The id is the synthetic one the GET builds: attendance:<memberId>:<date>
+    const parts = /^attendance:([0-9a-f-]{36}):(\d{4}-\d{2}-\d{2})$/i.exec(String(b.id || ''));
+    if(!parts) return json({ok:false,error:'Invalid game fee reference'},400);
+    const [, attendeeId, sessionDate] = parts;
+    const [attended] = await db.sql`select 1 from session_attendance where member_id=${attendeeId} and session_date=${sessionDate}::date and attended=true`;
+    if(!attended) return json({ok:false,error:'No attendance recorded for that player on that date.'},404);
+
+    if(b.action === 'waive_game') {
+     const reason = String(b.reason || '').trim().slice(0,500) || null;
+     await db.sql`
+      insert into finance_waived_games (member_id, session_date, reason, waived_by)
+      values (${attendeeId}, ${sessionDate}::date, ${reason}, ${caller.id})
+      on conflict (member_id, session_date) do update set reason=excluded.reason, waived_by=excluded.waived_by
+     `;
+     await logAudit(db,{actorId:caller.id,actorEmail:caller.email,action:'finance_game_fee_waived',resourceType:'session_attendance',resourceId:`${attendeeId}:${sessionDate}`,newValue:{reason},note:`${caller.email} waived the game fee for ${sessionDate}`});
+    } else {
+     await db.sql`delete from finance_waived_games where member_id=${attendeeId} and session_date=${sessionDate}::date`;
+     await logAudit(db,{actorId:caller.id,actorEmail:caller.email,action:'finance_game_fee_restored',resourceType:'session_attendance',resourceId:`${attendeeId}:${sessionDate}`,note:`${caller.email} restored the game fee for ${sessionDate}`});
+    }
    } else if(b.action === 'delete') {
     // Removing a mistaken fee — joining/annual/game/custom only. Payments are
     // never deletable here (money that actually changed hands stays on the
@@ -125,23 +151,31 @@ export default async (req: Request) => {
      row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
     from session_attendance sa join members m on m.id=sa.member_id where sa.attended=true
    ), game_entries as (
+    -- A waived fee (20 Oct 2026) renders at $0 and says so, rather than
+    -- vanishing: the club keeps a visible record of the decision, totals()
+    -- naturally excludes a zero, and deleting the waiver row puts the
+    -- charge back. Attendance is untouched either way.
     select 'attendance:'||a.member_id||':'||a.session_date::text as id,a.bill_to as member_id,'game'::text as kind,
      to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-     case when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
+     case when w.member_id is not null then 0
+          when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
           when fa.trial_eligible and a.attendance_number<=3 then 0
           when fa.category='waged' then 2000 else 1000 end as amount_cents,
-     case when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+     case when w.member_id is not null then 'Fee waived'||coalesce(' — '||nullif(trim(w.reason),''),'')
+          when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
           when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
+     (w.member_id is not null) as waived,
      a.marked_by as actor_id,a.session_date::timestamptz as created_at
     from attended a join finance_accounts fa on fa.member_id=a.bill_to
+    left join finance_waived_games w on w.member_id=a.member_id and w.session_date=a.session_date
    ), manual_entries as (
     -- Includes retrospective manual 'game' entries alongside joining/annual/
     -- payment/custom — finance.mts refuses a manual game entry for any date
     -- session_attendance already covers, so this can never double up with
     -- game_entries above.
-    select id,member_id,kind,to_char(entry_date,'YYYY-MM-DD') as entry_date,amount_cents,note,actor_id,created_at
+    select id,member_id,kind,to_char(entry_date,'YYYY-MM-DD') as entry_date,amount_cents,note,false as waived,actor_id,created_at
     from finance_entries
-   ) select id,member_id,kind,entry_date,amount_cents,note,actor_id from (
+   ) select id,member_id,kind,entry_date,amount_cents,note,waived,actor_id from (
     select * from game_entries union all select * from manual_entries
    ) all_entries order by entry_date,created_at`;
   // Attended games that can't be charged because whoever pays (the player, or
