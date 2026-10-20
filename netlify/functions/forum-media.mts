@@ -28,7 +28,15 @@ import { ensureForumAttachments, ensureMember, getVerifiedUser, hasPermission, u
 
 // Larger than a profile photo: these are game photos people will want to
 // actually look at, not a thumbnail beside a name.
-const MAX_BYTES = 6 * 1024 * 1024; // 6MB
+//
+// Capped at 4MB rather than higher because base64 inflates the request by
+// about a third, and Netlify rejects an oversized body itself with a bare
+// 413 and no JSON — the member would see a meaningless error instead of
+// ours. 4MB of image is roughly 5.5MB on the wire, which stays underneath.
+// forum.js checks the same number before uploading so the feedback is
+// instant rather than after a slow failed upload.
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB
+const MAX_BYTES = MAX_IMAGE_BYTES;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 function decodeDataUrl(dataUrl: string): { contentType: string; bytes: Buffer } | null {
@@ -86,7 +94,7 @@ export default async (req: Request, context: Context) => {
       return json({ ok: false, error: "Images only — JPEG, PNG, WebP or GIF." }, 400);
     }
     if (decoded.bytes.byteLength > MAX_BYTES) {
-      return json({ ok: false, error: "That image is too big — keep it under 6MB." }, 400);
+      return json({ ok: false, error: "That image is too big — keep it under 4MB." }, 400);
     }
 
     const fileName = String((body as any).fileName || "").trim().slice(0, 200) || null;

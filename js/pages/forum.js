@@ -42,6 +42,7 @@ GUWH.Pages = GUWH.Pages || {};
   // _shared/roles.mts. This only decides whether to show the button; the
   // server checks the same permission on every upload.
   const MEDIA_ROLES = ["game_coordinator", "community_moderator", "treasurer", "administrator"];
+  const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // keep in step with forum-media.mts
   function canPostMedia() {
     return MEDIA_ROLES.some((r) => GUWH.Identity.hasRole(r));
   }
@@ -127,6 +128,15 @@ GUWH.Pages = GUWH.Pages || {};
       event.target.value = ""; // let the same file be chosen again later
       if (!file) return;
       setMediaError("");
+      // Checked here as well as server-side so an oversized photo fails
+      // instantly instead of after a slow upload. Must stay in step with
+      // MAX_IMAGE_BYTES in forum-media.mts — and it has to be caught before
+      // sending, because Netlify rejects a too-large body itself with an
+      // empty 413 that carries none of our wording.
+      if (file.size > MAX_IMAGE_BYTES) {
+        setMediaError("That image is too big — keep it under 4MB. Most phones can shrink a photo when you share it.");
+        return;
+      }
       setUploading(true);
       try {
         const dataUrl = await new Promise((resolve, reject) => {
@@ -139,7 +149,18 @@ GUWH.Pages = GUWH.Pages || {};
           method: "POST",
           body: JSON.stringify({ dataUrl, fileName: file.name }),
         });
-        const data = await res.json();
+        // Not every failure comes back as JSON — a 413 from the platform
+        // has an empty body, and parsing that throws a error that means
+        // nothing to a member.
+        const raw = await res.text();
+        let data;
+        try { data = JSON.parse(raw); } catch (e) { data = null; }
+        if (!data) {
+          setMediaError(res.status === 413
+            ? "That image is too big to upload — keep it under 4MB."
+            : "Could not add that image (error " + res.status + "). Try again in a moment.");
+          return;
+        }
         if (!data.ok) { setMediaError(data.error || "Could not add that image."); return; }
         const alt = (file.name || "image").replace(/\.[^.]+$/, "").slice(0, 80);
         insertAtCursor((value && !/\n$/.test(value) ? "\n" : "") + "![" + alt + "](attachment:" + data.id + ")\n");
