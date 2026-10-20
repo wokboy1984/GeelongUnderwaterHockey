@@ -39,6 +39,19 @@ export default async (req: Request, context: Context) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "");
 
+    // Live preview for the composer (20 Oct 2026). Deliberately runs the
+    // exact same renderWithMentions() a real post goes through, rather than
+    // the frontend carrying its own copy of the renderer: a second
+    // implementation would drift, and would show members a preview that
+    // doesn't match what they end up posting. Reads nothing and writes
+    // nothing, so it only needs forum access.
+    if (action === "preview") {
+      const access = await requireForumAccess(db, caller, { forPosting: true });
+      if (!access.ok) return access.response;
+      const { html } = await renderWithMentions(db, String(body.body || ""));
+      return new Response(JSON.stringify({ ok: true, html }), { headers: { "content-type": "application/json" } });
+    }
+
     if (action === "create_post") {
       const access = await requireForumAccess(db, caller, { forPosting: true });
       if (!access.ok) return access.response;

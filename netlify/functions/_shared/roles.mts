@@ -26,6 +26,13 @@ export const PERMISSIONS = {
   manage_grades: ["game_coordinator", "administrator"],
   record_scores: ["game_coordinator", "administrator"],
   moderate_community: ["community_moderator", "administrator"],
+  // Attaching images to forum posts (20 Oct 2026). Deliberately wider than
+  // moderate_community — "moderators and committee", i.e. anyone holding an
+  // operational role — but not every member. Because uploads are limited to
+  // people the club has already trusted with a role, images go live with no
+  // approval queue; an ordinary member can't put a picture in front of the
+  // under-18s who can read the forum.
+  post_forum_media: ["game_coordinator", "community_moderator", "treasurer", "administrator"],
   publish_news: ["community_moderator", "administrator"],
   manage_finances: ["treasurer", "administrator"],
   assign_roles: ["administrator"],
@@ -113,6 +120,37 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   await db.sql`alter table members add column if not exists dependant_removed_at timestamptz`;
   await db.sql`alter table members add column if not exists trial_free boolean not null default false`;
   familyColumnsReady = true;
+}
+
+// Forum image attachments (20 Oct 2026). The table comes from migration
+// 20260912000011_forum, which predates this feature — it was designed then
+// and only wired up now. Guarded here for the same reason as the columns
+// above: migrations haven't always reached production on this project, and
+// a missing table would fail the upload rather than degrade.
+let forumAttachmentsReady = false;
+export async function ensureForumAttachments(db: any): Promise<void> {
+  if (forumAttachmentsReady) return;
+  await db.sql`
+    create table if not exists forum_attachments (
+      id serial primary key,
+      post_id integer references forum_posts(id) on delete cascade,
+      kind text not null,
+      blob_key text,
+      url text,
+      file_name text,
+      content_type text,
+      size_bytes integer,
+      approved_at timestamptz,
+      approved_by text references members(id) on delete set null,
+      created_by text references members(id) on delete set null,
+      created_at timestamptz not null default now()
+    )
+  `;
+  // post_id is nullable here on purpose: an image is uploaded from the
+  // composer before the post it belongs to exists. The original migration
+  // declared it not null, so relax it where that version already ran.
+  await db.sql`alter table forum_attachments alter column post_id drop not null`;
+  forumAttachmentsReady = true;
 }
 
 // One-or-two-games timetable rows (12 Oct 2026). Column added by migration

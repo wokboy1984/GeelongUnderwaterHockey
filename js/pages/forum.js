@@ -37,6 +37,232 @@ GUWH.Pages = GUWH.Pages || {};
     return inputCls + " min-h-[90px]";
   }
 
+  // Attaching images is limited to members holding an operational role
+  // ("moderators and committee") — mirrors post_forum_media in
+  // _shared/roles.mts. This only decides whether to show the button; the
+  // server checks the same permission on every upload.
+  const MEDIA_ROLES = ["game_coordinator", "community_moderator", "treasurer", "administrator"];
+  function canPostMedia() {
+    return MEDIA_ROLES.some((r) => GUWH.Identity.hasRole(r));
+  }
+
+  // ---- Composer (20 Oct 2026) ------------------------------------------
+  // The forum has always supported bold, italic, links, headings, quotes and
+  // lists, but members had to type the markup by hand and the only hint was
+  // a line of placeholder text. These buttons wrap the current selection
+  // instead.
+  //
+  // Deliberately NOT a contenteditable WYSIWYG: that would mean sending HTML
+  // from the browser and sanitising untrusted markup server-side, which is
+  // the usual way XSS holes get in. The server stays the only thing that
+  // turns text into HTML (renderForumMarkup in _shared/forum.mts), and the
+  // preview below asks that same renderer rather than reimplementing it.
+  const TOOLS = [
+    { label: "B", title: "Bold", cls: "font-bold", wrap: ["**", "**"], sample: "bold text" },
+    { label: "I", title: "Italic", cls: "italic", wrap: ["*", "*"], sample: "italic text" },
+    { label: "Link", title: "Insert a link", wrap: ["[", "](https://)"], sample: "link text" },
+    { label: "H", title: "Heading", cls: "font-bold", line: "## ", sample: "Heading" },
+    { label: "“”", title: "Quote", line: "> ", sample: "quoted text" },
+    { label: "• List", title: "Bullet list", line: "- ", sample: "list item" },
+  ];
+
+  function Composer({ value, onChange, placeholder, rows }) {
+    const ref = React.useRef(null);
+    const [showPreview, setShowPreview] = React.useState(false);
+    const [previewHtml, setPreviewHtml] = React.useState("");
+    const [previewing, setPreviewing] = React.useState(false);
+    const [uploading, setUploading] = React.useState(false);
+    const [mediaError, setMediaError] = React.useState("");
+
+    // Replaces the selected range and puts the cursor back where the writer
+    // expects it — selecting the sample word when there was no selection, so
+    // the next keystroke overwrites it.
+    function apply(tool) {
+      const el = ref.current;
+      if (!el) return;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const text = value || "";
+      const selected = text.slice(start, end);
+      const body = selected || tool.sample;
+      let next, selFrom, selTo;
+
+      if (tool.line) {
+        // Line tools act on whole lines, so find the start of the line the
+        // cursor is on and prefix from there.
+        const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+        const needsBreak = lineStart > 0 && text[lineStart - 1] !== "\n" ? "" : "";
+        next = text.slice(0, lineStart) + tool.line + (selected || tool.sample) + text.slice(end);
+        selFrom = lineStart + tool.line.length + needsBreak.length;
+        selTo = selFrom + body.length;
+      } else {
+        next = text.slice(0, start) + tool.wrap[0] + body + tool.wrap[1] + text.slice(end);
+        selFrom = start + tool.wrap[0].length;
+        selTo = selFrom + body.length;
+      }
+
+      onChange(next);
+      requestAnimationFrame(() => {
+        if (!ref.current) return;
+        ref.current.focus();
+        ref.current.setSelectionRange(selFrom, selTo);
+      });
+    }
+
+    function insertAtCursor(snippet) {
+      const el = ref.current;
+      const text = value || "";
+      const at = el ? el.selectionEnd : text.length;
+      const next = text.slice(0, at) + snippet + text.slice(at);
+      onChange(next);
+      requestAnimationFrame(() => {
+        if (!ref.current) return;
+        ref.current.focus();
+        ref.current.setSelectionRange(at + snippet.length, at + snippet.length);
+      });
+    }
+
+    async function pickImage(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = ""; // let the same file be chosen again later
+      if (!file) return;
+      setMediaError("");
+      setUploading(true);
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Could not read that file."));
+          reader.readAsDataURL(file);
+        });
+        const res = await GUWH.Identity.authFetch("/api/forum/media", {
+          method: "POST",
+          body: JSON.stringify({ dataUrl, fileName: file.name }),
+        });
+        const data = await res.json();
+        if (!data.ok) { setMediaError(data.error || "Could not add that image."); return; }
+        const alt = (file.name || "image").replace(/\.[^.]+$/, "").slice(0, 80);
+        insertAtCursor((value && !/\n$/.test(value) ? "\n" : "") + "![" + alt + "](attachment:" + data.id + ")\n");
+      } catch (e) {
+        setMediaError(String(e.message || e));
+      } finally {
+        setUploading(false);
+      }
+    }
+
+    // Debounced so typing doesn't hammer the endpoint, and only while the
+    // preview is actually open.
+    React.useEffect(() => {
+      if (!showPreview) return undefined;
+      let cancelled = false;
+      setPreviewing(true);
+      const timer = setTimeout(() => {
+        GUWH.Identity.authFetch("/api/forum/posts", {
+          method: "POST",
+          body: JSON.stringify({ action: "preview", body: value || "" }),
+        })
+          .then((r) => r.json())
+          .then((d) => { if (!cancelled && d.ok) setPreviewHtml(d.html); })
+          .catch(() => {})
+          .finally(() => { if (!cancelled) setPreviewing(false); });
+      }, 500);
+      return () => { cancelled = true; clearTimeout(timer); };
+    }, [value, showPreview]);
+
+    const btn = "px-2 py-1 rounded text-xs text-[var(--ink)] hover:bg-black/5 transition";
+    return h(
+      "div",
+      { className: "flex flex-col gap-2" },
+      h(
+        "div",
+        { className: "flex flex-wrap items-center gap-0.5 rounded-xl bg-[var(--sand)] px-1.5 py-1" },
+        TOOLS.map((t) =>
+          h("button", {
+            key: t.label,
+            type: "button",
+            title: t.title,
+            "aria-label": t.title,
+            className: cx(btn, t.cls),
+            onClick: () => apply(t),
+          }, t.label)
+        ),
+        canPostMedia() &&
+          h(
+            "label",
+            { className: cx(btn, "cursor-pointer", uploading && "opacity-50 pointer-events-none"), title: "Add an image" },
+            uploading ? "Uploading…" : "Image",
+            h("input", { type: "file", accept: "image/*", className: "hidden", onChange: pickImage, disabled: uploading })
+          ),
+        h("span", { className: "flex-1" }),
+        h("button", {
+          type: "button",
+          className: cx(btn, showPreview && "bg-black/5 font-semibold"),
+          onClick: () => setShowPreview((v) => !v),
+        }, showPreview ? "Hide preview" : "Preview")
+      ),
+      mediaError && h("p", { className: "text-xs text-[var(--bad)]" }, mediaError),
+      h("textarea", {
+        ref,
+        className: textareaCls(),
+        rows: rows || undefined,
+        placeholder,
+        value: value,
+        onChange: (e) => onChange(e.target.value),
+      }),
+      showPreview &&
+        h(
+          "div",
+          { className: "rounded-xl bg-white ring-1 ring-black/5 p-3" },
+          h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-1.5" }, previewing ? "Preview — updating…" : "Preview"),
+          (value || "").trim()
+            ? h(PostBody, { html: previewHtml, className: "text-sm leading-relaxed" })
+            : h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Nothing to preview yet.")
+        )
+    );
+  }
+
+  // ---- Rendering a post body, including its images ----------------------
+  // Post HTML comes from the server already sanitised. Attachment images
+  // arrive as <img data-forum-media="12"> with no src, because forum media
+  // is members-only and a plain <img src> can't send an Authorization
+  // header. This fetches each one with the member's credentials and fills
+  // in an object URL — the same approach MemberPhoto uses in ui.js.
+  function PostBody({ html, className }) {
+    const ref = React.useRef(null);
+
+    React.useEffect(() => {
+      const root = ref.current;
+      if (!root) return undefined;
+      const urls = [];
+      let cancelled = false;
+      const nodes = root.querySelectorAll("img[data-forum-media]");
+      nodes.forEach((img) => {
+        const id = img.getAttribute("data-forum-media");
+        if (!id) return;
+        GUWH.Identity.authFetch("/api/forum/media?id=" + encodeURIComponent(id))
+          .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("unavailable"))))
+          .then((blob) => {
+            if (cancelled) return;
+            const url = URL.createObjectURL(blob);
+            urls.push(url);
+            img.src = url;
+          })
+          .catch(() => {
+            if (!cancelled) img.replaceWith(Object.assign(document.createElement("p"), {
+              className: "text-xs text-[var(--ink-soft)] italic",
+              textContent: "[image unavailable]",
+            }));
+          });
+      });
+      return () => {
+        cancelled = true;
+        urls.forEach((u) => URL.revokeObjectURL(u));
+      };
+    }, [html]);
+
+    return h("div", { ref, className: cx("forum-body", className), dangerouslySetInnerHTML: { __html: html || "" } });
+  }
+
   // Posts are only ever stored as rendered, sanitized HTML (see
   // _shared/forum.mts) — there's no separate "raw markup" column to edit
   // from, so this gives the edit box a reasonable plain-text starting
@@ -210,7 +436,7 @@ GUWH.Pages = GUWH.Pages || {};
         ? h(
             "div",
             { className: "flex flex-col gap-2" },
-            h("textarea", { className: textareaCls(), value: editDraft, onChange: (e) => setEditDraft(e.target.value) }),
+            h(Composer, { value: editDraft, onChange: setEditDraft }),
             h(
               "div",
               { className: "flex items-center gap-2" },
@@ -218,7 +444,7 @@ GUWH.Pages = GUWH.Pages || {};
               h(Button, { type: "button", size: "sm", variant: "ghost", onClick: () => setEditingId(null) }, "Cancel")
             )
           )
-        : h("div", { className: "forum-body text-sm leading-relaxed", dangerouslySetInnerHTML: { __html: post.bodyHtml } }),
+        : h(PostBody, { html: post.bodyHtml, className: "text-sm leading-relaxed" }),
 
       !editing &&
         h(
@@ -253,7 +479,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "mt-3 rounded-xl bg-[var(--sand)] p-3 flex flex-col gap-2" },
-          h("textarea", { className: textareaCls(), value: modDraft, onChange: (e) => setModDraft(e.target.value) }),
+          h(Composer, { value: modDraft, onChange: setModDraft }),
           h("input", { className: inputCls, placeholder: "Reason for this edit (required — shown in the audit log)", value: modReason, onChange: (e) => setModReason(e.target.value) }),
           h(
             "div",
@@ -532,11 +758,10 @@ GUWH.Pages = GUWH.Pages || {};
                 "Replying to " + replyingTo.display,
                 h("button", { type: "button", onClick: () => setReplyingTo(null), className: "underline" }, "cancel")
               ),
-            h("textarea", {
-              className: textareaCls(),
+            h(Composer, {
               value: replyBody,
-              onChange: (e) => setReplyBody(e.target.value),
-              placeholder: "Write a reply… **bold**, *italic*, [link](https://...), > quote, - list, @First S. to mention someone",
+              onChange: setReplyBody,
+              placeholder: "Write a reply… use the buttons above, or @First S. to mention someone",
             }),
             h("div", { className: "flex items-center gap-3" }, h(Button, { type: "submit", size: "sm", disabled: busy }, "Post reply"))
           )
@@ -592,7 +817,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(FormField, { label: "Title", required: true }, h("input", { className: inputCls, value: title, onChange: (e) => setTitle(e.target.value) })),
         h(FormField, { label: "Category" }, h("select", { className: inputCls, value: categoryId, onChange: (e) => setCategoryId(Number(e.target.value)) }, categories.map((c) => h("option", { key: c.id, value: c.id }, c.name)))),
         h(FormField, { label: "Why should this be a discussion?", required: true }, h("textarea", { className: textareaCls(), value: explanation, onChange: (e) => setExplanation(e.target.value) })),
-        h(FormField, { label: "Optional — a starting message", hint: "If approved, this becomes the opening post." }, h("textarea", { className: textareaCls(), value: openingContent, onChange: (e) => setOpeningContent(e.target.value) })),
+        h(FormField, { label: "Optional — a starting message", hint: "If approved, this becomes the opening post." }, h(Composer, { value: openingContent, onChange: setOpeningContent })),
         h("div", { className: "flex items-center gap-3" }, h(Button, { type: "submit", disabled: busy }, "Submit suggestion"), h(Button, { type: "button", variant: "ghost", onClick: onDone }, "Close"))
       ),
       mine.length > 0 &&
@@ -674,7 +899,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(FormField, { label: "Category" }, h("select", { className: inputCls, value: categoryId, onChange: (e) => setCategoryId(Number(e.target.value)) }, categories.map((c) => h("option", { key: c.id, value: c.id }, c.name)))),
           h(FormField, { label: "Title", required: true }, h("input", { className: inputCls, value: title, onChange: (e) => setTitle(e.target.value) }))
         ),
-        h(FormField, { label: "Opening post" }, h("textarea", { className: textareaCls(), value: content, onChange: (e) => setContent(e.target.value) })),
+        h(FormField, { label: "Opening post" }, h(Composer, { value: content, onChange: setContent })),
         h(
           "div",
           { className: "flex flex-wrap gap-4" },

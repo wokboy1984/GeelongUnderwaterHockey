@@ -120,6 +120,19 @@ export function renderForumMarkup(raw: string, mentions?: Map<string, MentionRes
 
   function inline(s: string): string {
     let out = escapeHtml(s);
+    // Images: ![alt](attachment:<id>) — must run BEFORE the link rule below,
+    // which would otherwise match the "[alt](...)" part and leave a stray
+    // "!" in front of a link (20 Oct 2026).
+    //
+    // Only a numeric attachment id is ever accepted; anything else falls
+    // through as the already-escaped literal text. No src is emitted here
+    // on purpose: forum media is member-only, and an <img src> can't send
+    // an Authorization header, so forum.js swaps in an object URL after
+    // render (same approach as MemberPhoto in ui.js). That also means a
+    // stored token can never cause the browser to fetch an arbitrary URL.
+    out = out.replace(/!\[([^\[\]]{0,200})\]\(attachment:(\d{1,10})\)/g, (_m, alt, id) => {
+      return `<img data-forum-media="${escapeHtml(id)}" alt="${alt}" loading="lazy">`;
+    });
     // Links: [text](url) — url validated, text escaped already.
     out = out.replace(/\[([^\[\]]{1,200})\]\(([^\s()]{1,2000})\)/g, (_m, label, url) => {
       const href = safeHref(url);

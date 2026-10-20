@@ -125,3 +125,9 @@ input, select, textarea { font-family: inherit; }
 .forum-body em { font-style: italic; }
 .forum-body a { color: var(--accent-dark); text-decoration: underline; word-break: break-word; }
 .forum-body .forum-mention { color: var(--accent-dark); font-weight: 600; }
+/* Attached images (20 Oct 2026). The src is empty until forum.js fetches
+   the image with the member's credentials and swaps in an object URL, so
+   min-height keeps the post from collapsing and re-flowing as each one
+   lands. Capped so a tall phone photo can't push the replies off screen. */
+.forum-body img { display: block; max-width: 100%; max-height: 32rem; width: auto; height: auto; border-radius: 0.75rem; margin: 0.6em 0; background: var(--sand); min-height: 2rem; }
+.forum-body img:last-child { margin-bottom: 0; }

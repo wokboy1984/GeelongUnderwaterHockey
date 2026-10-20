@@ -74,6 +74,40 @@ assert(renderForumMarkup("- one\n- two").includes("<ul><li>one</li><li>two</li><
 assert(renderForumMarkup("> quoted text").includes("<blockquote>quoted text</blockquote>"), "blockquote rendering");
 assert(renderForumMarkup("## Heads up").includes("<h4>Heads up</h4>"), "heading rendering capped at h4 (no layout-hijacking h1)");
 
+// --- Image attachments (20 Oct 2026) --------------------------------------
+// The token only ever names a numeric attachment id, and deliberately emits
+// no src — forum.js fetches the image with the member's credentials and
+// fills it in. That means a stored post can never make a browser fetch an
+// arbitrary URL, which is the whole risk of allowing images at all.
+assert(
+  renderForumMarkup("![team photo](attachment:12)").includes('<img data-forum-media="12"'),
+  "valid attachment token renders an img carrying the attachment id"
+);
+assert(
+  !renderForumMarkup("![team photo](attachment:12)").includes("src="),
+  "attachment img never carries a src — the client fills it in authenticated"
+);
+assert(
+  !renderForumMarkup("![x](attachment:1) ![y](attachment:2)").includes("attachment:"),
+  "every attachment token in a post is consumed, none left as literal text"
+);
+assert(
+  !renderForumMarkup("![pwn](https://evil.example/x.png)").includes("<img"),
+  "an external image URL is never rendered as an img — only attachment ids"
+);
+assert(
+  !renderForumMarkup("![pwn](attachment:1 onerror=alert(1))").includes("<img"),
+  "a token with anything after the id is rejected, not rendered"
+);
+assert(
+  !renderForumMarkup('![" onerror="alert(1)](attachment:3)').includes('onerror="alert'),
+  "quotes in alt text are escaped and cannot break out of the attribute"
+);
+assert(
+  renderForumMarkup("![a](attachment:7)").includes('loading="lazy"'),
+  "attachment images are lazy loaded"
+);
+
 {
   const mentions = new Map([["alex c.", { memberId: "m1", display: "Alex C." }]]);
   const out = renderForumMarkup("hey @Alex C. see you Wednesday", mentions);
