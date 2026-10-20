@@ -102,7 +102,12 @@ function myGameColours(board, team) {
         startMin: row.startMin,
         timeLabel: minToClock(row.startMin),
         label: row.label || row.rowTypeLabel || "Game",
+        teamName: team.name,
         opponent: colour === "black" ? pg.whiteTeamName : pg.blackTeamName,
+        // The other side's sticks, so a game can be written out in full as
+        // "Crays (Black sticks) v Sharks (White sticks)" — naming both
+        // colours is what makes it obvious which one is yours.
+        opponentColourLabel: colour === "black" ? "White sticks" : "Black sticks",
       });
     });
   });

@@ -245,7 +245,7 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "text-xs text-[var(--ink-soft)]" }, GUWH.formatDate(new Date(board.sessionDate + "T00:00:00")))
       ),
       !board.published && h(GUWH.UI.DraftNotice),
-      h(GUWH.UI.MyTeamSummary, { team: myTeam, colours }),
+      h(GUWH.UI.MyTeamSummary, { team: myTeam, colours, memberId }),
       h(
         "div",
         { className: "rounded-2xl bg-white p-4" },

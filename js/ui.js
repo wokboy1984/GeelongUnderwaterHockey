@@ -459,7 +459,69 @@ window.GUWH = window.GUWH || {};
     });
   }
 
-  function MyTeamSummary({ team, colours, className }) {
+  // One game written out in full: "Crays (Black sticks) v Sharks (White
+  // sticks)" (20 Oct 2026). Naming both sides and both colours is what
+  // makes it obvious which one is yours — "Black sticks v Sharks" left you
+  // working out whether the colour belonged to you or to them.
+  function GameLine({ c }) {
+    return h(
+      "span",
+      { className: "flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm" },
+      h("span", { className: "font-bold text-[var(--accent-dark)]" }, c.teamName),
+      h(
+        "span",
+        { className: "inline-flex items-center gap-1 text-[var(--ink)]" },
+        "(", h(StickSwatch, { colour: c.colour }), c.colourLabel, ")"
+      ),
+      h("span", { className: "text-[var(--ink-soft)]" }, "v"),
+      c.opponent
+        ? h(
+            React.Fragment,
+            null,
+            h("span", { className: "font-semibold text-[var(--ink)]" }, c.opponent),
+            h(
+              "span",
+              { className: "inline-flex items-center gap-1 text-[var(--ink-soft)]" },
+              "(", h(StickSwatch, { colour: c.colour === "black" ? "white" : "black" }), c.opponentColourLabel, ")"
+            )
+          )
+        : h("span", { className: "text-[var(--ink-soft)]" }, "TBC")
+    );
+  }
+
+  // Who else is on the team (20 Oct 2026). Knowing the team name is only
+  // half the answer — the rest is who you're playing alongside.
+  function TeamMates({ team, memberId }) {
+    const players = (team && team.players) || [];
+    if (!players.length) return null;
+    return h(
+      "div",
+      { className: "mt-3 pt-3 border-t border-black/5" },
+      h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-1.5" },
+        "Your team (" + players.length + ")"),
+      h(
+        "div",
+        { className: "flex flex-wrap gap-1.5" },
+        players.map((p) =>
+          h(
+            "span",
+            {
+              key: p.id,
+              className: cx(
+                "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs",
+                p.id === memberId ? "bg-[var(--accent-12)] font-bold text-[var(--accent-dark)]" : "bg-[var(--sand)] text-[var(--ink)]"
+              ),
+            },
+            GUWH.displayName(p),
+            p.id === memberId && h("span", { className: "font-normal" }, "(you)"),
+            p.isNew && h("span", { className: "text-[var(--ink-soft)] font-normal" }, "new")
+          )
+        )
+      )
+    );
+  }
+
+  function MyTeamSummary({ team, colours, memberId, className }) {
     if (!team) {
       return h(
         "div",
@@ -498,19 +560,14 @@ window.GUWH = window.GUWH || {};
                   "span",
                   { className: "flex-1 min-w-0" },
                   h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, c.label),
-                  h(
-                    "span",
-                    { className: "flex items-center gap-1.5 mt-0.5" },
-                    h(StickSwatch, { colour: c.colour }),
-                    h("span", { className: "text-xs font-semibold text-[var(--ink)]" }, c.colourLabel),
-                    c.opponent && h("span", { className: "text-xs text-[var(--ink-soft)] truncate" }, "v " + c.opponent)
-                  )
+                  h("span", { className: "block mt-0.5" }, h(GameLine, { c }))
                 ),
                 colours.some((x) => x.pool !== colours[0].pool) &&
                   h("span", { className: "text-[var(--ink-soft)] text-xs shrink-0" }, c.pool)
               )
             )
-          )
+          ),
+      h(TeamMates, { team, memberId })
     );
   }
 

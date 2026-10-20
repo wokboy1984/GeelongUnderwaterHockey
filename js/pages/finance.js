@@ -71,7 +71,9 @@ GUWH.Pages = GUWH.Pages || {};
     const today = melbourneToday();
     const [month, setMonth] = React.useState(today.slice(0, 7));
     const [data, setData] = React.useState(null);
-    const [selectedId, setSelectedId] = React.useState("");
+    // "#/finance?member=<id>" preselects that person, so Administration can
+    // link straight through to their fees (20 Oct 2026).
+    const [selectedId, setSelectedId] = React.useState(() => GUWH.Router.queryParam("member") || "");
     const [loading, setLoading] = React.useState(true);
     const [saving, setSaving] = React.useState(false);
     const [deleting, setDeleting] = React.useState("");

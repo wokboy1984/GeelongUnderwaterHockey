@@ -106,7 +106,7 @@ GUWH.Pages = GUWH.Pages || {};
             "Draft"
           )
       ),
-      h(GUWH.UI.MyTeamSummary, { team, colours }),
+      h(GUWH.UI.MyTeamSummary, { team, colours, memberId }),
       // Spelled out immediately above the link through to the board, where
       // a member is about to act on what they've just read. The pill up top
       // is easy to skim past; this sentence is the one that lands.

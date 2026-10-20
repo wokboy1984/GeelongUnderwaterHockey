@@ -133,6 +133,18 @@ GUWH.Pages = GUWH.Pages || {};
         m.roles.map((r) => h(Pill, { key: r, tone: "accent" }, ROLE_LABELS[r] || r))
       ),
       h("p", { className: "mt-1 text-sm text-[var(--ink-soft)]" }, [m.firstName, m.lastName].filter(Boolean).join(" ") + (m.email ? " · " + m.email : "")),
+      // Straight through to what this person owes (20 Oct 2026). Looking
+      // someone up in Administration and then hunting for the same name in
+      // a long Finance table was the slow way round.
+      h(
+        "button",
+        {
+          type: "button",
+          className: "mt-2 text-sm font-semibold text-[var(--accent-dark)] hover:underline",
+          onClick: () => navigate("/finance?member=" + encodeURIComponent(m.id)),
+        },
+        "View their fees & payments →"
+      ),
       error && h("p", { className: "mt-3 text-sm text-[var(--bad)]", role: "alert" }, error),
 
       h(
