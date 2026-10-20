@@ -53,17 +53,27 @@ async function historyBlockers(db: any, id: string): Promise<string[]> {
     closed_at timestamptz not null default now(),
     closed_by text not null references members(id)
   )`;
+  // own_hist and marked_hist are split deliberately (20 Oct 2026). Both
+  // used to be counted as "attendance rolls they have taken or changed",
+  // but session_attendance_history.member_id is the player the row is
+  // ABOUT, not the person who wrote it — so an ordinary member whose own
+  // attendance had been edited was told they'd been taking rolls. That
+  // reads like the wrong account is being deleted.
   const [c] = await db.sql`
     select
       (select count(*)::int from session_attendance where member_id = ${id}) as attended,
       (select count(*)::int from session_attendance where marked_by = ${id}) as marked,
-      (select count(*)::int from session_attendance_history where member_id = ${id} or marked_by = ${id}) as hist,
+      (select count(*)::int from session_attendance_history where member_id = ${id}) as own_hist,
+      (select count(*)::int from session_attendance_history where marked_by = ${id}) as marked_hist,
       (select count(*)::int from finance_entries where member_id = ${id} or actor_id = ${id}) as fees,
       (select count(*)::int from session_attendance_closeouts where closed_by = ${id}) as closeouts
   `;
   const reasons: string[] = [];
   if (c.attended > 0) reasons.push(`${c.attended} recorded game${c.attended === 1 ? "" : "s"}`);
-  if (c.marked > 0 || c.hist > 0 || c.closeouts > 0) reasons.push("attendance rolls they have taken or changed");
+  // Only mention their own past attendance separately when it isn't already
+  // covered by the recorded-games count above, so one fact isn't listed twice.
+  else if (c.own_hist > 0) reasons.push("past attendance records");
+  if (c.marked > 0 || c.marked_hist > 0 || c.closeouts > 0) reasons.push("attendance rolls they have taken or changed");
   if (c.fees > 0) reasons.push(`${c.fees} fee or payment record${c.fees === 1 ? "" : "s"}`);
   return reasons;
 }
