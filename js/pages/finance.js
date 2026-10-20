@@ -71,9 +71,7 @@ GUWH.Pages = GUWH.Pages || {};
     const today = melbourneToday();
     const [month, setMonth] = React.useState(today.slice(0, 7));
     const [data, setData] = React.useState(null);
-    // "#/finance?member=<id>" preselects that person, so Administration can
-    // link straight through to their fees (20 Oct 2026).
-    const [selectedId, setSelectedId] = React.useState(() => GUWH.Router.queryParam("member") || "");
+    const [selectedId, setSelectedId] = React.useState("");
     const [loading, setLoading] = React.useState(true);
     const [saving, setSaving] = React.useState(false);
     const [deleting, setDeleting] = React.useState("");
@@ -111,6 +109,21 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     React.useEffect(() => { load(); }, [month]);
+
+    // "#/finance?member=<id>" preselects that person, so Administration can
+    // link straight through to their fees (20 Oct 2026).
+    //
+    // Applied after the data arrives, not as the initial state: the player
+    // dropdown is a controlled select whose options load asynchronously, so
+    // a value set while the list is still empty is dropped by the browser
+    // and never reapplied.
+    const queryMemberApplied = React.useRef(false);
+    React.useEffect(() => {
+      if (queryMemberApplied.current || !data) return;
+      queryMemberApplied.current = true;
+      const wanted = GUWH.Router.queryParam("member");
+      if (wanted && data.members.some((m) => m.id === wanted)) setSelectedId(wanted);
+    }, [data]);
 
     const selected = data && data.members.find((member) => member.id === selectedId);
     const activeMembers = data ? data.members.filter((member) => member.category) : [];
