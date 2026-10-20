@@ -89,3 +89,32 @@ export function defaultRollDateISO(now = new Date()): string {
  }
  return nextSessionDateISO(now);
 }
+
+// What someone is actually coming for (20 Oct 2026). Not everyone who
+// turns up on a Wednesday is playing: some lane swim, some come to help
+// and may referee. Recorded against both the booking (what they said) and
+// session_attendance (what the coordinator ticked), because fees are
+// computed from the roll, not from intentions.
+//
+// 'player' is the default everywhere, so any row written before this
+// existed — or by any path that forgets to set it — behaves exactly as it
+// always did rather than silently becoming free.
+export const ATTENDANCE_KINDS = ['player', 'swim', 'volunteer'] as const;
+export type AttendanceKind = (typeof ATTENDANCE_KINDS)[number];
+
+export function isAttendanceKind(value: unknown): value is AttendanceKind {
+ return typeof value === 'string' && (ATTENDANCE_KINDS as readonly string[]).includes(value);
+}
+
+// Falls back to 'player' rather than rejecting, so a stale browser tab
+// that posts no kind books someone in to play, which is what it meant
+// before this feature existed.
+export function toAttendanceKind(value: unknown): AttendanceKind {
+ return isAttendanceKind(value) ? value : 'player';
+}
+
+export const ATTENDANCE_KIND_LABELS: Record<AttendanceKind, string> = {
+ player: 'Playing',
+ swim: 'Lane swim',
+ volunteer: 'Volunteering',
+};

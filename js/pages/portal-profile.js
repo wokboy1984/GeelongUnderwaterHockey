@@ -411,6 +411,8 @@ GUWH.Pages = GUWH.Pages || {};
     function missingRequiredFields() {
       const missing = [];
       if (!form.firstName.trim()) missing.push("First name");
+      if (!form.lastName.trim()) missing.push("Last name");
+      if (!form.phone.trim()) missing.push("Phone");
       if (!form.dateOfBirth) missing.push("Date of birth");
       if (!form.emergencyName.trim()) missing.push("Emergency contact name");
       if (!form.emergencyPhone.trim()) missing.push("Emergency contact phone");
@@ -472,7 +474,7 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
           h(FormField, { label: "First name *" }, h("input", { className: inputCls, value: form.firstName, onChange: (e) => set("firstName", e.target.value) })),
-          h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: form.lastName, onChange: (e) => set("lastName", e.target.value) }))
+          h(FormField, { label: "Last name *" }, h("input", { className: inputCls, value: form.lastName, onChange: (e) => set("lastName", e.target.value) }))
         ),
         // Nickname (2 Oct 2026): optional. Shown to other members instead of
         // your real name (Dashboard greeting, Who's Coming, game recap).
@@ -482,7 +484,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "Phone" }, h("input", { type: "tel", className: inputCls, value: form.phone, onChange: (e) => set("phone", e.target.value) })),
+          h(FormField, { label: "Phone *" }, h("input", { type: "tel", className: inputCls, value: form.phone, onChange: (e) => set("phone", e.target.value) })),
           h(FormField, { label: "Date of birth *" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) }))
         ),
         // Read-only numbers (games played, goals) live on the Player Stats
@@ -525,7 +527,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(FormField, { label: "Emergency contact name *" }, h("input", { className: inputCls, value: form.emergencyName, onChange: (e) => set("emergencyName", e.target.value) })),
           h(FormField, { label: "Emergency contact phone *" }, h("input", { type: "tel", className: inputCls, value: form.emergencyPhone, onChange: (e) => set("emergencyPhone", e.target.value) }))
         ),
-        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — an emergency contact is needed poolside, and date of birth is what unlocks the Members Forum."),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — your full name and phone so the club can identify and reach you, an emergency contact for poolside, and date of birth is what unlocks the Members Forum."),
 
         h(
           "div",

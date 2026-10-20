@@ -122,6 +122,20 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   familyColumnsReady = true;
 }
 
+// Attendance kinds (20 Oct 2026). Columns added by migration
+// 20261020000002_attendance_kinds; ensured here for the same reason as the
+// ones above — and with better evidence than most, since the waived-fees
+// table earlier today was in fact created by its guard rather than by its
+// migration. Without this, booking in would fail outright on a database
+// the migration hadn't reached.
+let attendanceKindsReady = false;
+export async function ensureAttendanceKinds(db: any): Promise<void> {
+  if (attendanceKindsReady) return;
+  await db.sql`alter table bookings add column if not exists kind text not null default 'player'`;
+  await db.sql`alter table session_attendance add column if not exists kind text not null default 'player'`;
+  attendanceKindsReady = true;
+}
+
 // Forum image attachments (20 Oct 2026). The table comes from migration
 // 20260912000011_forum, which predates this feature — it was designed then
 // and only wired up now. Guarded here for the same reason as the columns
@@ -198,22 +212,59 @@ export async function ensureMember(db: any, user: any): Promise<Member> {
   const email: string = user.email;
   const fullName: string | undefined = user.user_metadata?.full_name;
 
-  const [row] = await db.sql`
-    insert into members (id, email, first_name, last_name)
-    values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
-    on conflict (id) do update set email = excluded.email
-    returning id, email, first_name, last_name, date_of_birth, waiver_accepted_at
+  // Find the member this login belongs to (21 Oct 2026).
+  //
+  // By id first, which is the ordinary case and also what keeps the
+  // "change my email" feature working: the id is stable, the email isn't.
+  //
+  // Then by email, for a row that exists before the person has ever logged
+  // in — a walk-in the coordinator added, or someone added by name and
+  // email and then invited. members.email is unique, so without this the
+  // insert below would collide the first time they signed in and lock them
+  // out, with their bookings and attendance stranded on the older row.
+  //
+  // We adopt that row as-is rather than re-keying it to the Identity id:
+  // 53 foreign keys reference members(id) and none are declared ON UPDATE
+  // CASCADE, so changing it would be rejected outright. Everything
+  // downstream uses the id this function returns, so an id that isn't the
+  // Identity id is already normal here — every walk-in has one.
+  let [row] = await db.sql`
+    select id, email, first_name, last_name, date_of_birth, waiver_accepted_at
+    from members where id = ${memberId}
   `;
+  if (row) {
+    if (row.email !== email) {
+      await db.sql`update members set email = ${email} where id = ${memberId}`;
+      row.email = email;
+    }
+  } else {
+    [row] = await db.sql`
+      select id, email, first_name, last_name, date_of_birth, waiver_accepted_at
+      from members where email = ${email}
+    `;
+  }
+  if (!row) {
+    [row] = await db.sql`
+      insert into members (id, email, first_name, last_name)
+      values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
+      on conflict (id) do update set email = excluded.email
+      returning id, email, first_name, last_name, date_of_birth, waiver_accepted_at
+    `;
+  }
+
+  // From here on, the member's OWN id — usually the Identity id, but the
+  // adopted row's id when this login was matched by email instead.
+  const resolvedId: string = row.id;
 
   if (email === SUPER_ADMIN_EMAIL) {
     await db.sql`
       insert into member_roles (member_id, role, granted_by, note)
-      values (${memberId}, 'administrator', 'system', 'Super admin bootstrap')
+      values (${resolvedId}, 'administrator', 'system', 'Super admin bootstrap')
       on conflict (member_id, role) do nothing
     `;
   }
 
-  const roleRows = await db.sql`select role from member_roles where member_id = ${memberId}`;
+  const roleRows = await db.sql`select role from member_roles where member_id = ${resolvedId}`;
   const roles = roleRows.map((r: any) => r.role).filter(isRole);
 
   return {

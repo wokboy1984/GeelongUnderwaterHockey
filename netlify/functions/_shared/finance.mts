@@ -1,4 +1,12 @@
 export const FEES = { waged: { game: 2000, joining: 2000, annual: 2000 }, unwaged: { game: 1000, joining: 1000, annual: 500 } };
+
+// What each kind of attendance costs for a night (20 Oct 2026). A lane
+// swim is $10 flat — deliberately NOT split by waged/unwaged like the game
+// fee, because it's pool entry rather than a club session. Volunteers
+// aren't in the water, so they pay nothing. Players fall through to FEES
+// above, where the waged split and the free-trial rules still apply.
+export const SWIM_FEE = 1000;
+export const VOLUNTEER_FEE = 0;
 export function cents(value: unknown): number {
  const raw = String(value);
  if (!/^\d{1,7}(\.\d{1,2})?$/.test(raw)) throw new Error('Enter a positive amount with at most two decimal places');

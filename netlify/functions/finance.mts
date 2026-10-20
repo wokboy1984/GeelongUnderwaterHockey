@@ -1,12 +1,12 @@
 import { getDatabase } from '@netlify/database';
-import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, hasPermission, logAudit, shortName, unauthorized, forbidden } from './_shared/roles.mts';
+import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, ensureAttendanceKinds, hasPermission, logAudit, shortName, unauthorized, forbidden } from './_shared/roles.mts';
 import { FEES, cents, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
  if (!['GET','POST'].includes(req.method)) return json({ok:false,error:'Method not allowed'},405);
  const user = await getVerifiedUser(req); if (!user) return unauthorized();
  try {
-  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); const caller = await ensureMember(db,user);
+  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); await ensureAttendanceKinds(db); const caller = await ensureMember(db,user);
   const url = new URL(req.url);
   // Self-service summary for the member dashboard: any logged-in member can
   // see their OWN balance (never anyone else's, and never the full roster) —
@@ -23,16 +23,20 @@ export default async (req: Request) => {
      -- A child's games bill to their parent (bill_to). The first 3 games
      -- are free only for a child ticked as a Try Underwater Hockey trial
     -- (members.trial_free); otherwise the unwaged (junior) rate.
-     select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.trial_free,m.first_name,sa.session_date,
-      row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
+     select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.trial_free,m.first_name,sa.session_date,sa.kind,
+      row_number() over(partition by sa.member_id, sa.kind order by sa.session_date) as attendance_number
      from session_attendance sa join members m on m.id=sa.member_id
      where sa.attended=true and coalesce(m.parent_id,sa.member_id)=${caller.id}
     ), game_entries as (
      select 'game'::text as kind, to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-      case when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
+      case when a.kind='volunteer' then 0
+           when a.kind='swim' then 1000
+           when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
            when fa.trial_eligible and a.attendance_number<=3 then 0
            when fa.category='waged' then 2000 else 1000 end as amount_cents,
-      case when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+      case when a.kind='volunteer' then 'Volunteering — no charge'
+           when a.kind='swim' then 'Lane swim'
+           when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
            when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
       a.session_date::timestamptz as created_at
      from attended a join finance_accounts fa on fa.member_id=a.bill_to
@@ -146,16 +150,20 @@ export default async (req: Request) => {
     -- A child's games bill to their parent (bill_to). The first 3 games
     -- are free only for a child ticked as a Try Underwater Hockey trial
     -- (members.trial_free); otherwise the unwaged (junior) rate.
-    select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.trial_free,m.first_name,sa.session_date,sa.marked_by,
-     row_number() over(partition by sa.member_id order by sa.session_date) as attendance_number
+    select sa.member_id,coalesce(m.parent_id,sa.member_id) as bill_to,(m.parent_id is not null) as is_child,m.trial_free,m.first_name,sa.session_date,sa.marked_by,sa.kind,
+     row_number() over(partition by sa.member_id, sa.kind order by sa.session_date) as attendance_number
     from session_attendance sa join members m on m.id=sa.member_id where sa.attended=true
    ), game_entries as (
     select 'attendance:'||a.member_id||':'||a.session_date::text as id,a.bill_to as member_id,'game'::text as kind,
      to_char(a.session_date,'YYYY-MM-DD') as entry_date,
-     case when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
+     case when a.kind='volunteer' then 0
+          when a.kind='swim' then 1000
+          when a.is_child then (case when a.trial_free and a.attendance_number<=3 then 0 else 1000 end)
           when fa.trial_eligible and a.attendance_number<=3 then 0
           when fa.category='waged' then 2000 else 1000 end as amount_cents,
-     case when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
+     case when a.kind='volunteer' then 'Volunteering — no charge'
+          when a.kind='swim' then 'Lane swim'
+          when a.is_child then a.first_name||' (child) — '||(case when a.trial_free and a.attendance_number<=3 then 'free session' else 'confirmed attendance' end)
           when fa.trial_eligible and a.attendance_number<=3 then 'Try Underwater Hockey — free session' else 'Confirmed attendance' end as note,
      a.marked_by as actor_id,a.session_date::timestamptz as created_at
     from attended a join finance_accounts fa on fa.member_id=a.bill_to

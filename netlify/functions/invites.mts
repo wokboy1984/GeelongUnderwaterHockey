@@ -55,12 +55,12 @@ export default async (req: Request, context: Context) => {
     const email: string = user.email;
     const fullName: string | undefined = user.user_metadata?.full_name;
 
-    // Make sure this member exists (same pattern as /api/booking).
-    await db.sql`
-      insert into members (id, email, first_name, last_name)
-      values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
-      on conflict (id) do nothing
-    `;
+    // Resolve who this login is (21 Oct 2026, same change as /api/booking
+    // and /api/profile). Upserting by Identity id here would collide on the
+    // unique email for anyone the coordinator added before they first
+    // logged in, since their row is keyed by a different id.
+    const self = await ensureMember(db, user);
+    memberId = self.id;
     await ensureInviteColumns(db);
 
     // Club-wide view for the Attendance tab's "New Players Today" —

@@ -56,6 +56,40 @@ GUWH.Pages = GUWH.Pages || {};
   // embedded copy (13 Sept 2026, Cheongy's request: put Teams/Timetable
   // back on their own Members Portal page rather than folded into here).
 
+  // What someone is coming for (20 Oct 2026). Not everyone who turns up is
+  // playing: some lane swim, some come to help and may referee. The fee
+  // differs, so this has to be the member's own answer rather than
+  // something the coordinator guesses on the night.
+  //
+  // The price is on the button because that's the question people actually
+  // have, and it stops a swimmer being surprised by a $20 game fee.
+  const ATTENDANCE_KINDS = [
+    { value: "player", label: "Playing", hint: "Game fee" },
+    { value: "swim", label: "Lane swim", hint: "$10" },
+    { value: "volunteer", label: "Volunteering", hint: "Free" },
+  ];
+
+  function KindButton({ label, hint, active, disabled, onClick }) {
+    return h(
+      "button",
+      {
+        type: "button",
+        "aria-pressed": active ? "true" : "false",
+        disabled: disabled,
+        onClick: onClick,
+        className: cx(
+          "rounded-full px-3.5 py-1.5 text-sm transition inline-flex items-center gap-1.5",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
+          active ? "bg-white text-[var(--navy)] font-bold" : "bg-white/10 text-white hover:bg-white/20"
+        ),
+      },
+      active && h(Icon, { name: "check", size: 14 }),
+      label,
+      hint && h("span", { className: active ? "font-normal text-[var(--navy)]/60" : "text-white/50" }, hint)
+    );
+  }
+
   // One of the two attendance answers (20 Oct 2026). Both are always on
   // screen; this marks whichever one is currently yours rather than hiding
   // the other, so the card shows your answer and the way to change it in
@@ -637,12 +671,12 @@ GUWH.Pages = GUWH.Pages || {};
       // eslint-disable-next-line
     }, [forumMe && forumMe.eligible, forumMe && forumMe.participation && forumMe.participation.optedIn]);
 
-    async function setIn(wantsIn) {
+    async function setIn(wantsIn, kind) {
       if (!status) return;
       setLoading(true);
       setError(null);
       try {
-        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: wantsIn }) });
+        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: wantsIn, kind: kind || "player" }) });
         const data = await res.json();
         if (data.ok) setStatus(data);
         else setError(data.error || "Something went wrong");
@@ -753,7 +787,9 @@ GUWH.Pages = GUWH.Pages || {};
                       icon: "plus",
                       active: status.myStatus === "in",
                       disabled: loading,
-                      onClick: () => setIn(true),
+                      // Keeps whatever they're already down as, so pressing
+                      // this again doesn't quietly turn a swim into a game.
+                      onClick: () => setIn(true, status.myKind || "player"),
                     }),
                     h(AnswerButton, {
                       label: "I'm Not Coming",
@@ -762,6 +798,30 @@ GUWH.Pages = GUWH.Pages || {};
                       onClick: () => setIn(false),
                     })
                   ),
+                  // What they're coming for (20 Oct 2026). Only shown once
+                  // they're in: it's a follow-up to "yes", not a fourth way
+                  // of answering. Playing is the default and almost always
+                  // right, so this stays out of the way until it's needed.
+                  status.myStatus === "in" &&
+                    h(
+                      "div",
+                      { className: "mt-4 pt-4 border-t border-white/15" },
+                      h("p", { className: "text-xs font-bold uppercase tracking-wide text-white/50 mb-2" }, "What for?"),
+                      h(
+                        "div",
+                        { className: "flex items-center gap-2 flex-wrap" },
+                        ATTENDANCE_KINDS.map((k) =>
+                          h(KindButton, {
+                            key: k.value,
+                            label: k.label,
+                            hint: k.hint,
+                            active: (status.myKind || "player") === k.value,
+                            disabled: loading,
+                            onClick: () => setIn(true, k.value),
+                          })
+                        )
+                      )
+                    ),
                   h(
                     "p",
                     { className: "mt-3 text-sm text-white/70" },

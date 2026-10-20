@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clubToday } from '../netlify/functions/_shared/attendance.mts';
+import { clubToday, isAttendanceKind, toAttendanceKind } from '../netlify/functions/_shared/attendance.mts';
 import { hasPermission } from '../netlify/functions/_shared/roles.mts';
 
 test('club attendance date uses Melbourne time', () => {
@@ -13,4 +13,18 @@ test('only operational roles can mark actual attendance', () => {
   }
   assert.equal(hasPermission([], 'mark_actual_attendance'), false);
   assert.equal(hasPermission(['member'], 'mark_actual_attendance'), false);
+});
+
+// Attendance kinds (20 Oct 2026). Anything unrecognised must fall back to
+// 'player': that's what booking in meant before kinds existed, and the
+// alternative is a stale browser tab quietly making someone free.
+test('attendance kinds validate, and anything else means playing', () => {
+  for (const k of ['player', 'swim', 'volunteer']) {
+    assert.equal(isAttendanceKind(k), true);
+    assert.equal(toAttendanceKind(k), k);
+  }
+  for (const bad of ['', 'Player', 'referee', null, undefined, 0, {}]) {
+    assert.equal(isAttendanceKind(bad), false);
+    assert.equal(toAttendanceKind(bad), 'player');
+  }
 });

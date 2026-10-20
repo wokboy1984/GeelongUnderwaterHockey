@@ -14,7 +14,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
@@ -41,7 +41,7 @@ async function loadRowSnapsForValidation(db: any, sessionId: number): Promise<{ 
   teamRows.forEach((t: any) => { teams[t.id] = { id: t.id, name: t.name, playerIds: [] }; });
   assignmentRows.forEach((a: any) => { if (teams[a.team_id]) teams[a.team_id].playerIds.push(a.member_id); });
 
-  const confirmedRows = await db.sql`select member_id from bookings where session_id = ${sessionId} and status = 'in'`;
+  const confirmedRows = await db.sql`select member_id from bookings where session_id = ${sessionId} and status = 'in' and kind = 'player'`;
   const confirmedIds = new Set<string>(confirmedRows.map((r: any) => r.member_id));
 
   const rowRows = await db.sql`
@@ -93,7 +93,7 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   const confirmedRows = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade, m.position
     from bookings b join members m on m.id = b.member_id
-    where b.session_id = ${sessionId} and b.status = 'in'
+    where b.session_id = ${sessionId} and b.status = 'in' and b.kind = 'player'
     order by b.created_at asc
   `;
   const confirmed = confirmedRows.map(shapePlayer);
@@ -135,6 +135,7 @@ export default async (req: Request, context: Context) => {
 
   const db = getDatabase();
   await ensureNicknameColumn(db);
+  await ensureAttendanceKinds(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "arrange_teams")) {
     return forbidden("Only Game Coordinators and Administrators can arrange teams");

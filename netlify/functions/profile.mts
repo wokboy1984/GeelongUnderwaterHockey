@@ -11,7 +11,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, shortName, unauthorized } from "./_shared/roles.mts";
+import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, shortName, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -93,18 +93,18 @@ export default async (req: Request, context: Context) => {
 
   try {
     const db = getDatabase();
-    const memberId: string = user.sub;
-    const email: string = user.email;
-    const fullName: string | undefined = user.user_metadata?.full_name;
-
     await ensureNicknameColumn(db);
     await ensureOnboardingColumns(db);
     await ensureFamilyColumns(db);
-    await db.sql`
-      insert into members (id, email, first_name, last_name)
-      values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
-      on conflict (id) do update set email = excluded.email
-    `;
+
+    // Resolve who this login is, rather than upserting by Identity id here
+    // (21 Oct 2026). A member added by the coordinator before they ever
+    // logged in is keyed by a different id, so inserting by user.sub would
+    // collide on the unique email and fail. ensureMember() handles that in
+    // one place, and the id it returns is the member's real one.
+    const caller = await ensureMember(db, user);
+    const memberId: string = caller.id;
+    const email: string = caller.email;
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
@@ -140,6 +140,12 @@ export default async (req: Request, context: Context) => {
 
       const missing: string[] = [];
       if (!firstName) missing.push("first name");
+      // Last name and phone became required on 20 Oct 2026: the club was
+      // ending up with half-identified members and no way to ring anyone.
+      // Existing members without a phone will meet this the next time they
+      // edit anything, which is the point of making it required.
+      if (!lastName) missing.push("last name");
+      if (!phone) missing.push("phone number");
       if (!body.dateOfBirth) missing.push("date of birth");
       if (!emergencyName) missing.push("emergency contact name");
       if (!emergencyPhone) missing.push("emergency contact phone");

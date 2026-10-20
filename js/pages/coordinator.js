@@ -21,6 +21,13 @@ GUWH.Pages = GUWH.Pages || {};
     { key: "publish", label: "Publish", path: "/coordinator/publish" },
   ];
 
+  // Matches isLikelyEmail in coordinator-attendance.mts. Loose on purpose:
+  // the job is catching a typo or a name typed into the wrong box. The
+  // confirm field is the real defence against a wrong-but-valid address.
+  function isLikelyEmail(value) {
+    return /^[^s@]+@[^s@.]+.[^s@]+$/.test(value);
+  }
+
   function CoordinatorTabs({ active }) {
     return h(
       "div",
@@ -108,7 +115,10 @@ GUWH.Pages = GUWH.Pages || {};
     const [error, setError] = React.useState(null);
     const [addQuery, setAddQuery] = React.useState("");
     const [addResults, setAddResults] = React.useState([]);
-    const [addName, setAddName] = React.useState("");
+    // Add a player (21 Oct 2026): name and email, typed twice. A typo here
+    // creates an account nobody can reach and emails a stranger.
+    const [addPlayer, setAddPlayer] = React.useState({ firstName: "", lastName: "", email: "", confirmEmail: "" });
+    const [addNotice, setAddNotice] = React.useState(null);
     const [roll, setRoll] = React.useState({}); // memberId -> ticked, pending edits not yet saved
     const [savingRoll, setSavingRoll] = React.useState(false);
     const [closingRoll, setClosingRoll] = React.useState(false);
@@ -176,14 +186,32 @@ GUWH.Pages = GUWH.Pages || {};
 
     async function addGuestPlayer(ev) {
       ev.preventDefault();
-      const name = addName.trim();
-      if (!name) return;
+      const f = addPlayer.firstName.trim();
+      const l = addPlayer.lastName.trim();
+      const e1 = addPlayer.email.trim().toLowerCase();
+      const e2 = addPlayer.confirmEmail.trim().toLowerCase();
       setError(null);
+      setAddNotice(null);
+      if (!f || !l) { setError("Enter both a first and last name."); return; }
+      if (!isLikelyEmail(e1)) { setError("That email address doesn't look right."); return; }
+      if (e1 !== e2) { setError("The two email addresses don't match. Check for a typo — this one gets an invitation."); return; }
       try {
-        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", { method: "POST", body: JSON.stringify({ sessionDate, guestName: name }) });
+        const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate, firstName: f, lastName: l, email: e1 }),
+        });
         const data = await res.json();
-        if (data.ok) { setSessionDate(data.sessionDate); setPlayers(data.players); setAddName(""); }
-        else setError(data.error || "Something went wrong");
+        if (!data.ok) { setError(data.error || "Something went wrong"); return; }
+        setSessionDate(data.sessionDate);
+        setPlayers(data.players);
+        setAddPlayer({ firstName: "", lastName: "", email: "", confirmEmail: "" });
+        setAddNotice(
+          data.recognised
+            ? f + " is already a member — booked them in for this week."
+            : data.invited
+            ? f + " added, and an invitation is on its way to " + e1 + "."
+            : f + " added to the roll, but the invitation couldn't be sent" + (data.inviteProblem ? ": " + data.inviteProblem : ".")
+        );
       } catch (e) {
         setError(String(e));
       }
@@ -280,9 +308,19 @@ GUWH.Pages = GUWH.Pages || {};
       ),
       h(
         "form",
-        { onSubmit: addGuestPlayer, className: "mt-3 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex gap-3 items-end" },
-        h(FormField, { label: "Add a player (no account needed)" }, h("input", { className: inputCls, value: addName, onChange: (e) => setAddName(e.target.value), placeholder: "Name" })),
-        h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), "Add Player")
+        { onSubmit: addGuestPlayer, className: "mt-3 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex flex-col gap-3" },
+        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Add a player"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-2" }, "Books them in for this week and emails them an invitation to set up their account. The email is typed twice because a mistake here invites a stranger."),
+        h(
+          "div",
+          { className: "grid sm:grid-cols-2 gap-3" },
+          h(FormField, { label: "First name" }, h("input", { className: inputCls, value: addPlayer.firstName, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { firstName: e.target.value })) })),
+          h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: addPlayer.lastName, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { lastName: e.target.value })) })),
+          h(FormField, { label: "Email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.email, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { email: e.target.value })) })),
+          h(FormField, { label: "Confirm email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.confirmEmail, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { confirmEmail: e.target.value })) }))
+        ),
+        addNotice && h("p", { className: "text-sm text-[var(--good-dark)]", role: "status" }, addNotice),
+        h("div", null, h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), "Add Player"))
       ),
 
       // ---- Confirmed list — tick who showed up, then Save Roll / Close Roll ----
@@ -332,7 +370,18 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "div",
                     null,
-                    h("p", { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" }, GUWH.displayName(p), p.isNew && h(Pill, { tone: "accent" }, "New")),
+                    h(
+                      "p",
+                      { className: "text-sm font-semibold text-[var(--ink)] flex items-center gap-2" },
+                      GUWH.displayName(p),
+                      p.isNew && h(Pill, { tone: "accent" }, "New"),
+                      // What they're here for (20 Oct 2026). Only shown when it isn't
+                      // playing, since that's nearly everyone and a pill on every row
+                      // would be noise. It matters here because swimmers and volunteers
+                      // are charged differently and are kept out of teams.
+                      p.kind === "swim" && h(Pill, { tone: "dark" }, "Lane swim"),
+                      p.kind === "volunteer" && h(Pill, { tone: "dark" }, "Volunteer")
+                    ),
                     h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.parentName ? "Child of " + p.parentName : p.email && p.email.endsWith("@no-login.guwh") ? "Walk-in — no account" : p.email)
                   ),
                   h(

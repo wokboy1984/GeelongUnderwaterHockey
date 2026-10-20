@@ -1,5 +1,5 @@
 import {getDatabase} from '@netlify/database';
-import {ensureFamilyColumns,ensureNicknameColumn,getVerifiedUser,ensureMember,hasPermission,logAudit,shortName,unauthorized,forbidden} from './_shared/roles.mts';
+import {ensureAttendanceKinds,ensureFamilyColumns,ensureNicknameColumn,getVerifiedUser,ensureMember,hasPermission,logAudit,shortName,unauthorized,forbidden} from './_shared/roles.mts';
 import {clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
 const json=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 
@@ -35,6 +35,7 @@ export default async(req:Request)=>{
   if(!hasPermission(caller.roles,'mark_actual_attendance'))return forbidden();
   await ensureCloseoutTable(db);
   await ensureFamilyColumns(db);
+  await ensureAttendanceKinds(db);
   // The roll belongs to a game night (12 Oct 2026, Cheongy) - it used to
   // record against *today*, so a roll ticked the morning after (and the
   // game fees it charges) landed on the wrong date. ?date= / sessionDate
@@ -71,9 +72,13 @@ export default async(req:Request)=>{
     for(const e of body.entries){
      if(!e||typeof e.memberId!=='string'||typeof e.attended!=='boolean')continue;
      await db.sql`with changed as (
-      insert into session_attendance(session_date,member_id,attended,marked_by)
-      values(${sessionDate}::date,${e.memberId},${e.attended},${caller.id})
-      on conflict(session_date,member_id) do update set attended=excluded.attended,marked_by=excluded.marked_by,marked_at=now()
+      insert into session_attendance(session_date,member_id,attended,marked_by,kind)
+      values(${sessionDate}::date,${e.memberId},${e.attended},${caller.id},
+       -- Whatever they booked as, so the fee matches what they came for.
+       -- No booking (a walk-in the coordinator added) means 'player'.
+       coalesce((select b.kind from bookings b join sessions s on s.id=b.session_id
+                 where b.member_id=${e.memberId} and s.session_date=${sessionDate}::date),'player'))
+      on conflict(session_date,member_id) do update set attended=excluded.attended,marked_by=excluded.marked_by,marked_at=now(),kind=excluded.kind
       where session_attendance.attended is distinct from excluded.attended
       returning session_date,member_id,attended,marked_by
      ) insert into session_attendance_history(session_date,member_id,attended,marked_by)

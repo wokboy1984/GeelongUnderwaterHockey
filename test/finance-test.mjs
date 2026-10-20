@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cents, totals, validDate, FEES } from '../netlify/functions/_shared/finance.mts';
+import { cents, totals, validDate, FEES, SWIM_FEE, VOLUNTEER_FEE } from '../netlify/functions/_shared/finance.mts';
 test('exact decimal payments, including partial payments',()=>{
  assert.equal(cents('10.01'),1001); assert.equal(cents('0.50'),50);
  for(const value of ['0','-1','1.001','1e2','NaN']) assert.throws(()=>cents(value));
@@ -17,4 +17,25 @@ test('calendar validation and agreed rates',()=>{
  assert.equal(validDate('2026-02-30'),false); assert.equal(validDate('2026-09-12'),true);
  assert.deepEqual(FEES.unwaged,{game:1000,joining:1000,annual:500});
  assert.deepEqual(FEES.waged,{game:2000,joining:2000,annual:2000});
+});
+
+// Attendance kinds (20 Oct 2026). Not everyone who turns up is playing:
+// lane swimmers pay a flat $10 and volunteers pay nothing. These pin the
+// rates themselves; the SQL in finance.mts picks between them per row.
+test('a lane swim is $10 flat, not split by waged status', () => {
+  assert.equal(SWIM_FEE, 1000);
+  // Deliberately NOT the unwaged game rate halved, and not the waged rate.
+  assert.notEqual(SWIM_FEE, FEES.waged.game);
+});
+
+test('volunteers are never charged for a session', () => {
+  assert.equal(VOLUNTEER_FEE, 0);
+});
+
+test('a free session still counts toward what a player owes as zero', () => {
+  // A waived or free entry reaches totals() as a zero-amount row, so it
+  // shows in the history without moving the balance.
+  const month = '2026-10';
+  assert.equal(totals([{ entry_date: '2026-10-07', amount_cents: VOLUNTEER_FEE, kind: 'game' }], month).closing, 0);
+  assert.equal(totals([{ entry_date: '2026-10-07', amount_cents: SWIM_FEE, kind: 'game' }], month).closing, 1000);
 });

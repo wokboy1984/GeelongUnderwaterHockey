@@ -39,6 +39,19 @@ export const handler = async (event: { body: string | null }) => {
     return json(400, { msg: "Bad signup request" });
   }
 
+  // Someone the club invited (21 Oct 2026) has no club code to give — the
+  // Game Coordinator added them by name and email, and Netlify emailed the
+  // invitation. The club has already vouched for them, so let them through.
+  //
+  // Deliberately narrow: it trusts app_metadata, which only Netlify's admin
+  // API can set (see _shared/identity-admin.mts), never user_metadata,
+  // which the person signing up controls. Without this they'd be refused
+  // exactly like the "Failed to handle signup webhook" case from 20 Oct.
+  const appMeta = (payload.user && payload.user.app_metadata) || {};
+  if (appMeta.invited_by_club === true) {
+    return { statusCode: 200, body: "" };
+  }
+
   const meta = (payload.user && payload.user.user_metadata) || {};
   const given = String(meta.join_code || "").trim().toLowerCase();
   if (!given || given !== expected) {

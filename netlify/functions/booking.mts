@@ -24,8 +24,8 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureFamilyColumns, ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { nextSessionDateISO, toAttendanceKind } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -54,19 +54,20 @@ export default async (req: Request, context: Context) => {
 
   try {
     const db = getDatabase();
-    const memberId: string = user.sub;
-    const email: string = user.email;
-    const fullName: string | undefined = user.user_metadata?.full_name;
+    // Resolve who this login is, rather than upserting by Identity id
+    // here (21 Oct 2026). A member added by the coordinator before they
+    // ever logged in is keyed by a different id, so inserting by user.sub
+    // would collide on the unique email and fail. ensureMember() handles
+    // that one place, and its id is the member's real one.
+    const caller = await ensureMember(db, user);
+    const memberId: string = caller.id;
+    const email: string = caller.email;
     const sessionDate = nextSessionDateISO();
     await ensureNicknameColumn(db);
     await ensureFamilyColumns(db);
+    await ensureAttendanceKinds(db);
 
     // Make sure this member and this week's session both exist.
-    await db.sql`
-      insert into members (id, email, first_name, last_name)
-      values (${memberId}, ${email}, ${firstNameFrom(fullName, email)}, ${lastNameFrom(fullName)})
-      on conflict (id) do nothing
-    `;
     const [session] = await db.sql`
       insert into sessions (session_date)
       values (${sessionDate})
@@ -78,6 +79,12 @@ export default async (req: Request, context: Context) => {
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       const wantsIn = !!body.in;
+      // What they're coming for: playing, lane swim, or volunteering.
+      // Anything unrecognised (or a stale tab that sends nothing) falls
+      // back to 'player', which is what booking in meant before this
+      // existed. Only meaningful when booking in; an "out" keeps whatever
+      // was last chosen rather than resetting it.
+      const kind = toAttendanceKind(body.kind);
 
       // Booking one of the caller's own children (14 Oct 2026, "My kids").
       // Same cut-off rules as booking yourself; the child must belong to
@@ -112,15 +119,15 @@ export default async (req: Request, context: Context) => {
       }
 
       await db.sql`
-        insert into bookings (session_id, member_id, status)
-        values (${sessionId}, ${targetId}, ${wantsIn ? "in" : "out"})
+        insert into bookings (session_id, member_id, status, kind)
+        values (${sessionId}, ${targetId}, ${wantsIn ? "in" : "out"}, ${kind})
         on conflict (session_id, member_id)
-        do update set status = excluded.status
+        do update set status = excluded.status, kind = excluded.kind
       `;
     }
 
     const [mine] = await db.sql`
-      select status from bookings where session_id = ${sessionId} and member_id = ${memberId}
+      select status, kind from bookings where session_id = ${sessionId} and member_id = ${memberId}
     `;
     const confirmedRows = await db.sql`
       select m.id, m.nickname, m.first_name, m.last_name, m.photo_version
@@ -159,6 +166,8 @@ export default async (req: Request, context: Context) => {
         // member who said no apart from one who hasn't answered — both are
         // false — so the Dashboard can't ask the right question. This can.
         myStatus: mine ? mine.status : null,
+        // What they said they're coming for: player | swim | volunteer.
+        myKind: mine ? mine.kind : null,
         confirmedCount: count,
         confirmed,
         family,
