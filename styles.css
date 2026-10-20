@@ -131,3 +131,27 @@ input, select, textarea { font-family: inherit; }
    lands. Capped so a tall phone photo can't push the replies off screen. */
 .forum-body img { display: block; max-width: 100%; max-height: 32rem; width: auto; height: auto; border-radius: 0.75rem; margin: 0.6em 0; background: var(--sand); min-height: 2rem; }
 .forum-body img:last-child { margin-bottom: 0; }
+
+/* Keep form fields out of Netlify's badge (20 Oct 2026).
+   Reported by a new member who couldn't finish his Profile on a phone:
+   "can't seem to add any more info on this page to finish it".
+
+   Netlify injects a "Powered by Netlify" badge (#nl-badge-frame) as a
+   64px-tall iframe pinned bottom-right at the maximum z-index. We don't
+   control it and shouldn't hide it. What bit him was the date-of-birth
+   field: a date input's picker icon sits at its right edge, which is
+   exactly where the badge lands when the field is low on the screen.
+
+   scroll-margin-bottom means that whenever the browser scrolls a field
+   into view — focusing it, tabbing to it, or jumping to the first invalid
+   one on submit — it stops with the field above the badge rather than
+   underneath it. Pairing it with scroll-padding on the page covers
+   anchor-style jumps too.
+
+   This is a mitigation, not a cure: it can't help someone who taps
+   blindly at a field already sitting under the badge. Removing the badge
+   is a Netlify project setting, not something fixable here. */
+@media (max-width: 767px) {
+  html { scroll-padding-bottom: 7rem; }
+  input, select, textarea, label, button { scroll-margin-bottom: 7rem; }
+}
