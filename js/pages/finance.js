@@ -32,15 +32,12 @@ GUWH.Pages = GUWH.Pages || {};
   function deletable(entry) {
     return entry.kind !== "payment" && !isAutomaticGameCharge(entry);
   }
-  // An automatic game fee can't be deleted — it's computed from attendance,
-  // so it would simply come back. It can be waived instead (20 Oct 2026),
-  // which records the billing decision without making the roll lie about
-  // who turned up. Waiving is reversible from the same spot.
-  function waivable(entry) {
-    return isAutomaticGameCharge(entry) && !entry.waived;
-  }
-  function restorable(entry) {
-    return isAutomaticGameCharge(entry) && !!entry.waived;
+  // An automatic game fee isn't a stored row — it's computed from
+  // attendance — so removing it means removing the attendance that produces
+  // it (20 Oct 2026). One button, one confirmation, and the confirmation
+  // spells out that their attendance goes with it.
+  function removableGame(entry) {
+    return isAutomaticGameCharge(entry);
   }
   function deletableReason(entry) {
     return "Payments can't be deleted — record a correcting entry instead.";
@@ -157,18 +154,18 @@ GUWH.Pages = GUWH.Pages || {};
     // Those are blocked in some browsers — prompt() throws outright in the
     // desktop app's browser — and the buttons silently did nothing, which is
     // the worst possible failure for something touching money.
-    async function setGameFeeWaived(entry, waive, reason) {
+    async function removeGameFee(entry) {
       setDeleting(entry.id);
       setError("");
       setNotice("");
       try {
         const res = await GUWH.Identity.authFetch("/api/finance", {
           method: "POST",
-          body: JSON.stringify({ action: waive ? "waive_game" : "restore_game", id: entry.id, reason: reason || "" }),
+          body: JSON.stringify({ action: "remove_game", id: entry.id }),
         });
         const body = await res.json();
-        if (!body.ok) { setError(body.error || "Could not update that fee."); return; }
-        setNotice(waive ? "Game fee waived for " + entry.entry_date + "." : "Game fee restored for " + entry.entry_date + ".");
+        if (!body.ok) { setError(body.error || "Could not remove that fee."); return; }
+        setNotice("Removed the game fee for " + entry.entry_date + ", and that player's attendance for the night.");
         await load();
       } catch (e) {
         setError(String(e));
@@ -182,18 +179,15 @@ GUWH.Pages = GUWH.Pages || {};
     // no native dialog is involved, so it behaves the same in every browser.
     function EntryRow({ entry }) {
       const [confirming, setConfirming] = React.useState(false);
-      const [reason, setReason] = React.useState("");
       const busy = deleting === entry.id;
       const canDelete = deletable(entry);
-      const canWaive = waivable(entry);
-      const canRestore = restorable(entry);
+      const canRemoveGame = removableGame(entry);
       const who = selected ? selected.displayName : "this player";
 
       function run() {
         setConfirming(false);
         if (canDelete) return deleteEntry(entry);
-        if (canWaive) return setGameFeeWaived(entry, true, reason.trim());
-        if (canRestore) return setGameFeeWaived(entry, false, "");
+        if (canRemoveGame) return removeGameFee(entry);
       }
 
       return h(
@@ -208,23 +202,15 @@ GUWH.Pages = GUWH.Pages || {};
           ),
           h("div", { className: "flex items-center gap-3 shrink-0" },
             h("span", { className: "font-semibold tabular-nums " + (entry.kind === "payment" ? "text-[var(--good-dark)]" : "") }, (entry.kind === "payment" ? "−" : "") + money(entry.amount_cents)),
-            canDelete || canWaive
+            canDelete || canRemoveGame
               ? h("button", {
                   type: "button",
-                  "aria-label": canDelete ? "Delete this " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase() : "Waive this game fee",
-                  title: canDelete ? "Delete this charge" : "Waive this fee — leaves their attendance as it is",
+                  "aria-label": canDelete ? "Delete this " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase() : "Remove this game fee",
+                  title: canDelete ? "Delete this charge" : "Remove this fee — also clears their attendance for that night",
                   disabled: busy,
                   onClick: () => setConfirming((v) => !v),
                   className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
                 }, h(Icon, { name: "x", size: 15 }))
-              : canRestore
-              ? h("button", {
-                  type: "button",
-                  title: "Put this fee back",
-                  disabled: busy,
-                  onClick: () => setConfirming((v) => !v),
-                  className: "text-[10px] font-semibold text-[var(--accent-dark)] hover:underline disabled:opacity-40 transition",
-                }, "Restore")
               : h("span", {
                   className: "text-[10px] text-[var(--ink-soft)] w-[15px] text-center cursor-help",
                   title: deletableReason(entry),
@@ -238,20 +224,11 @@ GUWH.Pages = GUWH.Pages || {};
             h("p", { className: "text-xs text-[var(--ink)]" },
               canDelete
                 ? "Delete the " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase() + " of " + money(entry.amount_cents) + " for " + who + "? This removes it from their balance and can't be undone."
-                : canWaive
-                ? "Waive this " + money(entry.amount_cents) + " game fee for " + who + "? They stay marked as having attended — only the charge is cleared, and you can put it back."
-                : "Put this game fee back for " + who + "?"
+                : "Remove this " + money(entry.amount_cents) + " game fee for " + who + "? The fee comes from attendance, so this also marks them as not having played on " + entry.entry_date + ". That night's roll will no longer show them. Can't be undone."
             ),
-            canWaive &&
-              h("input", {
-                className: inputCls + " !py-1.5 text-xs",
-                placeholder: "Reason (optional) — shown on the record",
-                value: reason,
-                onChange: (e) => setReason(e.target.value),
-              }),
             h("div", { className: "flex items-center gap-2" },
-              h(Button, { type: "button", size: "sm", variant: canRestore ? "primary" : "danger", disabled: busy, onClick: run },
-                busy ? "Working…" : canDelete ? "Delete" : canWaive ? "Waive fee" : "Restore fee"),
+              h(Button, { type: "button", size: "sm", variant: "danger", disabled: busy, onClick: run },
+                busy ? "Working…" : canDelete ? "Delete" : "Remove fee and attendance"),
               h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => setConfirming(false) }, "Cancel")
             )
           )

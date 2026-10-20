@@ -20,3 +20,12 @@ create table if not exists finance_waived_games (
   created_at timestamptz not null default now(),
   primary key (member_id, session_date)
 );
+
+-- SUPERSEDED the same day. The club decided that clearing a game fee
+-- should clear the attendance that produces it, rather than recording a
+-- separate billing decision — one action, no extra steps. See the
+-- 'remove_game' branch in netlify/functions/finance.mts.
+--
+-- The table is left in place rather than dropped: it already applied to
+-- production, dropping tables there is not worth the risk, and an unused
+-- empty table costs nothing. Nothing reads or writes it any more.

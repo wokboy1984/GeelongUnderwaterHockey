@@ -122,26 +122,6 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   familyColumnsReady = true;
 }
 
-// Waived game fees (20 Oct 2026). Table added by migration
-// 20261020000001_waived_game_fees; ensured here for the same reason as the
-// columns above — a missing table would break the whole Finance page, which
-// reads it on every load.
-let waivedGamesReady = false;
-export async function ensureWaivedGames(db: any): Promise<void> {
-  if (waivedGamesReady) return;
-  await db.sql`
-    create table if not exists finance_waived_games (
-      member_id text not null references members(id) on delete cascade,
-      session_date date not null,
-      reason text,
-      waived_by text references members(id) on delete set null,
-      created_at timestamptz not null default now(),
-      primary key (member_id, session_date)
-    )
-  `;
-  waivedGamesReady = true;
-}
-
 // Forum image attachments (20 Oct 2026). The table comes from migration
 // 20260912000011_forum, which predates this feature — it was designed then
 // and only wired up now. Guarded here for the same reason as the columns
