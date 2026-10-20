@@ -17,6 +17,26 @@ GUWH.Pages = GUWH.Pages || {};
     custom: "Custom charge",
   };
 
+  // Which rows the server will let a treasurer delete (20 Oct 2026).
+  // Mirrors the two refusals in finance.mts so the button only appears
+  // where it will work:
+  //  - payments are never deletable (money that changed hands stays on the
+  //    record; a wrong one is fixed with a correcting entry)
+  //  - automatic game charges aren't rows in finance_entries at all. They
+  //    are derived from attendance and carry a synthetic "attendance:..."
+  //    id, so they're removed by unticking the player on the Coordinator's
+  //    Attendance tab instead.
+  function isAutomaticGameCharge(entry) {
+    return typeof entry.id === "string" && entry.id.indexOf("attendance:") === 0;
+  }
+  function deletable(entry) {
+    return entry.kind !== "payment" && !isAutomaticGameCharge(entry);
+  }
+  function deletableReason(entry) {
+    if (isAutomaticGameCharge(entry)) return "Automatic game fee — untick this player's attendance on the Game Coordination tab to remove it.";
+    return "Payments can't be deleted — record a correcting entry instead.";
+  }
+
   function money(cents) {
     return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format((Number(cents) || 0) / 100);
   }
@@ -48,6 +68,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [selectedId, setSelectedId] = React.useState("");
     const [loading, setLoading] = React.useState(true);
     const [saving, setSaving] = React.useState(false);
+    const [deleting, setDeleting] = React.useState("");
     const [error, setError] = React.useState("");
     const [notice, setNotice] = React.useState("");
     const [form, setForm] = React.useState({
@@ -94,6 +115,32 @@ GUWH.Pages = GUWH.Pages || {};
       }),
       { charges: 0, payments: 0, closing: 0 }
     );
+
+    // Deleting changes what someone owes, so it asks first and names the
+    // amount — a treasurer shouldn't be able to wipe a charge with one
+    // stray tap. Every deletion is written to the audit log server-side.
+    async function deleteEntry(entry) {
+      const label = (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase();
+      const who = selected ? selected.displayName : "this player";
+      if (!window.confirm("Delete the " + label + " of " + money(entry.amount_cents) + " dated " + entry.entry_date + " for " + who + "?\n\nThis removes it from their balance and can't be undone.")) return;
+      setDeleting(entry.id);
+      setError("");
+      setNotice("");
+      try {
+        const res = await GUWH.Identity.authFetch("/api/finance", {
+          method: "POST",
+          body: JSON.stringify({ action: "delete", id: entry.id }),
+        });
+        const body = await res.json();
+        if (!body.ok) { setError(body.error || "Could not delete that record."); return; }
+        setNotice("Deleted the " + label + " of " + money(entry.amount_cents) + ".");
+        await load();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setDeleting("");
+      }
+    }
 
     async function save(event) {
       event.preventDefault();
@@ -378,7 +425,27 @@ GUWH.Pages = GUWH.Pages || {};
                           h("p", { className: "text-sm font-semibold" }, ENTRY_LABELS[entry.kind] || entry.kind),
                           h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, entry.entry_date + (entry.note ? " · " + entry.note : ""))
                         ),
-                        h("span", { className: "font-semibold tabular-nums " + (entry.kind === "payment" ? "text-[var(--good-dark)]" : "") }, (entry.kind === "payment" ? "−" : "") + money(entry.amount_cents))
+                        h("div", { className: "flex items-center gap-3 shrink-0" },
+                          h("span", { className: "font-semibold tabular-nums " + (entry.kind === "payment" ? "text-[var(--good-dark)]" : "") }, (entry.kind === "payment" ? "−" : "") + money(entry.amount_cents)),
+                          // Delete a mistaken charge (20 Oct 2026). The API has
+                          // always supported this; there was simply no button.
+                          // Only offered where the server will actually allow
+                          // it — see deletableReason() — so the treasurer never
+                          // meets a refusal they couldn't have predicted.
+                          deletable(entry)
+                            ? h("button", {
+                                type: "button",
+                                "aria-label": "Delete this " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase(),
+                                title: "Delete this charge",
+                                disabled: deleting === entry.id,
+                                onClick: () => deleteEntry(entry),
+                                className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
+                              }, h(Icon, { name: "x", size: 15 }))
+                            : h("span", {
+                                className: "text-[10px] text-[var(--ink-soft)] w-[15px] text-center cursor-help",
+                                title: deletableReason(entry),
+                              }, "—")
+                        )
                       )))
                     : h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No transactions recorded for this player yet.")
                 )
