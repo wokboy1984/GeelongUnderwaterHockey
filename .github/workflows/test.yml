@@ -1,0 +1,28 @@
+# Runs the unit tests on every push and pull request (20 Oct 2026).
+#
+# These suites existed for weeks but nothing ran them, so a break in the
+# timetable, finance, forum or Melbourne-timezone logic would only have
+# shown up on the live site. They need no database and no server — they
+# exercise the pure functions in netlify/functions/_shared directly.
+#
+# test/check.js is deliberately left out: it drives a real browser with
+# Playwright against a locally served copy of the site, which is a much
+# heavier job than this. Run that one by hand when changing page layout.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 strips TypeScript types from the .mts files the tests
+          # import without any build step or extra flags.
+          node-version: '24'
+      - run: npm test
