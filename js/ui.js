@@ -481,14 +481,33 @@ window.GUWH = window.GUWH || {};
         ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No games scheduled for your team yet.")
         : h(
             "div",
-            { className: "flex flex-col gap-1.5" },
+            { className: "flex flex-col divide-y divide-black/5" },
             colours.map((c, i) =>
               h(
                 "div",
-                { key: i, className: "flex items-center gap-2 text-sm text-[var(--ink)]" },
-                h(StickSwatch, { colour: c.colour }),
-                h("span", { className: "font-semibold" }, c.colourLabel),
-                colours.length > 1 && h("span", { className: "text-[var(--ink-soft)] text-xs" }, c.pool)
+                { key: i, className: "flex items-baseline gap-2.5 py-1.5 first:pt-0 last:pb-0" },
+                // Start time leads the row — a member scanning this wants
+                // "when am I on" before anything else. Tabular so the
+                // times line up down the column.
+                h(
+                  "span",
+                  { className: "font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums shrink-0 w-14" },
+                  c.timeLabel || "—"
+                ),
+                h(
+                  "span",
+                  { className: "flex-1 min-w-0" },
+                  h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, c.label),
+                  h(
+                    "span",
+                    { className: "flex items-center gap-1.5 mt-0.5" },
+                    h(StickSwatch, { colour: c.colour }),
+                    h("span", { className: "text-xs font-semibold text-[var(--ink)]" }, c.colourLabel),
+                    c.opponent && h("span", { className: "text-xs text-[var(--ink-soft)] truncate" }, "v " + c.opponent)
+                  )
+                ),
+                colours.some((x) => x.pool !== colours[0].pool) &&
+                  h("span", { className: "text-[var(--ink-soft)] text-xs shrink-0" }, c.pool)
               )
             )
           )

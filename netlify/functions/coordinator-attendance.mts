@@ -3,7 +3,7 @@
 // (e.g. someone calls in sick, or asks to be added at the pool), or add a
 // walk-in player who has never logged in by name alone.
 //
-// GET  /api/coordinator/attendance -> { ok, sessionDate, players: [...] }
+// GET  /api/coordinator/attendance -> { ok, sessionDate, players: [...], declined: [...], noReply }
 // POST /api/coordinator/attendance { memberEmail, in } -> same shape
 // POST /api/coordinator/attendance { guestName } -> adds a name-only walk-in
 //   player (no account, no email) as confirmed for this session. Gives them
@@ -34,6 +34,34 @@ async function playerList(db: any, sessionId: number) {
     order by b.created_at asc
   `;
   return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new, grade: r.grade, parentName: r.parent_name || null }));
+}
+
+// Who said no (20 Oct 2026). Members can now decline explicitly, which is
+// different information from never having answered — it's the difference
+// between chasing two people and chasing twenty. Only the declines are
+// listed; "no reply" is everyone else and is reported as a count, since a
+// coordinator doesn't need a roll of the whole club to read it.
+async function declinedList(db: any, sessionId: number) {
+  const rows = await db.sql`
+    select m.id, m.nickname, m.first_name, m.last_name
+    from bookings b
+    join members m on m.id = b.member_id
+    where b.session_id = ${sessionId} and b.status = 'out'
+    order by b.created_at asc
+  `;
+  return rows.map((r: any) => ({ id: r.id, displayName: shortName(r.nickname, r.first_name, r.last_name) }));
+}
+
+// Members who have a login and haven't answered either way this week.
+async function noReplyCount(db: any, sessionId: number) {
+  const [row] = await db.sql`
+    select count(*)::int as n
+    from members m
+    where m.parent_id is null
+      and m.dependant_removed_at is null
+      and not exists (select 1 from bookings b where b.session_id = ${sessionId} and b.member_id = m.id)
+  `;
+  return row ? row.n : 0;
 }
 
 export default async (req: Request, context: Context) => {
@@ -111,7 +139,7 @@ export default async (req: Request, context: Context) => {
           newValue: { sessionDate, name: guestName },
           note: `${caller.email} added walk-in player "${guestName}" for ${sessionDate}`,
         });
-        return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId) }), {
+        return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId), declined: await declinedList(db, sessionId), noReply: await noReplyCount(db, sessionId) }), {
           headers: { "content-type": "application/json" },
         });
       }
@@ -144,7 +172,7 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId) }), {
+    return new Response(JSON.stringify({ ok: true, sessionDate, players: await playerList(db, sessionId), declined: await declinedList(db, sessionId), noReply: await noReplyCount(db, sessionId) }), {
       headers: { "content-type": "application/json" },
     });
   } catch (err) {

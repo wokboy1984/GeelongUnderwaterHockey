@@ -2,7 +2,7 @@
 // backend (Netlify Identity + Netlify DB) instead of the concept's
 // localStorage demo data.
 //
-// GET  /api/booking  -> { sessionDate, inSession, confirmedCount, confirmed[], cutoffAt, bookingClosed }
+// GET  /api/booking  -> { sessionDate, inSession, myStatus, confirmedCount, confirmed[] }
 // POST /api/booking  { in: boolean } -> same shape
 //
 // POST { in, dependantId? } (14 Oct 2026): with dependantId, books/cancels
@@ -11,8 +11,13 @@
 //
 // confirmed[] (2 Oct 2026): who's coming, for the Dashboard's Who's Coming
 // list - id, display name (nickname, else real name), photo version. Only
-// ever returned to a logged-in member. cutoffAt/bookingClosed: see
-// bookingCutoffFor() in _shared/attendance.mts.
+// ever returned to a logged-in member.
+//
+// There is no booking cut-off (20 Oct 2026): members can mark themselves
+// in or out at any time, including on the night. The club asks people to
+// book by 5pm so the Game Coordinator has numbers to build teams and a
+// timetable from, but that is encouragement in the UI only — nothing here
+// refuses a late change.
 //
 // Both require a logged-in Netlify Identity user (JWT in the Authorization
 // header — the widget's user.jwt() handles this on the frontend).
@@ -20,7 +25,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureFamilyColumns, ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
-import { bookingCutoffFor, nextSessionDateISO } from "./_shared/attendance.mts";
+import { nextSessionDateISO } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -53,8 +58,6 @@ export default async (req: Request, context: Context) => {
     const email: string = user.email;
     const fullName: string | undefined = user.user_metadata?.full_name;
     const sessionDate = nextSessionDateISO();
-    const cutoffAt = bookingCutoffFor(sessionDate);
-    const bookingClosed = Date.now() >= cutoffAt.getTime();
     await ensureNicknameColumn(db);
     await ensureFamilyColumns(db);
 
@@ -91,25 +94,6 @@ export default async (req: Request, context: Context) => {
           });
         }
         targetId = kid.id;
-      }
-
-      // Past the cut-off the roll is locked in both directions (20 Oct
-      // 2026): no self-service booking in and no self-service cancelling,
-      // so the numbers the Game Coordinator builds teams from at 7:30pm
-      // can't move underneath them. Only a Game Coordinator can change
-      // anyone after that, via coordinator-attendance.mts.
-      //
-      // Re-asserting a status you already hold is still allowed, so a
-      // double-tap or a stale tab can't produce a confusing error.
-      if (bookingClosed) {
-        const [current] = await db.sql`select status from bookings where session_id = ${sessionId} and member_id = ${targetId}`;
-        const currentStatus = current ? current.status : null;
-        if (currentStatus !== (wantsIn ? "in" : "out")) {
-          return new Response(JSON.stringify({ ok: false, error: "The roll closed at 7:30pm. Message the Game Coordinator if you need to be added or taken off." }), {
-            status: 403,
-            headers: { "content-type": "application/json" },
-          });
-        }
       }
 
       // The client route already gates the whole portal behind the waiver
@@ -171,11 +155,13 @@ export default async (req: Request, context: Context) => {
         ok: true,
         sessionDate,
         inSession: mine ? mine.status === "in" : false,
+        // "in" | "out" | null (20 Oct 2026). inSession alone can't tell a
+        // member who said no apart from one who hasn't answered — both are
+        // false — so the Dashboard can't ask the right question. This can.
+        myStatus: mine ? mine.status : null,
         confirmedCount: count,
         confirmed,
         family,
-        cutoffAt: cutoffAt.toISOString(),
-        bookingClosed,
       }),
       { headers: { "content-type": "application/json" } }
     );

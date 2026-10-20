@@ -69,9 +69,23 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "flex items-baseline justify-between gap-3 flex-wrap" },
         h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Your team this week"),
-        !board.published && h("span", { className: "text-xs font-semibold text-[var(--bad)]" }, "Draft")
+        !board.published &&
+          h(
+            "span",
+            { className: "rounded-full bg-[var(--bad)] text-white text-[10px] font-bold uppercase tracking-wide px-2 py-0.5" },
+            "Draft"
+          )
       ),
       h(GUWH.UI.MyTeamSummary, { team, colours }),
+      // Spelled out immediately above the link through to the board, where
+      // a member is about to act on what they've just read. The pill up top
+      // is easy to skim past; this sentence is the one that lands.
+      !board.published &&
+        h(
+          "p",
+          { className: "text-sm font-semibold text-[var(--bad)]" },
+          "This is a draft timetable only — the full timetable will be published shortly."
+        ),
       h(
         "button",
         { onClick: () => navigate("/portal/board"), className: "text-xs font-semibold text-[var(--accent-dark)] text-left hover:underline" },
@@ -244,8 +258,11 @@ GUWH.Pages = GUWH.Pages || {};
     if ((profile.gamesPlayed || 0) >= 3) return h(FinishProfileCard, { profile });
     const seen = profile.onboardingSeen || [];
     const hasProfile = !!(profile.emergencyName && profile.emergencyPhone && profile.dateOfBirth);
-    const booked = !!((status && status.inSession) || (profile.gamesPlayed || 0) > 0);
-    const closed = !!(status && status.bookingClosed);
+    // The step is "tell the club either way", not "say yes" (20 Oct 2026).
+    // Answering "I'm Not Coming" is using the feature exactly as intended,
+    // so it ticks the box. Nagging someone who has already replied just
+    // teaches them to ignore the checklist.
+    const answered = !!((status && status.myStatus) || (profile.gamesPlayed || 0) > 0);
     const forumOk = !!(forumMe && forumMe.eligible);
 
     function post(body) {
@@ -258,12 +275,10 @@ GUWH.Pages = GUWH.Pages || {};
 
     const steps = [
       {
-        label: "Book in for Wednesday",
-        hint: closed
-          ? "The roll for this Wednesday has closed - book in for next week."
-          : "Tap I'm Coming before 7:30pm Wednesday. That's how the coordinator knows to put you in a team.",
-        done: booked,
-        button: !booked && !closed && status ? h(Button, { size: "sm", className: "shrink-0", disabled: booking, onClick: onBook }, "I'm Coming") : null,
+        label: "Let the club know if you're playing",
+        hint: "Tap I'm Coming or I'm Not Coming, ideally by 5pm Wednesday. Either answer helps — it's how the coordinator knows who to put in a team.",
+        done: answered,
+        button: !answered && status ? h(Button, { size: "sm", className: "shrink-0", disabled: booking, onClick: onBook }, "I'm Coming") : null,
       },
       {
         label: "Add your date of birth and an emergency contact",
@@ -403,41 +418,16 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // ---- Booking cut-off countdown (2 Oct 2026). cutoffAt comes from the
-  // server (/api/booking), which also enforces it — see bookingCutoffFor()
-  // in _shared/attendance.mts. Ticks once a minute.
-  function formatCountdown(ms) {
-    const mins = Math.max(0, Math.floor(ms / 60000));
-    const days = Math.floor(mins / 1440);
-    const hrs = Math.floor((mins % 1440) / 60);
-    const m = mins % 60;
-    if (days > 0) return days + (days === 1 ? " day " : " days ") + hrs + (hrs === 1 ? " hr" : " hrs");
-    if (hrs > 0) return hrs + (hrs === 1 ? " hr " : " hrs ") + m + " min";
-    return m + " min";
-  }
-  function useNow(intervalMs) {
-    const [now, setNow] = React.useState(() => Date.now());
-    React.useEffect(() => {
-      const t = setInterval(() => setNow(Date.now()), intervalMs);
-      return () => clearInterval(t);
-    }, [intervalMs]);
-    return now;
-  }
-  function BookingCountdown({ cutoffAt }) {
-    const now = useNow(60000);
-    if (!cutoffAt) return null;
-    const cutoff = new Date(cutoffAt);
-    const left = cutoff.getTime() - now;
-    // e.g. "Wed 9:00am" — built by hand so it reads the same on every phone.
-    const parts = new Intl.DateTimeFormat("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Australia/Melbourne" }).formatToParts(cutoff);
-    const part = (t) => (parts.find((x) => x.type === t) || {}).value || "";
-    const when = part("weekday") + " " + part("hour") + ":" + part("minute") + part("dayPeriod").toLowerCase().replace(/\s|\./g, "");
+  // ---- A nudge, not a deadline (20 Oct 2026). The booking cut-off and
+  // its countdown are gone: nothing stops a member marking themselves in
+  // on the night, and a ticking "bookings close in..." only made people
+  // think they'd missed their chance. All that's left is the ask — book by
+  // 5pm so the Game Coordinator has numbers to build teams from.
+  function BookingNudge() {
     return h(
       "p",
       { className: "mt-4 text-xs text-white/60 leading-relaxed" },
-      left > 0
-        ? h(React.Fragment, null, "Bookings close " + when + " · ", h("span", { className: "font-semibold text-white tabular-nums whitespace-nowrap" }, formatCountdown(left) + " to go"))
-        : "Bookings closed " + when + "."
+      "Try to book in by 5pm Wednesday so the Game Coordinator can sort teams and the timetable. You can still change your mind after that."
     );
   }
 
@@ -539,7 +529,7 @@ GUWH.Pages = GUWH.Pages || {};
   // on the Profile, with a Coming / Not coming button each. Independent of
   // whether the parent is playing. With no children saved it is just a
   // quiet pointer to the Profile.
-  function FamilyBooking({ family, closed, busy, onToggle }) {
+  function FamilyBooking({ family, busy, onToggle }) {
     if (!family || family.length === 0) {
       return h(
         "button",
@@ -567,8 +557,6 @@ GUWH.Pages = GUWH.Pages || {};
             ),
             k.inSession
               ? h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: busy, onClick: () => onToggle(k.id, false) }, "Can't make it")
-              : closed
-              ? h("span", { className: "text-xs text-white/60" }, "Closed")
               : h(Button, { size: "sm", disabled: busy, onClick: () => onToggle(k.id, true) }, "Bring " + k.firstName)
           )
         )
@@ -711,23 +699,40 @@ GUWH.Pages = GUWH.Pages || {};
                   ? h(
                       React.Fragment,
                       null,
-                      h("h2", { className: "font-display text-xl sm:text-2xl font-bold" }, "Are you playing?"),
+                      // Three states, not two (20 Oct 2026): said yes,
+                      // said no, or hasn't answered. "Not coming" used to
+                      // be indistinguishable from silence, so a member who
+                      // declined got asked the same question again and the
+                      // coordinator couldn't tell who had actually replied.
+                      status.myStatus === "out"
+                        ? h(Pill, { tone: "white" }, "You're not coming this week")
+                        : h("h2", { className: "font-display text-xl sm:text-2xl font-bold" }, "Are you playing?"),
                       h(
                         "div",
                         { className: "mt-3 flex flex-col gap-1 text-sm text-white/70" },
                         h("div", { className: "flex items-center gap-2" }, h(Icon, { name: "clock", size: 15 }), GUWH.club.sessionTime),
                         h("div", { className: "flex items-center gap-2" }, h(Icon, { name: "mapPin", size: 15 }), GUWH.club.venue)
                       ),
+                      status.myStatus === "out"
+                        ? h(
+                            "div",
+                            { className: "mt-6" },
+                            h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "Changed my mind, I'm Coming")
+                          )
+                        : h(
+                            "div",
+                            { className: "mt-6 flex items-center gap-3 flex-wrap" },
+                            h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "I'm Coming"),
+                            h(Button, { variant: "secondary", size: "lg", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "I'm Not Coming")
+                          ),
                       h(
-                        "div",
-                        { className: "mt-6 flex items-center gap-4 flex-wrap" },
-                        status.bookingClosed
-                          ? h("p", { className: "text-sm text-white/80" }, "Bookings have closed. Message the Game Coordinator if you can still make it.")
-                          : h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "I'm Coming"),
-                        h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white" }, status.confirmedCount), " members confirmed")
+                        "p",
+                        { className: "mt-3 text-sm text-white/70" },
+                        h("span", { className: "font-display font-bold text-white" }, status.confirmedCount),
+                        " members confirmed"
                       ),
-                      h(BookingCountdown, { cutoffAt: status.cutoffAt }),
-                      h(FamilyBooking, { family: status.family, closed: status.bookingClosed, busy: loading, onToggle: setKidIn })
+                      h(BookingNudge),
+                      h(FamilyBooking, { family: status.family, busy: loading, onToggle: setKidIn })
                     )
                   : h(
                       React.Fragment,
@@ -737,12 +742,7 @@ GUWH.Pages = GUWH.Pages || {};
                         "div",
                         { className: "mt-4 flex items-center gap-4 flex-wrap" },
                         h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white text-lg" }, status.confirmedCount), " members confirmed"),
-                        // Past 7:30pm the roll is locked both ways (20 Oct
-                        // 2026), so dropping out is no longer self-service —
-                        // hide the button rather than let it fail server-side.
-                        status.bookingClosed
-                          ? h("p", { className: "text-sm text-white/80" }, "The roll is locked — tell the Game Coordinator if you can't make it.")
-                          : h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "Can't Make It")
+                        h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "Can't Make It")
                       ),
                       h(
                         "div",
@@ -753,8 +753,8 @@ GUWH.Pages = GUWH.Pages || {};
                           boardBlurb(board)
                         )
                       ),
-                      h(BookingCountdown, { cutoffAt: status.cutoffAt }),
-                      h(FamilyBooking, { family: status.family, closed: status.bookingClosed, busy: loading, onToggle: setKidIn })
+                      h(BookingNudge),
+                      h(FamilyBooking, { family: status.family, busy: loading, onToggle: setKidIn })
                     )
               )
             : loading && h("div", { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" }, h("p", { className: "text-sm text-white/70" }, "Loading…")),

@@ -445,12 +445,12 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
-    if (loading) return h(Container, { className: "py-10 sm:py-14 max-w-3xl" }, h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"));
-    if (!member) return h(Container, { className: "py-10 sm:py-14 max-w-3xl" }, error && h("p", { className: "text-sm text-[var(--bad)]" }, error));
+    if (loading) return h(Container, { className: "py-10 sm:py-14 max-w-4xl" }, h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"));
+    if (!member) return h(Container, { className: "py-10 sm:py-14 max-w-4xl" }, error && h("p", { className: "text-sm text-[var(--bad)]" }, error));
 
     return h(
       Container,
-      { className: "py-10 sm:py-14 max-w-3xl" },
+      { className: "py-10 sm:py-14 max-w-4xl" },
       h(PhotoUploader, { member, onChange: (photoVersion) => setMember((m) => Object.assign({}, m, { photoVersion })) }),
       GUWH.justJoined && !GUWH.joinedSaved && h(
         "div",

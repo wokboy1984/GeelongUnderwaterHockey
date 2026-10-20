@@ -123,7 +123,7 @@ GUWH.Pages = GUWH.Pages || {};
 
     return h(
       Container,
-      { className: "py-8 sm:py-10 max-w-3xl" },
+      { className: "py-10 sm:py-14 max-w-4xl" },
       back,
       h(
         "div",

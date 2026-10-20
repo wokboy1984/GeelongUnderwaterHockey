@@ -66,10 +66,41 @@ GUWH.Pages = GUWH.Pages || {};
   // against *today*. Now the page works on a chosen Wednesday - Thu/Fri it
   // opens on the night just gone, otherwise the upcoming one - and Prev /
   // Next moves between weeks (last 12 weeks + upcoming).
+  // Replies at a glance (20 Oct 2026). Members can now decline explicitly,
+  // so "not confirmed" splits into two very different groups: people who
+  // said no, and people who haven't replied. Only the second group is
+  // worth chasing. Names are listed for declines because the coordinator
+  // often wants to know who specifically is out; no-replies are a count,
+  // since that list is just "everyone else".
+  function ReplySummary({ declined, noReply }) {
+    const hasDeclines = declined && declined.length > 0;
+    if (!hasDeclines && noReply == null) return null;
+    return h(
+      "div",
+      { className: "flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs text-[var(--ink-soft)]" },
+      hasDeclines &&
+        h(
+          "span",
+          null,
+          h("span", { className: "font-semibold text-[var(--ink)]" }, "Can't make it (" + declined.length + "): "),
+          declined.map((d) => d.displayName).join(", ")
+        ),
+      noReply != null &&
+        h(
+          "span",
+          null,
+          h("span", { className: "font-semibold text-[var(--ink)]" }, noReply),
+          " not replied"
+        )
+    );
+  }
+
   function AttendanceTab() {
     const [week, setWeek] = React.useState(null); // null = server default
     const [sessionDate, setSessionDate] = React.useState(null);
     const [players, setPlayers] = React.useState([]);
+    const [declined, setDeclined] = React.useState([]);
+    const [noReply, setNoReply] = React.useState(null);
     const [checkin, setCheckin] = React.useState(null); // { sessionDate, players, closed, closedAt, closedByName }
     const [newPlayers, setNewPlayers] = React.useState([]);
     const [trialSignups, setTrialSignups] = React.useState([]);
@@ -95,7 +126,7 @@ GUWH.Pages = GUWH.Pages || {};
         GUWH.Identity.authFetch("/api/trial-signup?scope=coordinator" + (q ? "&" + q : "")).then((r) => r.json()).catch(() => ({ ok: false })),
       ])
         .then(([a, c, i, t]) => {
-          if (a.ok) { setSessionDate(a.sessionDate); setPlayers(a.players); }
+          if (a.ok) { setSessionDate(a.sessionDate); setPlayers(a.players); setDeclined(a.declined || []); setNoReply(a.noReply == null ? null : a.noReply); }
           else setError(a.error || "Something went wrong");
           // This used to be silently dropped on failure (no `else`), so a
           // real DB/permission error here left the roll simply missing with
@@ -259,6 +290,10 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "mt-8" },
         h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, "Confirmed (" + players.length + ")"),
+        // Who said no, and how many never answered (20 Oct 2026). Without
+        // this the coordinator can't tell a quiet week from an unanswered
+        // one, and chases people who've already replied.
+        h(ReplySummary, { declined, noReply }),
         checkin
           ? h(
               React.Fragment,
@@ -1745,7 +1780,7 @@ GUWH.Pages = GUWH.Pages || {};
       const get = (u) => GUWH.Identity.authFetch(u).then((r) => r.json()).catch(() => ({ ok: false }));
       function refresh() {
       const mine = ++seq;
-      Promise.all([get("/api/coordinator/teams"), get("/api/coordinator/schedule"), get("/api/booking")]).then(([t, sc, b]) => {
+      Promise.all([get("/api/coordinator/teams"), get("/api/coordinator/schedule")]).then(([t, sc]) => {
         if (off || mine !== seq) return;
         const upcoming = t.ok ? t.sessionDate : null;
         (upcoming ? get("/api/coordinator/scores?date=" + upcoming) : Promise.resolve({ ok: false })).then((scr) => {
@@ -1758,7 +1793,6 @@ GUWH.Pages = GUWH.Pages || {};
             published: t.ok ? !!t.published : null,
             issues: sc.ok ? (sc.validation || []).length : null,
             games, scored,
-            cutoffAt: b.ok ? b.cutoffAt : null,
           });
         });
       });
@@ -1771,7 +1805,6 @@ GUWH.Pages = GUWH.Pages || {};
       return () => { off = true; clearTimeout(timer); window.removeEventListener("guwh:coord-changed", onChange); };
     }, []);
     if (!st) return null;
-    const left = st.cutoffAt ? new Date(st.cutoffAt).getTime() - Date.now() : null;
     const chip = (label, value, tone) =>
       h(
         "div",
@@ -1779,12 +1812,13 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, label),
         h("p", { className: "font-display font-bold text-[var(--ink)] tabular-nums" }, value)
       );
-    const hrs = left != null && left > 0 ? Math.floor(left / 3600000) : null;
+    // The "Bookings close in..." chip went with the cut-off (20 Oct 2026).
+    // Nothing closes any more, so a countdown would be inventing a deadline
+    // the members' side no longer has. "Booked in" is the live number.
     return h(
       "div",
       { className: "flex flex-wrap gap-2 mb-6" },
       chip("Booked in", st.booked == null ? "—" : String(st.booked)),
-      chip("Bookings", left == null ? "—" : left > 0 ? (hrs >= 24 ? Math.floor(hrs / 24) + "d " + (hrs % 24) + "h left" : hrs + "h " + Math.floor((left % 3600000) / 60000) + "m left") : "Closed"),
       chip("Unassigned", st.unassigned == null ? "—" : String(st.unassigned), st.unassigned > 0 ? "warn" : null),
       chip("Timetable", st.issues == null ? "—" : st.issues === 0 ? "Ready" : st.issues + (st.issues === 1 ? " issue" : " issues"), st.issues > 0 ? "warn" : st.issues === 0 ? "good" : null),
       chip("Board", st.published == null ? "—" : st.published ? "Published" : "Not published", st.published ? "good" : null),

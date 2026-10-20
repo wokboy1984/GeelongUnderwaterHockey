@@ -31,17 +31,17 @@ export function nextSessionDateISO(now = new Date()): string {
  return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
 }
 
-// Booking cut-off (2 Oct 2026). Members can change their own attendance
-// for the upcoming Wednesday until this Melbourne wall-clock time on the
-// day itself; after that only a Game Coordinator can move anyone.
-// Club decision (20 Oct 2026): the roll stays open until 7:30pm on game
-// night, so anyone who only finds out late that they can get there can
-// still put themselves in. Supersedes the 12 Oct midday cut-off, which
-// shut people out for the whole afternoon. At 7:30pm it locks in both
-// directions — see booking.mts — so the coordinator has firm numbers to
-// build teams from. Change these two numbers to move it.
-export const BOOKING_CUTOFF_HOUR = 19;
-export const BOOKING_CUTOFF_MINUTE = 30;
+// There is no booking cut-off any more (20 Oct 2026). Members can mark
+// themselves in or out right up to the game, and the club asks them to do
+// it by 5pm so the Game Coordinator has numbers to build teams and a
+// timetable from. That 5pm is encouragement only — nothing enforces it,
+// and no endpoint refuses a late change.
+//
+// History: a cut-off existed from 2 Oct 2026 (midday, then briefly 7:30pm
+// on 20 Oct). Both shut people out who only found out late that they
+// could make it, which cost the club players for no real gain. If a cut-
+// off is ever wanted again, it belongs here as a Melbourne wall-clock
+// time fed through melbourneToUTC(), with the refusal in booking.mts.
 
 // Converts a Melbourne wall-clock date/time to a real UTC instant, DST-safe:
 // guess the instant as if Melbourne were UTC, measure how far Melbourne's
@@ -55,9 +55,6 @@ export function melbourneToUTC(dateISO: string, hour: number, minute: number): D
  return new Date(guess - (asMelb - guess));
 }
 
-export function bookingCutoffFor(sessionDateISO: string): Date {
- return melbourneToUTC(sessionDateISO, BOOKING_CUTOFF_HOUR, BOOKING_CUTOFF_MINUTE);
-}
 
 // Week-by-week browsing (2 Oct 2026). Game Board, Scores and MVP can now
 // look at any past Wednesday instead of only "the upcoming one", which

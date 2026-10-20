@@ -67,10 +67,26 @@ function myTeamFor(board, memberId) {
   return board.teams.find((t) => (t.players || []).some((p) => p.id === memberId)) || null;
 }
 
+// Timetable minutes are an offset from a 6:00pm start, not a clock time.
+// Shared so the board, the Dashboard and Profile print the same string.
+function minToClock(min) {
+  if (min == null) return null;
+  const base = new Date(2000, 0, 1, 18, 0, 0);
+  base.setMinutes(base.getMinutes() + min);
+  let hr = base.getHours();
+  const m = base.getMinutes();
+  const suffix = hr >= 12 ? "pm" : "am";
+  hr = hr % 12 || 12;
+  return hr + ":" + String(m).padStart(2, "0") + suffix;
+}
+
 // Every game that team plays, with the stick colour they wear for it.
-// Returns [{ pool, colour: "black" | "white", colourLabel, startMin }].
-// Teams can switch colour between games, so this is per game, never per
-// night. A game the team isn't in simply doesn't appear.
+// Returns [{ pool, colour: "black" | "white", colourLabel, startMin,
+// timeLabel, label }]. Teams can switch colour between games, so this is
+// per game, never per night. A game the team isn't in simply doesn't
+// appear. `label` and `timeLabel` are what make the list readable — four
+// rows all reading "Black sticks, Pool A" tell a member nothing about
+// when they're actually on.
 function myGameColours(board, team) {
   if (!board || !team || !Array.isArray(board.rows)) return [];
   const out = [];
@@ -84,6 +100,9 @@ function myGameColours(board, team) {
         colour,
         colourLabel: colour === "black" ? "Black sticks" : "White sticks",
         startMin: row.startMin,
+        timeLabel: minToClock(row.startMin),
+        label: row.label || row.rowTypeLabel || "Game",
+        opponent: colour === "black" ? pg.whiteTeamName : pg.blackTeamName,
       });
     });
   });

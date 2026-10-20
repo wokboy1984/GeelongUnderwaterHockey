@@ -77,16 +77,10 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  function minToClockReal(min) {
-    if (min == null) return null;
-    const base = new Date(2000, 0, 1, 18, 0, 0);
-    base.setMinutes(base.getMinutes() + min);
-    let hr = base.getHours();
-    const m = base.getMinutes();
-    const suffix = hr >= 12 ? "pm" : "am";
-    hr = hr % 12 || 12;
-    return hr + ":" + String(m).padStart(2, "0") + suffix;
-  }
+  // Lives in helpers.js now (20 Oct 2026) so the Dashboard and Profile
+  // print game times identically to the board. Kept as a local name
+  // because this file calls it from several places.
+  const minToClockReal = minToClock;
 
   function refNames(list) {
     return (list || []).map((p) => GUWH.displayName(p)).join(", ");
@@ -453,7 +447,7 @@ GUWH.Pages = GUWH.Pages || {};
 
     return h(
       Container,
-      { className: "py-12 sm:py-16 max-w-4xl" },
+      { className: "py-10 sm:py-14 max-w-4xl" },
       h(SectionHeading, { eyebrow: isPast ? "Past game" : "This week's game", title: data ? GUWH.formatDate(new Date(data.sessionDate + "T00:00:00")) : "" }),
       data && data.weeks && data.weeks.length > 1 &&
         h("div", { className: "max-w-md mb-8" }, h(GUWH.UI.WeekSwitcher, { date: data.sessionDate, weeks: data.weeks, upcoming: data.upcoming, onChange: load })),
