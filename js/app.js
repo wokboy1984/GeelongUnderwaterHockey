@@ -266,12 +266,12 @@
             h(
               "a",
               { href: "https://underwaterhockeyaustralia.org.au", target: "_blank", rel: "noopener", "aria-label": "Underwater Hockey Australia", className: "opacity-90 hover:opacity-100 transition shrink-0" },
-              h("img", { src: "images/logos/uwh-australia-logo.png", alt: "Underwater Hockey Australia", loading: "lazy", className: "h-11 w-11 rounded-full bg-white p-0.5 object-contain" })
+              h("img", { src: "/images/logos/uwh-australia-logo.png", alt: "Underwater Hockey Australia", loading: "lazy", className: "h-11 w-11 rounded-full bg-white p-0.5 object-contain" })
             ),
             h(
               "a",
               { href: "https://auf.com.au/", target: "_blank", rel: "noopener", "aria-label": "Australian Underwater Federation Inc.", className: "opacity-90 hover:opacity-100 transition shrink-0" },
-              h("img", { src: "images/logos/auf-logo.png", alt: "Australian Underwater Federation Inc.", loading: "lazy", className: "h-11 w-auto rounded bg-white px-1.5 py-1 object-contain" })
+              h("img", { src: "/images/logos/auf-logo.png", alt: "Australian Underwater Federation Inc.", loading: "lazy", className: "h-11 w-auto rounded bg-white px-1.5 py-1 object-contain" })
             )
           )
         ),

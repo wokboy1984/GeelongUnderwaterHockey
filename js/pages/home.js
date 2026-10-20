@@ -23,10 +23,10 @@ GUWH.Pages = GUWH.Pages || {};
   ];
 
   const CLUB_PHOTOS = [
-    { src: "images/action-contest.jpg", alt: "Two players diving for the puck along the pool floor", caption: "Contesting the puck" },
-    { src: "images/action-reach.jpg", alt: "Players contesting the puck underwater", caption: "Full stretch for every inch" },
-    { src: "images/gear-closeup.jpg", alt: "Player at the pool edge with stick, puck and gloves", caption: "Stick, puck, glove — that's it" },
-    { src: "images/team-group.jpg", alt: "The club surfacing together for a group photo after a session", caption: "The whole crew, every Wednesday" },
+    { src: "/images/action-contest.jpg", alt: "Two players diving for the puck along the pool floor", caption: "Contesting the puck" },
+    { src: "/images/action-reach.jpg", alt: "Players contesting the puck underwater", caption: "Full stretch for every inch" },
+    { src: "/images/gear-closeup.jpg", alt: "Player at the pool edge with stick, puck and gloves", caption: "Stick, puck, glove — that's it" },
+    { src: "/images/team-group.jpg", alt: "The club surfacing together for a group photo after a session", caption: "The whole crew, every Wednesday" },
   ];
 
   function HomePage() {
@@ -59,7 +59,7 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "absolute inset-0", "aria-hidden": "true" },
           h("img", {
-            src: "images/team-dive-wide.jpg",
+            src: "/images/team-dive-wide.jpg",
             alt: "",
             className: "absolute inset-0 w-full h-full object-cover opacity-60",
           }),

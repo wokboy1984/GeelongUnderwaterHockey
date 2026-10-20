@@ -87,7 +87,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "mt-14 rounded-2xl overflow-hidden ring-1 ring-black/5" },
-        h("img", { src: "images/gear-closeup.jpg", alt: "A player at the pool edge holding a stick, puck and gloves", loading: "lazy", className: "w-full h-auto object-cover max-h-72" })
+        h("img", { src: "/images/gear-closeup.jpg", alt: "A player at the pool edge holding a stick, puck and gloves", loading: "lazy", className: "w-full h-auto object-cover max-h-72" })
       ),
 
       // Video embed (13 Sept 2026, Cheongy's request) — a real 16:9
@@ -198,7 +198,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { className: "mt-5 rounded-2xl overflow-hidden ring-1 ring-black/5" },
-            h("img", { src: "images/team-group.jpg", alt: "The Geelong Underwater Hockey club surfacing together after a Wednesday session", loading: "lazy", className: "w-full h-auto object-cover" })
+            h("img", { src: "/images/team-group.jpg", alt: "The Geelong Underwater Hockey club surfacing together after a Wednesday session", loading: "lazy", className: "w-full h-auto object-cover" })
           )
         )
       ),

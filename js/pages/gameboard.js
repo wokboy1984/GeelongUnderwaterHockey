@@ -532,7 +532,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "rounded-3xl overflow-hidden ring-1 ring-black/5 mb-8 h-40 sm:h-56" },
-        h("img", { src: "images/team-dive-wide.jpg", alt: "The whole club mid-session, swimming down together", loading: "lazy", className: "w-full h-full object-cover" })
+        h("img", { src: "/images/team-dive-wide.jpg", alt: "The whole club mid-session, swimming down together", loading: "lazy", className: "w-full h-full object-cover" })
       ),
       h(
         "div",

@@ -218,7 +218,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { className: "mt-6 rounded-2xl overflow-hidden ring-1 ring-black/5 h-32 sm:h-40" },
-            h("img", { src: "images/puck-battle-wide.jpg", alt: "Two players contesting the puck along the pool floor", loading: "lazy", className: "w-full h-full object-cover" })
+            h("img", { src: "/images/puck-battle-wide.jpg", alt: "Two players contesting the puck along the pool floor", loading: "lazy", className: "w-full h-full object-cover" })
           ),
 
           h(
