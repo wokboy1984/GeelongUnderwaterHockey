@@ -56,6 +56,36 @@ GUWH.Pages = GUWH.Pages || {};
   // embedded copy (13 Sept 2026, Cheongy's request: put Teams/Timetable
   // back on their own Members Portal page rather than folded into here).
 
+  // One of the two attendance answers (20 Oct 2026). Both are always on
+  // screen; this marks whichever one is currently yours rather than hiding
+  // the other, so the card shows your answer and the way to change it in
+  // the same place.
+  //
+  // The active state is never colour alone — it carries a tick and an
+  // aria-pressed flag, so it reads the same to a screen reader and on a
+  // washed-out phone screen in sunlight.
+  function AnswerButton({ label, icon, active, disabled, onClick }) {
+    return h(
+      "button",
+      {
+        type: "button",
+        "aria-pressed": active ? "true" : "false",
+        disabled: disabled,
+        onClick: onClick,
+        className: cx(
+          "inline-flex items-center justify-center gap-2 rounded-full font-semibold transition px-5 py-3 text-[15px]",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
+          active
+            ? "bg-white text-[var(--navy)] shadow-sm"
+            : "bg-transparent text-white border-2 border-white/30 hover:border-white/60"
+        ),
+      },
+      active ? h(Icon, { name: "check", size: 18 }) : icon ? h(Icon, { name: icon, size: 18 }) : null,
+      label
+    );
+  }
+
   // "Your team this week" on the Dashboard (20 Oct 2026). Reads the board
   // the page already loaded — no extra request — and leans on the shared
   // MyTeamSummary so Profile and This Week's Game say the same thing.
@@ -695,67 +725,57 @@ GUWH.Pages = GUWH.Pages || {};
             ? h(
                 "div",
                 { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" },
-                !status.inSession
-                  ? h(
-                      React.Fragment,
-                      null,
-                      // Three states, not two (20 Oct 2026): said yes,
-                      // said no, or hasn't answered. "Not coming" used to
-                      // be indistinguishable from silence, so a member who
-                      // declined got asked the same question again and the
-                      // coordinator couldn't tell who had actually replied.
-                      status.myStatus === "out"
-                        ? h(Pill, { tone: "white" }, "You're not coming this week")
-                        : h("h2", { className: "font-display text-xl sm:text-2xl font-bold" }, "Are you playing?"),
-                      h(
-                        "div",
-                        { className: "mt-3 flex flex-col gap-1 text-sm text-white/70" },
-                        h("div", { className: "flex items-center gap-2" }, h(Icon, { name: "clock", size: 15 }), GUWH.club.sessionTime),
-                        h("div", { className: "flex items-center gap-2" }, h(Icon, { name: "mapPin", size: 15 }), GUWH.club.venue)
-                      ),
-                      status.myStatus === "out"
-                        ? h(
-                            "div",
-                            { className: "mt-6" },
-                            h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "Changed my mind, I'm Coming")
-                          )
-                        : h(
-                            "div",
-                            { className: "mt-6 flex items-center gap-3 flex-wrap" },
-                            h(Button, { size: "lg", disabled: loading, onClick: () => setIn(true) }, h(Icon, { name: "plus", size: 18 }), "I'm Coming"),
-                            h(Button, { variant: "secondary", size: "lg", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "I'm Not Coming")
-                          ),
-                      h(
-                        "p",
-                        { className: "mt-3 text-sm text-white/70" },
-                        h("span", { className: "font-display font-bold text-white" }, status.confirmedCount),
-                        " members confirmed"
-                      ),
-                      h(BookingNudge),
-                      h(FamilyBooking, { family: status.family, busy: loading, onToggle: setKidIn })
-                    )
-                  : h(
-                      React.Fragment,
-                      null,
-                      h(Pill, { tone: "white" }, h(Icon, { name: "check", size: 14 }), "You're in for Wednesday"),
-                      h(
-                        "div",
-                        { className: "mt-4 flex items-center gap-4 flex-wrap" },
-                        h("p", { className: "text-sm text-white/70" }, h("span", { className: "font-display font-bold text-white text-lg" }, status.confirmedCount), " members confirmed"),
-                        h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: loading, onClick: () => setIn(false) }, "Can't Make It")
-                      ),
-                      h(
-                        "div",
-                        { className: "mt-5 pt-5 border-t border-white/15 flex flex-wrap items-center gap-3" },
-                        h(
-                          "p",
-                          { className: "text-xs text-white/60" },
-                          boardBlurb(board)
-                        )
-                      ),
-                      h(BookingNudge),
-                      h(FamilyBooking, { family: status.family, busy: loading, onToggle: setKidIn })
-                    )
+                h(
+                  React.Fragment,
+                  null,
+                  // Both answers are always on screen (20 Oct 2026, club
+                  // request). Previously only the option you hadn't picked
+                  // was shown, which hid the choice and made it unclear
+                  // whether you'd actually replied. Now the pair is always
+                  // there with your current answer marked, so the state and
+                  // the way to change it are the same control.
+                  status.myStatus === "in"
+                    ? h(Pill, { tone: "white" }, h(Icon, { name: "check", size: 14 }), "You're in for Wednesday")
+                    : status.myStatus === "out"
+                    ? h(Pill, { tone: "white" }, "You're not coming this week")
+                    : h("h2", { className: "font-display text-xl sm:text-2xl font-bold" }, "Are you playing?"),
+                  h(
+                    "div",
+                    { className: "mt-3 flex flex-col gap-1 text-sm text-white/70" },
+                    h("div", { className: "flex items-center gap-2" }, h(Icon, { name: "clock", size: 15 }), GUWH.club.sessionTime),
+                    h("div", { className: "flex items-center gap-2" }, h(Icon, { name: "mapPin", size: 15 }), GUWH.club.venue)
+                  ),
+                  h(
+                    "div",
+                    { className: "mt-6 flex items-center gap-3 flex-wrap" },
+                    h(AnswerButton, {
+                      label: "I'm Coming",
+                      icon: "plus",
+                      active: status.myStatus === "in",
+                      disabled: loading,
+                      onClick: () => setIn(true),
+                    }),
+                    h(AnswerButton, {
+                      label: "I'm Not Coming",
+                      active: status.myStatus === "out",
+                      disabled: loading,
+                      onClick: () => setIn(false),
+                    })
+                  ),
+                  h(
+                    "p",
+                    { className: "mt-3 text-sm text-white/70" },
+                    h("span", { className: "font-display font-bold text-white" }, status.confirmedCount),
+                    " members confirmed"
+                  ),
+                  h(
+                    "div",
+                    { className: "mt-5 pt-5 border-t border-white/15 flex flex-wrap items-center gap-3" },
+                    h("p", { className: "text-xs text-white/60" }, boardBlurb(board))
+                  ),
+                  h(BookingNudge),
+                  h(FamilyBooking, { family: status.family, busy: loading, onToggle: setKidIn })
+                )
               )
             : loading && h("div", { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" }, h("p", { className: "text-sm text-white/70" }, "Loading…")),
           // Your team and stick colour, first thing after the attendance
