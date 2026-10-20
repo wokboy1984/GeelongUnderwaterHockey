@@ -130,8 +130,6 @@ GUWH.Pages = GUWH.Pages || {};
     // stray tap. Every deletion is written to the audit log server-side.
     async function deleteEntry(entry) {
       const label = (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase();
-      const who = selected ? selected.displayName : "this player";
-      if (!window.confirm("Delete the " + label + " of " + money(entry.amount_cents) + " dated " + entry.entry_date + " for " + who + "?\n\nThis removes it from their balance and can't be undone.")) return;
       setDeleting(entry.id);
       setError("");
       setNotice("");
@@ -154,15 +152,12 @@ GUWH.Pages = GUWH.Pages || {};
     // Waive or restore an automatic game fee. Attendance is never touched:
     // the player still counts as having turned up, the club has just decided
     // not to charge them for it.
-    async function setGameFeeWaived(entry, waive) {
-      const who = selected ? selected.displayName : "this player";
-      let reason = null;
-      if (waive) {
-        reason = window.prompt("Waive the " + money(entry.amount_cents) + " game fee for " + who + " on " + entry.entry_date + "?\n\nThis leaves their attendance as it is. Add a short reason (optional):", "");
-        if (reason === null) return; // cancelled
-      } else if (!window.confirm("Put the game fee back for " + who + " on " + entry.entry_date + "?")) {
-        return;
-      }
+    //
+    // Confirmation is inline rather than window.confirm/prompt (20 Oct 2026).
+    // Those are blocked in some browsers — prompt() throws outright in the
+    // desktop app's browser — and the buttons silently did nothing, which is
+    // the worst possible failure for something touching money.
+    async function setGameFeeWaived(entry, waive, reason) {
       setDeleting(entry.id);
       setError("");
       setNotice("");
@@ -180,6 +175,87 @@ GUWH.Pages = GUWH.Pages || {};
       } finally {
         setDeleting("");
       }
+    }
+
+    // One row of the transaction history, with its own inline confirmation
+    // step. Nothing that changes a balance happens on a single click, and
+    // no native dialog is involved, so it behaves the same in every browser.
+    function EntryRow({ entry }) {
+      const [confirming, setConfirming] = React.useState(false);
+      const [reason, setReason] = React.useState("");
+      const busy = deleting === entry.id;
+      const canDelete = deletable(entry);
+      const canWaive = waivable(entry);
+      const canRestore = restorable(entry);
+      const who = selected ? selected.displayName : "this player";
+
+      function run() {
+        setConfirming(false);
+        if (canDelete) return deleteEntry(entry);
+        if (canWaive) return setGameFeeWaived(entry, true, reason.trim());
+        if (canRestore) return setGameFeeWaived(entry, false, "");
+      }
+
+      return h(
+        "div",
+        { className: "px-4 py-3" },
+        h(
+          "div",
+          { className: "flex items-start justify-between gap-4" },
+          h("div", null,
+            h("p", { className: "text-sm font-semibold" }, ENTRY_LABELS[entry.kind] || entry.kind),
+            h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, entry.entry_date + (entry.note ? " · " + entry.note : ""))
+          ),
+          h("div", { className: "flex items-center gap-3 shrink-0" },
+            h("span", { className: "font-semibold tabular-nums " + (entry.kind === "payment" ? "text-[var(--good-dark)]" : "") }, (entry.kind === "payment" ? "−" : "") + money(entry.amount_cents)),
+            canDelete || canWaive
+              ? h("button", {
+                  type: "button",
+                  "aria-label": canDelete ? "Delete this " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase() : "Waive this game fee",
+                  title: canDelete ? "Delete this charge" : "Waive this fee — leaves their attendance as it is",
+                  disabled: busy,
+                  onClick: () => setConfirming((v) => !v),
+                  className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
+                }, h(Icon, { name: "x", size: 15 }))
+              : canRestore
+              ? h("button", {
+                  type: "button",
+                  title: "Put this fee back",
+                  disabled: busy,
+                  onClick: () => setConfirming((v) => !v),
+                  className: "text-[10px] font-semibold text-[var(--accent-dark)] hover:underline disabled:opacity-40 transition",
+                }, "Restore")
+              : h("span", {
+                  className: "text-[10px] text-[var(--ink-soft)] w-[15px] text-center cursor-help",
+                  title: deletableReason(entry),
+                }, "—")
+          )
+        ),
+        confirming &&
+          h(
+            "div",
+            { className: "mt-3 rounded-xl bg-white ring-1 ring-black/5 p-3 flex flex-col gap-2" },
+            h("p", { className: "text-xs text-[var(--ink)]" },
+              canDelete
+                ? "Delete the " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase() + " of " + money(entry.amount_cents) + " for " + who + "? This removes it from their balance and can't be undone."
+                : canWaive
+                ? "Waive this " + money(entry.amount_cents) + " game fee for " + who + "? They stay marked as having attended — only the charge is cleared, and you can put it back."
+                : "Put this game fee back for " + who + "?"
+            ),
+            canWaive &&
+              h("input", {
+                className: inputCls + " !py-1.5 text-xs",
+                placeholder: "Reason (optional) — shown on the record",
+                value: reason,
+                onChange: (e) => setReason(e.target.value),
+              }),
+            h("div", { className: "flex items-center gap-2" },
+              h(Button, { type: "button", size: "sm", variant: canRestore ? "primary" : "danger", disabled: busy, onClick: run },
+                busy ? "Working…" : canDelete ? "Delete" : canWaive ? "Waive fee" : "Restore fee"),
+              h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => setConfirming(false) }, "Cancel")
+            )
+          )
+      );
     }
 
     async function save(event) {
@@ -458,52 +534,7 @@ GUWH.Pages = GUWH.Pages || {};
                 h("div", { className: "mt-8" },
                   h("h3", { className: "font-display text-lg font-bold mb-3" }, "Transaction history"),
                   selectedEntries.length
-                    ? h("div", { className: "rounded-xl bg-[var(--sand)] divide-y divide-black/5" }, selectedEntries.map((entry) => h(
-                        "div",
-                        { key: entry.id, className: "flex items-start justify-between gap-4 px-4 py-3" },
-                        h("div", null,
-                          h("p", { className: "text-sm font-semibold" }, ENTRY_LABELS[entry.kind] || entry.kind),
-                          h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, entry.entry_date + (entry.note ? " · " + entry.note : ""))
-                        ),
-                        h("div", { className: "flex items-center gap-3 shrink-0" },
-                          h("span", { className: "font-semibold tabular-nums " + (entry.kind === "payment" ? "text-[var(--good-dark)]" : "") }, (entry.kind === "payment" ? "−" : "") + money(entry.amount_cents)),
-                          // Delete a mistaken charge (20 Oct 2026). The API has
-                          // always supported this; there was simply no button.
-                          // Only offered where the server will actually allow
-                          // it — see deletableReason() — so the treasurer never
-                          // meets a refusal they couldn't have predicted.
-                          deletable(entry)
-                            ? h("button", {
-                                type: "button",
-                                "aria-label": "Delete this " + (ENTRY_LABELS[entry.kind] || entry.kind).toLowerCase(),
-                                title: "Delete this charge",
-                                disabled: deleting === entry.id,
-                                onClick: () => deleteEntry(entry),
-                                className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
-                              }, h(Icon, { name: "x", size: 15 }))
-                            : waivable(entry)
-                            ? h("button", {
-                                type: "button",
-                                "aria-label": "Waive this game fee",
-                                title: "Waive this fee — leaves their attendance as it is",
-                                disabled: deleting === entry.id,
-                                onClick: () => setGameFeeWaived(entry, true),
-                                className: "text-[var(--ink-soft)] hover:text-[var(--bad)] disabled:opacity-40 transition p-1 -m-1",
-                              }, h(Icon, { name: "x", size: 15 }))
-                            : restorable(entry)
-                            ? h("button", {
-                                type: "button",
-                                title: "Put this fee back",
-                                disabled: deleting === entry.id,
-                                onClick: () => setGameFeeWaived(entry, false),
-                                className: "text-[10px] font-semibold text-[var(--accent-dark)] hover:underline disabled:opacity-40 transition",
-                              }, "Restore")
-                            : h("span", {
-                                className: "text-[10px] text-[var(--ink-soft)] w-[15px] text-center cursor-help",
-                                title: deletableReason(entry),
-                              }, "—")
-                        )
-                      )))
+                    ? h("div", { className: "rounded-xl bg-[var(--sand)] divide-y divide-black/5" }, selectedEntries.map((entry) => h(EntryRow, { key: entry.id, entry })))
                     : h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No transactions recorded for this player yet.")
                 )
               )
