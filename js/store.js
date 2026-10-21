@@ -153,7 +153,7 @@ window.GUWH = window.GUWH || {};
     findPlayer(id) {
       return GUWH.players.find((p) => p.id === id) || state.adHocPlayers.find((p) => p.id === id) || null;
     },
-    addAdHocPlayer({ firstName, lastName, grade = "B-grade", position = "Midfield", age = "", tag }) {
+    addAdHocPlayer({ firstName, lastName, grade = "B-grade", position = "Centre", age = "", tag }) {
       const rec = {
         id: "adhoc-" + Date.now() + "-" + Math.round(Math.random() * 999),
         firstName, lastName, age, grade, position,

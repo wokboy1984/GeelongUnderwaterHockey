@@ -311,7 +311,7 @@ GUWH.Pages = GUWH.Pages || {};
   // see the Finish your profile prompt, and only if those are missing.
   const FIRST_NIGHT = [
     "Games start at 6pm on Wednesday at the Handbury Centre for Wellbeing, Corio. Get there a bit early on your first night so we can fit your gear.",
-    "Bring swimmers, a towel and a water bottle (and a mouthguard if you have one). We lend you fins, mask, snorkel, glove and stick.",
+    "Bring bathers, a towel and a water bottle (and a mouthguard if you have one). We lend you fins, mask, snorkel, glove and stick.",
     "The coordinator splits everyone into teams. Games are short and you rotate on and off - nobody expects you to know the rules yet.",
     "Your first three sessions are free. After that there's a game fee each night you play - what you owe shows on your Dashboard.",
   ];

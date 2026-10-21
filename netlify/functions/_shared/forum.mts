@@ -65,10 +65,22 @@ export function withinEditWindow(createdAt: string | Date, now: Date = new Date(
 }
 
 // "Alex C." — first name + surname initial, the only identity ever shown in
-// the forum. Never pass a full last name into this.
-export function forumDisplayName(firstName: string, lastName: string): string {
+// the forum. Never pass a full last name into this. A nickname, when set,
+// wins (21 Oct 2026), matching shortName() everywhere else on the site —
+// the Profile page promises members others see their nickname.
+export function forumDisplayName(firstName: string, lastName: string, nickname?: string | null): string {
+  const nick = (nickname || "").trim();
+  if (nick) return nick;
   const initial = (lastName || "").trim().charAt(0).toUpperCase();
   return initial ? `${firstName} ${initial}.` : firstName;
+}
+
+// The caller's own forum name, for notifications ("Cookie replied…").
+// ensureMember() doesn't carry the nickname, so look it up; the caller must
+// have run ensureNicknameColumn() first.
+export async function callerForumName(db: any, caller: { id: string; firstName: string; lastName: string }): Promise<string> {
+  const [row] = await db.sql`select nickname from members where id = ${caller.id}`;
+  return forumDisplayName(caller.firstName, caller.lastName, row?.nickname);
 }
 
 function escapeHtml(s: string): string {

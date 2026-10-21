@@ -9,8 +9,10 @@ Deployed on Netlify, auto-deploys from `main`. Real backend: Netlify DB
 no build step — plain `<script>` tags, see the list inside
 `index.html`). This is the real, current site: home, about, new player,
 news, portal (login/dashboard/booking/bring-a-mate/profile), organiser
-tools, and the live attendance feature (`js/pages/live-attendance.js`,
-backed by `netlify/functions/booking.mts` and Netlify Identity).
+tools, and the live attendance feature (members book in from the
+dashboard, `js/pages/portal-dashboard.js`; the roll call is in
+`js/pages/coordinator.js`; backed by `netlify/functions/booking.mts`,
+`coordinator-attendance.mts` and Netlify Identity).
 
 **There is no second "real" site.** If `index.html` is ever found to be
 a large (~1MB+) single self-contained file instead of the short

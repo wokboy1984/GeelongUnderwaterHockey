@@ -12,7 +12,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
 import { requireForumAccess, requireModerator } from "./_shared/forum-access.mts";
 import { forumDisplayName } from "./_shared/forum.mts";
 import { renderWithMentions, recordMentionsAndNotify } from "./_shared/forum-content.mts";
@@ -26,6 +26,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
   const db = getDatabase();
   const caller = await ensureMember(db, user);
+  await ensureNicknameColumn(db);
 
   const access = await requireForumAccess(db, caller);
   if (!access.ok) return access.response;
@@ -116,7 +117,7 @@ export default async (req: Request, context: Context) => {
     if (access.isModerator) {
       pending = await db.sql`
         select s.id, s.suggested_title, s.explanation, s.opening_content, s.created_at, s.suggested_category_id,
-          m.first_name, m.last_name
+          m.first_name, m.last_name, m.nickname
         from forum_suggestions s join members m on m.id = s.suggested_by
         where s.status = 'pending' order by s.created_at asc
       `;
@@ -134,7 +135,7 @@ export default async (req: Request, context: Context) => {
               openingContent: p.opening_content,
               createdAt: p.created_at,
               suggestedCategoryId: p.suggested_category_id,
-              suggestedBy: forumDisplayName(p.first_name, p.last_name),
+              suggestedBy: forumDisplayName(p.first_name, p.last_name, p.nickname),
             }))
           : undefined,
       }),

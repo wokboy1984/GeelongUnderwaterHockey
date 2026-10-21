@@ -382,7 +382,10 @@ GUWH.Pages = GUWH.Pages || {};
                       p.kind === "swim" && h(Pill, { tone: "dark" }, "Lane swim"),
                       p.kind === "volunteer" && h(Pill, { tone: "dark" }, "Volunteer")
                     ),
-                    h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.parentName ? "Child of " + p.parentName : p.email && p.email.endsWith("@no-login.guwh") ? "Walk-in — no account" : p.email)
+                    // No email under ordinary members (21 Oct 2026, site review
+                    // AT-1): the roll is often open poolside where others can see it.
+                    (p.parentName || (p.email && p.email.endsWith("@no-login.guwh"))) &&
+                      h("p", { className: "text-xs text-[var(--ink-soft)]" }, p.parentName ? "Child of " + p.parentName : "Walk-in — no account")
                   ),
                   h(
                     "div",
