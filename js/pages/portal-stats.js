@@ -31,7 +31,7 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "grid grid-cols-1 sm:grid-cols-3 gap-4 mt-3" },
         h(StatTile, { label: "Games played", value: games }),
-        h(StatTile, { label: "Goals this season", value: season, hint: "Calendar year" }),
+        h(StatTile, { label: "Goals this year", value: season, hint: "Since 1 January" }),
         h(StatTile, { label: "Career goals", value: career })
       )
     );

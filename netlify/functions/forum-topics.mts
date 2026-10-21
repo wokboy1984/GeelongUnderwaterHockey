@@ -21,9 +21,9 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
 import { requireForumAccess, requireModerator } from "./_shared/forum-access.mts";
-import { forumDisplayName, isExpired, validatePollVote } from "./_shared/forum.mts";
+import { callerForumName, forumDisplayName, isExpired, validatePollVote } from "./_shared/forum.mts";
 import { renderWithMentions, recordMentionsAndNotify } from "./_shared/forum-content.mts";
 
 function badRequest(message: string) {
@@ -66,6 +66,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
   const db = getDatabase();
   const caller = await ensureMember(db, user);
+  await ensureNicknameColumn(db);
 
   const access = await requireForumAccess(db, caller);
   if (!access.ok) return access.response;
@@ -119,7 +120,7 @@ export default async (req: Request, context: Context) => {
         const [post] = await db.sql`
           insert into forum_posts (topic_id, author_id, body_html, is_opening_post) values (${topic.id}, ${caller.id}, ${html}, true) returning id
         `;
-        await recordMentionsAndNotify(db, post.id, topic.id, mentionedIds, caller.id, forumDisplayName(caller.firstName, caller.lastName));
+        await recordMentionsAndNotify(db, post.id, topic.id, mentionedIds, caller.id, await callerForumName(db, caller));
 
         if (body.poll && Array.isArray(body.poll.options) && body.poll.options.length >= 2) {
           const [poll] = await db.sql`
@@ -204,7 +205,7 @@ export default async (req: Request, context: Context) => {
     if (topicIdParam) {
       const topicId = Number(topicIdParam);
       const [topic] = await db.sql`
-        select t.*, c.name as category_name, c.slug as category_slug, m.first_name, m.last_name
+        select t.*, c.name as category_name, c.slug as category_slug, m.first_name, m.last_name, m.nickname
         from forum_topics t join forum_categories c on c.id = t.category_id left join members m on m.id = t.author_id
         where t.id = ${topicId}
       `;
@@ -213,7 +214,7 @@ export default async (req: Request, context: Context) => {
       const posts = await db.sql`
         select p.id, p.parent_post_id, p.author_id, p.body_html, p.is_opening_post, p.edited_at, p.edited_by_moderator,
           p.hidden_at, p.removed_at, p.deleted_by_author_at, p.created_at,
-          m.first_name, m.last_name, fp.show_photo, fp.show_grade, mem.grade
+          m.first_name, m.last_name, m.nickname, fp.show_photo, fp.show_grade, mem.grade
         from forum_posts p
         left join members m on m.id = p.author_id
         left join forum_participation fp on fp.member_id = p.author_id
@@ -248,7 +249,7 @@ export default async (req: Request, context: Context) => {
           id: p.id,
           parentPostId: p.parent_post_id,
           authorId: p.author_id,
-          authorDisplay: p.first_name ? forumDisplayName(p.first_name, p.last_name) : "Former member",
+          authorDisplay: p.first_name ? forumDisplayName(p.first_name, p.last_name, p.nickname) : "Former member",
           authorShowPhoto: !!p.show_photo,
           authorGrade: p.show_grade ? p.grade : null,
           bodyHtml: canSeeContent ? p.body_html : p.deleted_by_author_at ? "<p><em>Comment removed by author.</em></p>" : "<p><em>Comment removed by a Moderator.</em></p>",
@@ -274,7 +275,7 @@ export default async (req: Request, context: Context) => {
             title: topic.title,
             categoryId: topic.category_id,
             categoryName: topic.category_name,
-            authorDisplay: topic.first_name ? forumDisplayName(topic.first_name, topic.last_name) : "Former member",
+            authorDisplay: topic.first_name ? forumDisplayName(topic.first_name, topic.last_name, topic.nickname) : "Former member",
             pinned: topic.pinned,
             locked: topic.locked,
             archived: !!topic.archived_at,
@@ -304,7 +305,7 @@ export default async (req: Request, context: Context) => {
     // Feed (main, or one category) — pinned first, then recency order.
     const categoryFilter = categoryIdParam ? Number(categoryIdParam) : null;
     const topics = await db.sql`
-      select t.id, t.title, t.category_id, c.name as category_name, m.first_name, m.last_name,
+      select t.id, t.title, t.category_id, c.name as category_name, m.first_name, m.last_name, m.nickname,
         t.pinned, t.locked, t.archived_at, t.is_announcement, t.important, t.expires_at,
         t.created_at, t.last_activity_at,
         (select count(*)::int from forum_posts p where p.topic_id = t.id and p.is_opening_post = false) as reply_count,
@@ -313,7 +314,9 @@ export default async (req: Request, context: Context) => {
         (select lm.first_name from forum_posts lp join members lm on lm.id = lp.author_id
           where lp.topic_id = t.id order by lp.created_at desc limit 1) as last_poster_first_name,
         (select lm.last_name from forum_posts lp join members lm on lm.id = lp.author_id
-          where lp.topic_id = t.id order by lp.created_at desc limit 1) as last_poster_last_name
+          where lp.topic_id = t.id order by lp.created_at desc limit 1) as last_poster_last_name,
+        (select lm.nickname from forum_posts lp join members lm on lm.id = lp.author_id
+          where lp.topic_id = t.id order by lp.created_at desc limit 1) as last_poster_nickname
       from forum_topics t
       join forum_categories c on c.id = t.category_id
       left join members m on m.id = t.author_id
@@ -330,10 +333,10 @@ export default async (req: Request, context: Context) => {
           title: t.title,
           categoryId: t.category_id,
           categoryName: t.category_name,
-          authorDisplay: t.first_name ? forumDisplayName(t.first_name, t.last_name) : "Former member",
+          authorDisplay: t.first_name ? forumDisplayName(t.first_name, t.last_name, t.nickname) : "Former member",
           // Falls back to the topic's own author when nobody has replied yet.
-          lastActivityBy: t.last_poster_first_name ? forumDisplayName(t.last_poster_first_name, t.last_poster_last_name)
-            : (t.first_name ? forumDisplayName(t.first_name, t.last_name) : "Former member"),
+          lastActivityBy: t.last_poster_first_name ? forumDisplayName(t.last_poster_first_name, t.last_poster_last_name, t.last_poster_nickname)
+            : (t.first_name ? forumDisplayName(t.first_name, t.last_name, t.nickname) : "Former member"),
           pinned: t.pinned,
           locked: t.locked,
           isAnnouncement: t.is_announcement,

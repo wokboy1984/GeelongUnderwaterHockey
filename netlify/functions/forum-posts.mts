@@ -19,9 +19,9 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, logAudit, unauthorized } from "./_shared/roles.mts";
 import { requireForumAccess, requireModerator } from "./_shared/forum-access.mts";
-import { withinEditWindow, isReaction, isReportReason, forumDisplayName } from "./_shared/forum.mts";
+import { withinEditWindow, isReaction, isReportReason, callerForumName } from "./_shared/forum.mts";
 import { renderWithMentions, recordMentionsAndNotify, notifyTopicActivity } from "./_shared/forum-content.mts";
 
 function badRequest(message: string) {
@@ -33,7 +33,8 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
   const db = getDatabase();
   const caller = await ensureMember(db, user);
-  const callerDisplay = forumDisplayName(caller.firstName, caller.lastName);
+  await ensureNicknameColumn(db);
+  const callerDisplay = await callerForumName(db, caller);
 
   try {
     const body = await req.json().catch(() => ({}));

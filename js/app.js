@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 (function () {
   const { Container, Button, Icon, Pill } = GUWH.UI;
-  const { navigate, useRoute } = GUWH.Router;
+  const { navigate, linkProps, useRoute } = GUWH.Router;
 
   // "Members" is deliberately not in this list - it's the highlighted CTA
   // button in the nav bar instead (see NavBar), and "Try It Free" is a plain
@@ -124,18 +124,17 @@
       navigate("/");
     }
 
-    function navButton(item, { onClick, active, small }) {
+    function navButton(item, { active, small }) {
       return h(
-        "button",
-        {
+        "a",
+        Object.assign(linkProps(item.path), {
           key: item.label,
-          onClick,
           className: cx(
             "rounded-full font-semibold transition",
             small ? "px-3 py-1.5 text-xs" : "px-3 py-2 text-sm",
             active ? "bg-white/15 text-white" : "text-white/70 hover:text-white"
           ),
-        },
+        }),
         item.label
       );
     }
@@ -147,15 +146,15 @@
         Container,
         { className: "flex items-center justify-between h-16" },
         h(
-          "button",
-          { onClick: () => navigate(homeHref), className: "flex items-center gap-2.5 text-white" },
+          "a",
+          Object.assign(linkProps(homeHref), { className: "flex items-center gap-2.5 text-white" }),
           h("span", { className: "h-9 w-9 rounded-full bg-[var(--accent)] flex items-center justify-center shrink-0" }, h(Icon, { name: "droplet", size: 17, className: "text-white" })),
           h("span", { className: "font-display font-extrabold text-sm sm:text-base tracking-tight whitespace-nowrap" }, "Geelong Underwater Hockey")
         ),
         h(
           "nav",
           { className: "hidden lg:flex items-center gap-1" },
-          publicNav.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path }))
+          publicNav.map((item) => navButton(item, { active: path === item.path }))
         ),
         h(
           "div",
@@ -176,7 +175,7 @@
           h(
             Container,
             { className: "flex items-center gap-1 h-11" },
-            portalItems.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path, small: true }))
+            portalItems.map((item) => navButton(item, { active: path === item.path, small: true }))
           )
         ),
       loggedIn && adminItems.length > 0 &&
@@ -187,7 +186,7 @@
             Container,
             { className: "flex items-center gap-3 h-11" },
             h("span", { className: "font-mono text-[10px] uppercase tracking-wide text-white/40 shrink-0" }, "Admin functions"),
-            adminItems.map((item) => navButton(item, { onClick: () => navigate(item.path), active: path === item.path || (item.path === "/admin/roles" && path === "/admin/member"), small: true }))
+            adminItems.map((item) => navButton(item, { active: path === item.path || (item.path === "/admin/roles" && path === "/admin/member"), small: true }))
           )
         ),
       open &&
@@ -203,8 +202,8 @@
             loggedIn &&
               portalItems.map((item) =>
                 h(
-                  "button",
-                  { key: "m" + item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                  "a",
+                  Object.assign(linkProps(item.path, () => setOpen(false)), { key: "m" + item.path, className: cx("block text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") }),
                   item.label
                 )
               ),
@@ -212,8 +211,8 @@
               h("div", { className: "h-px bg-white/10 my-2" }),
             publicNav.map((item, i) =>
               h(
-                "button",
-                { key: "p" + i, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                "a",
+                Object.assign(linkProps(item.path, () => setOpen(false)), { key: "p" + i, className: cx("block text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") }),
                 item.label
               )
             ),
@@ -224,8 +223,8 @@
             loggedIn &&
               adminItems.map((item) =>
                 h(
-                  "button",
-                  { key: item.path, onClick: () => { navigate(item.path); setOpen(false); }, className: cx("text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") },
+                  "a",
+                  Object.assign(linkProps(item.path, () => setOpen(false)), { key: item.path, className: cx("block text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") }),
                   item.label
                 )
               ),
@@ -235,6 +234,36 @@
           )
         )
     );
+  }
+
+  // Browser tab title per page (21 Oct 2026, site review SW-6), so tabs,
+  // bookmarks and history entries say which page they are. Unlisted paths
+  // (and the homepage) keep the plain club name.
+  const SITE_NAME = "Geelong Underwater Hockey";
+  const PAGE_TITLES = {
+    "/about": "About",
+    "/news": "News",
+    "/beginners-guide": "Beginners Guide",
+    "/new-player": "Try It Free",
+    "/portal": "Members",
+    "/portal/waiver": "Waiver",
+    "/portal/dashboard": "Dashboard",
+    "/portal/board": "This Week's Game",
+    "/portal/stats": "Player Stats",
+    "/portal/forum": "Forum",
+    "/portal/bring-a-mate": "Bring a Mate",
+    "/portal/profile": "My Profile",
+    "/attendance": "Attendance",
+    "/attendance/history": "Attendance",
+    "/coordinator": "Game Coordination",
+    "/community": "Community & Content",
+    "/finance": "Finance",
+    "/admin/roles": "Administration",
+    "/admin/member": "Administration",
+  };
+  function pageTitle(path) {
+    const page = PAGE_TITLES[path] || (path.startsWith("/portal/forum/") ? "Forum" : path.startsWith("/coordinator") ? "Game Coordination" : null);
+    return page ? page + " | " + SITE_NAME : SITE_NAME;
   }
 
   function Footer() {
@@ -280,7 +309,7 @@
           null,
           h("p", { className: "font-mono text-xs uppercase tracking-wide text-white/50 mb-2" }, "Get involved"),
           h("a", { href: GUWH.club.facebook, target: "_blank", rel: "noopener", className: "block text-sm hover:text-white" }, "Facebook"),
-          h("button", { onClick: () => navigate("/new-player"), className: "block text-sm hover:text-white mt-1 text-left" }, "Try three sessions free")
+          h("a", Object.assign(linkProps("/new-player"), { className: "block text-sm hover:text-white mt-1" }), "Try three sessions free")
         )
       ),
       // Was "Concept redesign — not the live club site." — leftover copy
@@ -535,6 +564,7 @@
       // animates (and can be interrupted by) this jump.
       window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     }, [path]);
+    React.useEffect(() => { document.title = pageTitle(path); }, [path]);
 
     return h(
       "div",
