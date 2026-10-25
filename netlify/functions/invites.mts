@@ -51,7 +51,9 @@ export default async (req: Request, context: Context) => {
 
   try {
     const db = getDatabase();
-    const memberId: string = user.sub;
+    // Reassigned below from ensureMember(), which resolves a login that
+    // belongs to a row created before the person first signed in.
+    let memberId: string = user.sub;
     const email: string = user.email;
     const fullName: string | undefined = user.user_metadata?.full_name;
 
