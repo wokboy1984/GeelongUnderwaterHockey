@@ -24,9 +24,11 @@ GUWH.Pages = GUWH.Pages || {};
   ];
 
   const POSITIONS = [
-    { name: "Forward", body: "Leads the attack, first to the puck, looks for the shot on goal." },
-    { name: "Midfield", body: "Links attack and defence, covers the most ground across a shift." },
-    { name: "Back", body: "Last line before the goal, reads the game and clears the puck out." },
+    { name: "Forward", body: "Plays up front and leads the attack, looking for the shot on goal." },
+    { name: "Centre", body: "Plays through the middle, first to the puck and the link between attack and defence." },
+    { name: "Wing", body: "Attacks down the left or right side, ready to take a pass and carry the puck forward." },
+    { name: "Back", body: "Defends on the left or right, wins the puck back and moves it up to the forwards." },
+    { name: "Full Back", body: "Last line before the goal, reads the game and clears the puck out." },
   ];
 
   // Moved off the homepage (12 Sept 2026) to keep the home page focused on
@@ -36,7 +38,7 @@ GUWH.Pages = GUWH.Pages || {};
     "Wednesday nights — the whole club, every grade",
     "Club fixtures — Pool A and B, most terms",
     "Victorian titles — state selection each year",
-    "Nationals & Australian selection — where it's gone before",
+    "Nationals & Australian selection — where Geelong players have gone before",
   ];
 
   function HowItWorksSection() {

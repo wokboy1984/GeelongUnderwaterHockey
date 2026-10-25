@@ -7,7 +7,7 @@ GUWH.Pages = GUWH.Pages || {};
 (function () {
   const { Container, Button, Pill, Icon, SectionHeading, FormField, inputCls } = GUWH.UI;
 
-  const MESSAGE = "I'm playing underwater hockey in Geelong this Wednesday. Your first three sessions are free and they'll supply the gear. Come give it a crack.";
+  const MESSAGE = "I'm playing underwater hockey in Geelong this Wednesday. Your first three sessions are free and we'll supply the gear. Come give it a crack.";
 
   // One-tap share row (2 Oct 2026): WhatsApp, Messenger, phone message
   // (SMS/iMessage), plus the phone's own share sheet as "More". Each is a
@@ -146,7 +146,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
-      h(SectionHeading, { eyebrow: "Bring a mate", title: "Grow the game, one Wednesday at a time.", sub: "Their first three sessions are free too — same as yours were." }),
+      h(SectionHeading, { eyebrow: "Bring a mate", title: "Grow the game, one Wednesday at a time.", sub: "Their first three sessions are free too." }),
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
 
@@ -266,7 +266,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { className: "flex flex-col gap-4" },
-      h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Their first three sessions are free too — same as yours were. Invite someone for " + GUWH.formatDate(wed) + "."),
+      h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Their first three sessions are free too. Invite someone for " + GUWH.formatDate(wed) + "."),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
       h(
         "form",
@@ -313,7 +313,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-3xl" },
-      h(SectionHeading, { eyebrow: "Bring a mate", title: "Grow the game, one Wednesday at a time.", sub: "Their first three sessions are free too — same as yours were." }),
+      h(SectionHeading, { eyebrow: "Bring a mate", title: "Grow the game, one Wednesday at a time.", sub: "Their first three sessions are free too." }),
 
       h(
         "div",

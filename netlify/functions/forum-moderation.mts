@@ -20,7 +20,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, getVerifiedUser, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 import { requireModerator } from "./_shared/forum-access.mts";
 import { forumDisplayName } from "./_shared/forum.mts";
 
@@ -33,6 +33,7 @@ export default async (req: Request, context: Context) => {
   if (!user) return unauthorized();
   const db = getDatabase();
   const caller = await ensureMember(db, user);
+  await ensureNicknameColumn(db);
   const modErr = requireModerator(caller);
   if (modErr) return modErr;
 
@@ -123,20 +124,20 @@ export default async (req: Request, context: Context) => {
 
     const [suggestionCount] = await db.sql`select count(*)::int as count from forum_suggestions where status = 'pending'`;
     const openReports = await db.sql`
-      select r.*, m.first_name, m.last_name from forum_reports r join members m on m.id = r.reporter_id
+      select r.*, m.first_name, m.last_name, m.nickname from forum_reports r join members m on m.id = r.reporter_id
       where r.status in ('open', 'in_review') order by r.created_at asc limit 30
     `;
     const mediaAwaitingApproval = await db.sql`
-      select a.id, a.kind, a.file_name, a.content_type, a.post_id, a.created_at, m.first_name, m.last_name
+      select a.id, a.kind, a.file_name, a.content_type, a.post_id, a.created_at, m.first_name, m.last_name, m.nickname
       from forum_attachments a left join members m on m.id = a.created_by
       where a.approved_at is null and a.kind in ('image', 'video', 'document') order by a.created_at asc limit 30
     `;
     const restrictedMembers = await db.sql`
-      select fp.member_id, fp.restricted_reason, fp.restricted_at, m.first_name, m.last_name
+      select fp.member_id, fp.restricted_reason, fp.restricted_at, m.first_name, m.last_name, m.nickname
       from forum_participation fp join members m on m.id = fp.member_id where fp.restricted_at is not null
     `;
     const suspendedMembers = await db.sql`
-      select fp.member_id, fp.suspended_reason, fp.suspended_at, fp.suspended_until, m.first_name, m.last_name
+      select fp.member_id, fp.suspended_reason, fp.suspended_at, fp.suspended_until, m.first_name, m.last_name, m.nickname
       from forum_participation fp join members m on m.id = fp.member_id
       where fp.suspended_at is not null and (fp.suspended_until is null or fp.suspended_until > now())
     `;
@@ -145,10 +146,20 @@ export default async (req: Request, context: Context) => {
       from forum_topics t join forum_categories c on c.id = t.category_id
       where t.archived_at is null order by t.last_activity_at desc limit 10
     `;
-    const recentActivity = await db.sql`
-      select action, actor_email, resource_type, resource_id, note, created_at from audit_log
-      where action like 'forum_%' order by created_at desc limit 25
+    // Notes are written as "<actor email> did X" — the audit log keeps the
+    // email, but this page shows the actor's forum name instead (21 Oct 2026,
+    // site review CC-1), and never sends the email to the browser.
+    const activityRows = await db.sql`
+      select a.action, a.actor_email, a.resource_type, a.resource_id, a.note, a.created_at,
+        m.first_name, m.last_name, m.nickname
+      from audit_log a left join members m on m.id = a.actor_id
+      where a.action like 'forum_%' order by a.created_at desc limit 25
     `;
+    const recentActivity = activityRows.map((a: any) => {
+      const who = a.first_name ? forumDisplayName(a.first_name, a.last_name, a.nickname) : "A member";
+      const note = a.note && a.actor_email ? a.note.split(a.actor_email).join(who) : a.note;
+      return { action: a.action, resource_type: a.resource_type, resource_id: a.resource_id, note, created_at: a.created_at };
+    });
 
     return new Response(
       JSON.stringify({
@@ -157,14 +168,14 @@ export default async (req: Request, context: Context) => {
         openReports: openReports.map((r: any) => ({
           id: r.id, targetType: r.target_type, targetId: r.target_id, reason: r.reason, explanation: r.explanation,
           status: r.status, assignedModeratorId: r.assigned_moderator_id, createdAt: r.created_at,
-          reporterDisplay: forumDisplayName(r.first_name, r.last_name),
+          reporterDisplay: forumDisplayName(r.first_name, r.last_name, r.nickname),
         })),
         mediaAwaitingApproval: mediaAwaitingApproval.map((a: any) => ({
           id: a.id, kind: a.kind, fileName: a.file_name, contentType: a.content_type, postId: a.post_id, createdAt: a.created_at,
-          uploadedBy: a.first_name ? forumDisplayName(a.first_name, a.last_name) : "Unknown",
+          uploadedBy: a.first_name ? forumDisplayName(a.first_name, a.last_name, a.nickname) : "Unknown",
         })),
-        restrictedMembers: restrictedMembers.map((m: any) => ({ memberId: m.member_id, display: forumDisplayName(m.first_name, m.last_name), reason: m.restricted_reason, since: m.restricted_at })),
-        suspendedMembers: suspendedMembers.map((m: any) => ({ memberId: m.member_id, display: forumDisplayName(m.first_name, m.last_name), reason: m.suspended_reason, since: m.suspended_at, until: m.suspended_until })),
+        restrictedMembers: restrictedMembers.map((m: any) => ({ memberId: m.member_id, display: forumDisplayName(m.first_name, m.last_name, m.nickname), reason: m.restricted_reason, since: m.restricted_at })),
+        suspendedMembers: suspendedMembers.map((m: any) => ({ memberId: m.member_id, display: forumDisplayName(m.first_name, m.last_name, m.nickname), reason: m.suspended_reason, since: m.suspended_at, until: m.suspended_until })),
         recentDiscussions,
         recentActivity,
       }),

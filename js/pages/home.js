@@ -15,7 +15,7 @@ GUWH.Pages = GUWH.Pages || {};
   ];
 
   const FIRST_NIGHT_STEPS = [
-    { title: "Meet us at the pool", body: "Arrive from 5:50pm at the Handbury Centre. One of our members will meet you and show you where to go." },
+    { title: "Meet us at the pool", body: "Arrive by 5:50pm at the Handbury Centre. One of our members will meet you and show you where to go." },
     { title: "Borrow your equipment", body: "We'll fit you with fins, a mask, snorkel, glove and stick. Just bring bathers and a towel." },
     { title: "Learn the basics", body: "An experienced player will explain the equipment, safety rules and how to move the puck." },
     { title: "Get in and have a go", body: "Warm up with an experienced player before joining the Wednesday session at your own pace." },
@@ -307,7 +307,7 @@ GUWH.Pages = GUWH.Pages || {};
               "Plenty of players stick around after the session for a chat — it's as much a social, welcoming club as it is a competitive one."
             )
           ),
-          h(Button, { variant: "dark", onClick: () => navigate("/portal") }, "See the full board", h(Icon, { name: "chevronRight", size: 16 }))
+          h(Button, { variant: "dark", onClick: () => navigate("/portal") }, "Go to the members area", h(Icon, { name: "chevronRight", size: 16 }))
         )
       ),
 

@@ -46,7 +46,7 @@ GUWH.Pages = GUWH.Pages || {};
     const state = GUWH.Store.getState();
     const roster = GUWH.Store.allPlayers();
     const [showAdd, setShowAdd] = React.useState(false);
-    const [addForm, setAddForm] = React.useState({ firstName: "", lastName: "", grade: "B-grade", position: "Midfield" });
+    const [addForm, setAddForm] = React.useState({ firstName: "", lastName: "", grade: "B-grade", position: "Centre" });
 
     const confirmedCount = GUWH.Store.confirmedPlayerIds().length;
     const pendingGuests = state.guestBookings;
@@ -56,7 +56,7 @@ GUWH.Pages = GUWH.Pages || {};
       ev.preventDefault();
       if (!addForm.firstName.trim()) return;
       GUWH.Store.addAdHocPlayer(Object.assign({}, addForm, { tag: "new-player" }));
-      setAddForm({ firstName: "", lastName: "", grade: "B-grade", position: "Midfield" });
+      setAddForm({ firstName: "", lastName: "", grade: "B-grade", position: "Centre" });
       setShowAdd(false);
     }
 

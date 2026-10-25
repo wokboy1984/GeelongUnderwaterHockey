@@ -9,7 +9,7 @@ GUWH.Pages = GUWH.Pages || {};
   const { navigate } = GUWH.Router;
 
   const WHAT_WE_PROVIDE = ["Fins (adult & junior sizes)", "Mask & snorkel", "Glove for your stick hand", "A stick and a puck", "Someone to show you the ropes"];
-  const WHAT_TO_BRING = ["Swimmers", "A towel", "Water bottle", "A mouthguard if you have one (not essential)"];
+  const WHAT_TO_BRING = ["Bathers", "A towel", "Water bottle", "A mouthguard if you have one (not essential)"];
 
   const HEARD_OPTIONS = ["Word of mouth / a friend", "Facebook", "Google search", "Geelong community directory", "Saw us at the pool", "Other"];
 

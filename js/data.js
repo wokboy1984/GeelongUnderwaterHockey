@@ -37,12 +37,14 @@ GUWH.club = {
     { year: 1978, text: "Formed by a handful of Geelong scuba clubs looking for an off-season, foul-weather activity." },
     { year: 1997, text: "Geelong juniors combined with Wonthaggi to form a joint squad that won the National titles in Canberra." },
     { year: 2023, text: "Geelong's U15 squad took home bronze at the Victorian titles." },
-    { year: 2026, text: "Still meeting every Wednesday, rain, hail or lockdown-shine, at the Handbury Centre." },
+    { year: 2026, text: "Still meeting every Wednesday, rain, hail or shine, at the Handbury Centre." },
   ],
 };
 
-// Positions kept deliberately simple for the concept (real club formations vary).
-GUWH.POSITIONS = ["Forward", "Midfield", "Back"];
+// The club's positions — the same list the server accepts
+// (POSITIONS in netlify/functions/_shared/roles.mts) and the About page
+// describes. One list everywhere since 21 Oct 2026 (site review AB-1/PR-4).
+GUWH.POSITIONS = ["Forward", "Centre", "Wing", "Back", "Full Back"];
 GUWH.GRADES = ["A-grade", "B-grade", "Junior"];
 GUWH.CAP_COLOURS = ["White", "Black"];
 GUWH.POOLS = ["Pool A", "Pool B"];
@@ -51,40 +53,40 @@ GUWH.POOLS = ["Pool A", "Pool B"];
 GUWH.players = [
   { id: "p01", firstName: "Alex", lastName: "Chen", age: 34, grade: "A-grade", position: "Forward", handed: "Right", finSize: "9", lastWeekTeam: "Pool A / Black", gamesThisYear: 28, isNew: false },
   { id: "p02", firstName: "Priya", lastName: "Nair", age: 29, grade: "A-grade", position: "Back", handed: "Left", finSize: "7", lastWeekTeam: "Pool A / White", gamesThisYear: 31, isNew: false },
-  { id: "p03", firstName: "Marcus", lastName: "Webb", age: 41, grade: "B-grade", position: "Midfield", handed: "Right", finSize: "10", lastWeekTeam: "Pool B / Black", gamesThisYear: 19, isNew: false },
+  { id: "p03", firstName: "Marcus", lastName: "Webb", age: 41, grade: "B-grade", position: "Centre", handed: "Right", finSize: "10", lastWeekTeam: "Pool B / Black", gamesThisYear: 19, isNew: false },
   { id: "p04", firstName: "Sione", lastName: "Taufa", age: 22, grade: "A-grade", position: "Forward", handed: "Right", finSize: "11", lastWeekTeam: "Pool A / Black", gamesThisYear: 24, isNew: false },
-  { id: "p05", firstName: "Isla", lastName: "Ferguson", age: 17, grade: "Junior", position: "Midfield", handed: "Right", finSize: "6", lastWeekTeam: "Pool B / White", gamesThisYear: 12, isNew: false },
+  { id: "p05", firstName: "Isla", lastName: "Ferguson", age: 17, grade: "Junior", position: "Centre", handed: "Right", finSize: "6", lastWeekTeam: "Pool B / White", gamesThisYear: 12, isNew: false },
   { id: "p06", firstName: "Declan", lastName: "O'Meara", age: 38, grade: "B-grade", position: "Back", handed: "Left", finSize: "9", lastWeekTeam: "Pool A / White", gamesThisYear: 22, isNew: false },
-  { id: "p07", firstName: "Grace", lastName: "Lindqvist", age: 26, grade: "A-grade", position: "Midfield", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / Black", gamesThisYear: 30, isNew: false },
+  { id: "p07", firstName: "Grace", lastName: "Lindqvist", age: 26, grade: "A-grade", position: "Centre", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / Black", gamesThisYear: 30, isNew: false },
   { id: "p08", firstName: "Tane", lastName: "Ropata", age: 31, grade: "B-grade", position: "Forward", handed: "Right", finSize: "10", lastWeekTeam: "Pool A / Black", gamesThisYear: 18, isNew: false },
   { id: "p09", firstName: "Chloe", lastName: "Dimitriou", age: 24, grade: "A-grade", position: "Back", handed: "Left", finSize: "8", lastWeekTeam: "Pool B / White", gamesThisYear: 27, isNew: false },
   { id: "p10", firstName: "Rhys", lastName: "Pham", age: 19, grade: "Junior", position: "Forward", handed: "Right", finSize: "8", lastWeekTeam: "Pool B / Black", gamesThisYear: 9, isNew: false },
   { id: "p11", firstName: "Bea", lastName: "Kowalski", age: 45, grade: "B-grade", position: "Back", handed: "Right", finSize: "7", lastWeekTeam: "Pool A / White", gamesThisYear: 20, isNew: false },
   { id: "p12", firstName: "Oscar", lastName: "Reyes", age: 33, grade: "A-grade", position: "Forward", handed: "Left", finSize: "10", lastWeekTeam: "Pool A / Black", gamesThisYear: 29, isNew: false },
-  { id: "p13", firstName: "Nell", lastName: "Sutherland", age: 27, grade: "B-grade", position: "Midfield", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / White", gamesThisYear: 15, isNew: false },
+  { id: "p13", firstName: "Nell", lastName: "Sutherland", age: 27, grade: "B-grade", position: "Centre", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / White", gamesThisYear: 15, isNew: false },
   { id: "p14", firstName: "Kai", lastName: "Matagi", age: 20, grade: "A-grade", position: "Back", handed: "Right", finSize: "9", lastWeekTeam: "Pool B / Black", gamesThisYear: 23, isNew: false },
   { id: "p15", firstName: "Freya", lastName: "Adamski", age: 36, grade: "B-grade", position: "Forward", handed: "Left", finSize: "8", lastWeekTeam: "Pool A / White", gamesThisYear: 17, isNew: false },
-  { id: "p16", firstName: "Wei", lastName: "Zhou", age: 30, grade: "A-grade", position: "Midfield", handed: "Right", finSize: "9", lastWeekTeam: "Pool A / Black", gamesThisYear: 26, isNew: false },
+  { id: "p16", firstName: "Wei", lastName: "Zhou", age: 30, grade: "A-grade", position: "Centre", handed: "Right", finSize: "9", lastWeekTeam: "Pool A / Black", gamesThisYear: 26, isNew: false },
   { id: "p17", firstName: "Amara", lastName: "Okafor", age: 25, grade: "B-grade", position: "Back", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / White", gamesThisYear: 14, isNew: false },
   { id: "p18", firstName: "Lachie", lastName: "Fenton", age: 16, grade: "Junior", position: "Back", handed: "Right", finSize: "6", lastWeekTeam: "Pool B / Black", gamesThisYear: 11, isNew: false },
   { id: "p19", firstName: "Sasha", lastName: "Volkov", age: 39, grade: "A-grade", position: "Forward", handed: "Left", finSize: "10", lastWeekTeam: "Pool A / White", gamesThisYear: 25, isNew: false },
-  { id: "p20", firstName: "Tui", lastName: "Falcao", age: 28, grade: "B-grade", position: "Midfield", handed: "Right", finSize: "8", lastWeekTeam: "Pool A / Black", gamesThisYear: 16, isNew: false },
+  { id: "p20", firstName: "Tui", lastName: "Falcao", age: 28, grade: "B-grade", position: "Centre", handed: "Right", finSize: "8", lastWeekTeam: "Pool A / Black", gamesThisYear: 16, isNew: false },
   { id: "p21", firstName: "Ivy", lastName: "Marchetti", age: 32, grade: "A-grade", position: "Back", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / White", gamesThisYear: 28, isNew: false },
   { id: "p22", firstName: "Noah", lastName: "Bianchi", age: 23, grade: "B-grade", position: "Forward", handed: "Right", finSize: "9", lastWeekTeam: "Pool B / Black", gamesThisYear: 13, isNew: false },
-  { id: "p23", firstName: "Mele", lastName: "Fifita", age: 35, grade: "A-grade", position: "Midfield", handed: "Left", finSize: "8", lastWeekTeam: "Pool A / White", gamesThisYear: 27, isNew: false },
+  { id: "p23", firstName: "Mele", lastName: "Fifita", age: 35, grade: "A-grade", position: "Centre", handed: "Left", finSize: "8", lastWeekTeam: "Pool A / White", gamesThisYear: 27, isNew: false },
   { id: "p24", firstName: "Harvey", lastName: "Stott", age: 44, grade: "B-grade", position: "Back", handed: "Right", finSize: "10", lastWeekTeam: "Pool A / Black", gamesThisYear: 21, isNew: false },
   { id: "p25", firstName: "Della", lastName: "Ahmadi", age: 21, grade: "A-grade", position: "Forward", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / White", gamesThisYear: 22, isNew: false },
   { id: "p26", firstName: "Toby", lastName: "Wren", age: 18, grade: "Junior", position: "Forward", handed: "Left", finSize: "7", lastWeekTeam: "Pool B / Black", gamesThisYear: 10, isNew: false },
-  { id: "p27", firstName: "Saoirse", lastName: "Byrne", age: 29, grade: "B-grade", position: "Midfield", handed: "Right", finSize: "8", lastWeekTeam: "Pool A / White", gamesThisYear: 18, isNew: false },
+  { id: "p27", firstName: "Saoirse", lastName: "Byrne", age: 29, grade: "B-grade", position: "Centre", handed: "Right", finSize: "8", lastWeekTeam: "Pool A / White", gamesThisYear: 18, isNew: false },
   { id: "p28", firstName: "Femi", lastName: "Adeyemi", age: 26, grade: "A-grade", position: "Back", handed: "Right", finSize: "9", lastWeekTeam: "Pool A / Black", gamesThisYear: 24, isNew: false },
   { id: "p29", firstName: "Lior", lastName: "Katz", age: 37, grade: "B-grade", position: "Forward", handed: "Left", finSize: "9", lastWeekTeam: "Pool B / White", gamesThisYear: 19, isNew: false },
-  { id: "p30", firstName: "Ruby", lastName: "Considine", age: 24, grade: "A-grade", position: "Midfield", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / Black", gamesThisYear: 26, isNew: false },
+  { id: "p30", firstName: "Ruby", lastName: "Considine", age: 24, grade: "A-grade", position: "Centre", handed: "Right", finSize: "7", lastWeekTeam: "Pool B / Black", gamesThisYear: 26, isNew: false },
   { id: "p31", firstName: "Stu", lastName: "McCallum", age: 52, grade: "B-grade", position: "Back", handed: "Right", finSize: "10", lastWeekTeam: "Pool A / White", gamesThisYear: 30, isNew: false, isOrganiser: true },
   { id: "p32", firstName: "Tama", lastName: "Ngata", age: 27, grade: "A-grade", position: "Forward", handed: "Right", finSize: "9", lastWeekTeam: "Pool A / Black", gamesThisYear: 23, isNew: false },
-  { id: "p33", firstName: "Winnie", lastName: "Hartono", age: 19, grade: "Junior", position: "Midfield", handed: "Left", finSize: "6", lastWeekTeam: "Pool B / White", gamesThisYear: 8, isNew: false },
+  { id: "p33", firstName: "Winnie", lastName: "Hartono", age: 19, grade: "Junior", position: "Centre", handed: "Left", finSize: "6", lastWeekTeam: "Pool B / White", gamesThisYear: 8, isNew: false },
   { id: "p34", firstName: "Cormac", lastName: "Lehane", age: 31, grade: "B-grade", position: "Back", handed: "Right", finSize: "9", lastWeekTeam: "Pool B / Black", gamesThisYear: 15, isNew: false },
   { id: "p35", firstName: "Anika", lastName: "Berg", age: 33, grade: "A-grade", position: "Forward", handed: "Right", finSize: "7", lastWeekTeam: null, gamesThisYear: 2, isNew: true },
-  { id: "p36", firstName: "Jono", lastName: "Petropoulos", age: 28, grade: "B-grade", position: "Midfield", handed: "Right", finSize: "10", lastWeekTeam: null, gamesThisYear: 1, isNew: true, viaBringAMate: true, invitedBy: "Alex Chen" },
+  { id: "p36", firstName: "Jono", lastName: "Petropoulos", age: 28, grade: "B-grade", position: "Centre", handed: "Right", finSize: "10", lastWeekTeam: null, gamesThisYear: 1, isNew: true, viaBringAMate: true, invitedBy: "Alex Chen" },
 ];
 
 GUWH.referees = ["Priya Nair", "Stu McCallum", "Bea Kowalski"];

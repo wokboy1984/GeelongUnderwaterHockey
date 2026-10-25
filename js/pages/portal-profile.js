@@ -10,7 +10,7 @@ GUWH.Pages = GUWH.Pages || {};
 
   const EMOJI_CHOICES = ["🏊", "🤿", "🐬", "🦈", "🐢", "🐙", "🌊", "🥽"];
 
-  const REAL_POSITIONS = ["Forward", "Back", "Wing", "Full Back", "Centre", "Unknown"];
+  const REAL_POSITIONS = GUWH.POSITIONS.concat("Unknown");
   const REAL_GRADES = ["A", "B", "Casual", "Junior"];
 
   // MemberPhoto now lives in js/ui.js (GUWH.UI.MemberPhoto) so the

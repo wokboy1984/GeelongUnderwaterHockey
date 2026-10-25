@@ -24,6 +24,21 @@ window.GUWH = window.GUWH || {};
     window.scrollTo({ top: 0, behavior: "instant" }); // "instant" beats the smooth-scroll CSS (2 Oct 2026)
   }
 
+  // Props for a real <a> that routes in-app (21 Oct 2026, site review
+  // SW-3): a plain click navigates as before, but ctrl/cmd/shift/middle
+  // click, "Copy link" and bookmarking all work because there's an href.
+  function linkProps(path, after) {
+    return {
+      href: "#" + path,
+      onClick: (e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        navigate(path);
+        if (after) after();
+      },
+    };
+  }
+
   function useRoute() {
     const [path, setPath] = React.useState(currentPath());
     React.useEffect(() => {
@@ -34,5 +49,5 @@ window.GUWH = window.GUWH || {};
     return path;
   }
 
-  GUWH.Router = { navigate, useRoute, currentPath, queryParam };
+  GUWH.Router = { navigate, linkProps, useRoute, currentPath, queryParam };
 })();

@@ -4,7 +4,7 @@
 // approved suggestion), so all three follow exactly the same mention-safety
 // rule: only real, adult, opted-in members can ever be mentioned.
 
-import { renderForumMarkup, extractMentionTokens } from "./forum.mts";
+import { renderForumMarkup, extractMentionTokens, forumDisplayName } from "./forum.mts";
 
 export async function renderWithMentions(db: any, raw: string): Promise<{ html: string; mentionedIds: string[] }> {
   const tokens = extractMentionTokens(raw);
@@ -14,13 +14,13 @@ export async function renderWithMentions(db: any, raw: string): Promise<{ html: 
     if (!m) continue;
     const [, first, initial] = m;
     const rows = await db.sql`
-      select m.id, m.first_name, m.last_name from members m
+      select m.id, m.first_name, m.last_name, m.nickname from members m
       join forum_participation fp on fp.member_id = m.id and fp.opted_in = true
       where m.date_of_birth is not null and date_part('year', age(m.date_of_birth)) >= 18
         and lower(m.first_name) = lower(${first}) and lower(left(m.last_name, 1)) = lower(${initial})
       limit 1
     `;
-    if (rows[0]) map.set(token.toLowerCase(), { memberId: rows[0].id, display: `${rows[0].first_name} ${String(rows[0].last_name || "").charAt(0).toUpperCase()}.` });
+    if (rows[0]) map.set(token.toLowerCase(), { memberId: rows[0].id, display: forumDisplayName(rows[0].first_name, rows[0].last_name, rows[0].nickname) });
   }
   const html = renderForumMarkup(raw, map);
   return { html, mentionedIds: [...new Set([...map.values()].map((v) => v.memberId))] };

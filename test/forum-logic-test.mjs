@@ -56,6 +56,8 @@ assert(withinEditWindow("not a date", now) === false, "garbage createdAt is trea
 // --- Display identity ----------------------------------------------------
 assert(forumDisplayName("Alex", "Cheong") === "Alex C.", "first name + surname initial");
 assert(forumDisplayName("Sam", "") === "Sam", "no surname on file falls back to first name only");
+assert(forumDisplayName("Liam", "Cooke", "Cookie") === "Cookie", "a nickname replaces first name + initial");
+assert(forumDisplayName("Liam", "Cooke", "  ") === "Liam C.", "a blank nickname is ignored");
 
 // --- Markup rendering / injection safety ----------------------------------
 assert(
