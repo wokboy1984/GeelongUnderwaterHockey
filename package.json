@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "description": "Geelong Underwater Hockey club site — live build (Netlify + Netlify DB + Netlify Identity).",
   "scripts": {
-    "test": "node --test test/attendance-test.mjs test/finance-test.mjs test/forum-logic-test.mjs test/timetable-logic-test.mjs && node test/logic-test.js"
+    "test": "node --test test/attendance-test.mjs test/finance-test.mjs test/forum-logic-test.mjs test/timetable-logic-test.mjs && node test/logic-test.js",
+    "build-check": "esbuild netlify/functions/*.mts netlify/functions/_shared/*.mts --bundle --platform=node --format=esm --outdir=.buildcheck --external:@netlify/*"
   },
   "dependencies": {
     "@netlify/blobs": "latest",
     "@netlify/database": "latest",
     "@netlify/functions": "latest"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
   }
 }

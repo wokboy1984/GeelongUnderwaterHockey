@@ -1,14 +1,26 @@
-# Runs the unit tests on every push and pull request (20 Oct 2026).
+# Runs on every push and pull request (20 Oct 2026).
 #
-# These suites existed for weeks but nothing ran them, so a break in the
-# timetable, finance, forum or Melbourne-timezone logic would only have
-# shown up on the live site. They need no database and no server — they
-# exercise the pure functions in netlify/functions/_shared directly.
+# Two gates, and they catch different things:
 #
-# test/check.js is deliberately left out: it drives a real browser with
-# Playwright against a locally served copy of the site, which is a much
-# heavier job than this. Run that one by hand when changing page layout.
-name: Tests
+#   build-check  bundles the Netlify Functions exactly as Netlify does, so
+#                a mistake that stops the site deploying is reported here
+#                in about a minute instead of silently.
+#   test         the unit suites: timetable, finance, forum and the
+#                Melbourne-timezone logic.
+#
+# The build check exists because of a real four-day outage in Oct 2026: a
+# reassigned `const` failed Netlify's build, Netlify reported only "exit
+# code 2", and nothing local caught it — `node --check` verifies syntax but
+# not this, and the tests don't import that file. Everything built in that
+# window sat on main, undeployed, with no sign anything was wrong.
+#
+# Deliberately NOT a TypeScript type check: that flags patterns this
+# codebase uses happily and Netlify accepts, so it would block working
+# code. esbuild rejects what Netlify rejects, and nothing more.
+#
+# test/check.js is left out — it drives a real browser against a locally
+# served copy, a much heavier job than this.
+name: Checks
 
 on:
   push:
@@ -16,13 +28,17 @@ on:
   pull_request:
 
 jobs:
-  test:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           # Node 24 strips TypeScript types from the .mts files the tests
-          # import without any build step or extra flags.
+          # import, with no build step or extra flags.
           node-version: '24'
-      - run: npm test
+      - run: npm ci
+      - name: Will it build?
+        run: npm run build-check
+      - name: Unit tests
+        run: npm test
