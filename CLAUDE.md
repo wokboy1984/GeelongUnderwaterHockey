@@ -37,18 +37,43 @@ served as part of the live site and should be left alone.
   files. Function routes (declared via each function's own
   `config.path`) take priority over this redirect automatically.
 - Site: https://geelong-underwater-hockey.netlify.app
-- Known issue (as of 11 Sept 2026): the Netlify project has
-  "require team login" turned on for all visitors, which blocks real
-  club members from viewing the site. This needs to be turned off in
-  Netlify project settings before go-live — it is not something to fix
-  by changing code here.
+- "Require team login" was turned off before go-live (Oct 2026). The site
+  is public; only the member portal sits behind Netlify Identity.
 - `netlify/functions/health.mts` and the DB migration under
   `netlify/database/` are real and load-bearing — not experiments.
 
+## Before you push
+
+Run `npm run build-check` and `npm test`. CI runs both on every push, and
+`main` won't accept a merge unless they pass.
+
+`build-check` bundles the functions with esbuild, the same thing Netlify
+uses. It exists because `node --check` only verifies syntax: in Oct 2026 a
+reassigned `const` passed `node --check`, failed Netlify's build, and
+Netlify reported nothing but "exit code 2". Four days of work sat on main
+undeployed before anyone noticed. Don't rely on `node --check` alone.
+
+## Never edit an applied migration
+
+Netlify checksums every migration that has already run, including
+comments and whitespace. Changing or deleting one fails the deploy with
+"has been modified after being applied", which blocked deploys for hours
+in Oct 2026. Add a new migration instead. The unused
+`finance_waived_games` table is left in place for exactly this reason.
+
+## Two people work on this
+
+Alex (wokboy1984) and Liam (UWHCookie) both push to `main`, both using
+Claude. Pull before starting and push small changes often — the trouble
+comes from two people sitting on a week of unpushed work in the same
+files. Force-pushing and deleting `main` are blocked, so a conflict is
+always recoverable: git will refuse the push and ask you to pull first.
+
 ## Local environment notes
 
-- Node is installed and used for `netlify dev`, `node --check`, and
-  running `netlify database migrations apply` against the local dev
-  Postgres.
+- Node is installed and used for `netlify dev`, `npm run build-check`,
+  and running `netlify database migrations apply` against the local dev
+  Postgres. Run `npm ci` first — `build-check` needs esbuild from
+  devDependencies.
 - The terminal is Windows PowerShell 5.1. `&&` is a syntax error
   there — chain commands with `;`, or run them as separate commands.
