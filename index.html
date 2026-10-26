@@ -6,6 +6,15 @@
   <title>Geelong Underwater Hockey</title>
   <meta name="description" content="Hockey. At the bottom of a pool. Join Wednesday nights in Geelong." />
 
+  <!-- Installable app: "Add to Home Screen" on iPhone/Android. See manifest.webmanifest and sw.js. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0B2138" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="GUH" />
+  <link rel="apple-touch-icon" href="/images/icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/images/icons/icon-192.png" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -53,6 +62,15 @@
         b.style.display = "";
       }
     });
+  </script>
+
+  <!-- Offline shell for the home-screen app (sw.js). Failure is harmless: the site still works online. -->
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("/sw.js").catch(function () {});
+      });
+    }
   </script>
 
   <!-- Real member login for the live build (not used by the concept preview). -->
