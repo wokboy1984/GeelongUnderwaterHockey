@@ -187,15 +187,15 @@ GUWH.testimonialFacts = [
   "Loan gear — including junior sizes — is available every week, no need to own a thing to start.",
 ];
 
-// Helper: next Wednesday's date, formatted, from any reference date.
+// Helper: the Wednesday session date, from any reference date. On a
+// Wednesday this is that same day (game day), matching the server's
+// nextSessionDateISO in netlify/functions/_shared/attendance.mts. Using a
+// different rule here made the home, Book and Bring a Mate pages show next
+// week on game day while the Dashboard and booking API showed today.
 GUWH.nextWednesday = function (from) {
   const d = from ? new Date(from) : new Date();
   const day = d.getDay(); // 0 Sun ... 3 Wed ... 6 Sat
-  let add = (3 - day + 7) % 7;
-  if (add === 0) {
-    // if it's already Wednesday, decide by time of day (before/after session)
-    add = 7;
-  }
+  const add = (3 - day + 7) % 7;
   d.setDate(d.getDate() + add);
   d.setHours(0, 0, 0, 0);
   return d;

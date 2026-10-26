@@ -1,37 +1,66 @@
 // ---------------------------------------------------------------------------
-// GUWH concept — Book a Game (booking status + recent attendance history)
+// GUWH concept — Book a Game (booking status + games played)
+//
+// Live: reads and writes the real booking through /api/booking, the same
+// endpoint the Dashboard uses, so both pages always agree. Games played
+// comes from /api/profile. There is no per-week attendance history endpoint
+// yet, so this page doesn't show one rather than inventing it.
 // ---------------------------------------------------------------------------
 window.GUWH = window.GUWH || {};
 GUWH.Pages = GUWH.Pages || {};
 
 (function () {
   const { Container, Button, Pill, Icon, SectionHeading } = GUWH.UI;
-
-  function recentWeeks(wed, count) {
-    const out = [];
-    for (let i = 1; i <= count; i++) {
-      const d = new Date(wed);
-      d.setDate(d.getDate() - 7 * i);
-      out.push(d);
-    }
-    return out;
-  }
+  const { navigate } = GUWH.Router;
 
   function BookGamePage() {
-    const [, force] = React.useReducer((x) => x + 1, 0);
-    React.useEffect(() => GUWH.Store.subscribe(force), []);
+    const [user, setUser] = React.useState(() => GUWH.Identity.currentUser());
+    const [status, setStatus] = React.useState(null);
+    const [profile, setProfile] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
 
-    const player = GUWH.Store.currentPlayer();
-    const wed = GUWH.nextWednesday();
-    const closesAt = new Date(wed);
-    closesAt.setHours(16, 0, 0, 0);
-    const booking = GUWH.Store.bookingFor(player.id);
-    const past = recentWeeks(wed, 5);
+    React.useEffect(() => GUWH.Identity.onChange(() => setUser(GUWH.Identity.currentUser())), []);
+
+    React.useEffect(() => {
+      if (!user) return;
+      setLoading(true);
+      setError(null);
+      GUWH.Identity.authFetch("/api/booking")
+        .then((r) => r.json())
+        .then((data) => (data.ok ? setStatus(data) : setError(data.error || "Something went wrong")))
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+      GUWH.Identity.authFetch("/api/profile")
+        .then((r) => r.json())
+        .then((d) => { if (d.ok) setProfile(d.member); })
+        .catch(() => {});
+    }, [user]);
+
+    async function setIn(wantsIn) {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: wantsIn }) });
+        const data = await res.json();
+        if (data.ok) setStatus(data);
+        else setError(data.error || "Something went wrong");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (!user) return null;
+
+    const isIn = !!(status && status.myStatus === "in");
+    const sessionDate = status ? new Date(status.sessionDate + "T00:00:00") : null;
 
     return h(
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
-      h(SectionHeading, { eyebrow: "Book a game", title: GUWH.formatDate(wed) }),
+      h(SectionHeading, { eyebrow: "Book a game", title: sessionDate ? GUWH.formatDate(sessionDate) : "This Wednesday" }),
 
       h(
         "div",
@@ -42,37 +71,31 @@ GUWH.Pages = GUWH.Pages || {};
           h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Your status for this Wednesday"),
           h(
             "p",
-            { className: "font-display text-2xl font-bold mt-1", style: { color: booking.in ? "var(--good-dark)" : "var(--ink)" } },
-            booking.in ? "You're in" : "Not booked yet"
+            { className: "font-display text-2xl font-bold mt-1", style: { color: isIn ? "var(--good-dark)" : "var(--ink)" } },
+            loading && !status ? "Loading…" : isIn ? "You're in" : "Not booked yet"
           ),
-          h("p", { className: "text-xs text-[var(--ink-soft)] mt-2" }, "Bookings close " + closesAt.toLocaleString("en-AU", { weekday: "long", hour: "numeric", minute: "2-digit" }) + " — you can cancel any time before the game starts.")
+          status && h("p", { className: "text-xs text-[var(--ink-soft)] mt-2" }, status.confirmedCount + " booked in so far. Please book by 5pm so the Game Coordinator can build teams — you can change your mind any time.")
         ),
         h(
           Button,
-          { size: "lg", variant: booking.in ? "danger" : "primary", onClick: () => GUWH.Store.setBooking(player.id, !booking.in) },
-          h(Icon, { name: booking.in ? "x" : "check", size: 18 }),
-          booking.in ? "Cancel my spot" : "I'm in"
+          { size: "lg", variant: isIn ? "danger" : "primary", disabled: loading || !status, onClick: () => setIn(!isIn) },
+          h(Icon, { name: isIn ? "x" : "check", size: 18 }),
+          isIn ? "Cancel my spot" : "I'm in"
         )
       ),
+
+      error && h("p", { className: "mt-4 text-sm text-[var(--bad)]", role: "alert" }, error),
 
       h(
         "div",
         { className: "mt-10" },
-        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Your recent attendance"),
+        h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "Your games"),
         h(
           "div",
-          { className: "rounded-2xl bg-[var(--sand)] divide-y divide-black/5" },
-          past.map((d, i) => {
-            const attended = i !== 2; // mock: missed one week a fortnight back
-            return h(
-              "div",
-              { key: d.toISOString(), className: "flex items-center justify-between px-5 py-3" },
-              h("span", { className: "text-sm text-[var(--ink)]" }, GUWH.formatDate(d)),
-              h(Pill, { tone: attended ? "good" : "warn" }, attended ? "Played" : "Missed")
-            );
-          })
-        ),
-        h("p", { className: "mt-3 text-sm text-[var(--ink-soft)]" }, player.firstName + " has played " + player.gamesThisYear + " games this year.")
+          { className: "rounded-2xl bg-[var(--sand)] px-5 py-4 flex items-center justify-between gap-4" },
+          h("span", { className: "text-sm text-[var(--ink)]" }, profile ? "You've played " + (profile.gamesPlayed || 0) + " game" + ((profile.gamesPlayed || 0) === 1 ? "" : "s") + "." : "Loading your games…"),
+          h(Button, { size: "sm", variant: "ghost", onClick: () => navigate("/portal/stats") }, "See my stats")
+        )
       )
     );
   }
