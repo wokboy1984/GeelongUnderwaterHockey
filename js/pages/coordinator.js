@@ -593,11 +593,13 @@ GUWH.Pages = GUWH.Pages || {};
     const [renaming, setRenaming] = React.useState({}); // teamId -> draft name
     // Drag players between teams (12 Oct 2026, Cheongy: "can we just drag
     // them?"). Drag any player onto a team to move them there, or onto
-    // Unassigned to take them off. Phones can't drag, so on a touch screen
-    // each player in a team gets a small "Move to" dropdown instead.
+    // Unassigned to take them off. Every player in a team also has a "Move
+    // to" dropdown. It used to appear only on touch screens, but dragging
+    // isn't obvious (or doesn't work) for everyone on a computer either, so
+    // since 27 Oct 2026 it shows everywhere (Liam couldn't move anyone in
+    // Chrome on his PC).
     const [dragging, setDragging] = React.useState(null); // player being dragged
     const [dropKey, setDropKey] = React.useState(null);   // team id or "unassigned"
-    const isTouch = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
     function dropZone(key, onDropPlayer) {
       return {
         onDragOver: (e) => { if (dragging) { e.preventDefault(); if (dropKey !== key) setDropKey(key); } },
@@ -667,7 +669,7 @@ GUWH.Pages = GUWH.Pages || {};
       React.Fragment,
       null,
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
-      h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md mb-6" }, "Drag players onto a team to place or move them (on a phone, use the dropdown next to each name). Nothing here is visible to players until you publish."),
+      h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md mb-6" }, "Use the dropdown next to each name to move a player to another team, or drag them there on a computer. Nothing here is visible to players until you publish."),
 
       // Carried forward from last week (12 Oct 2026) — see
       // _shared/carry-forward.mts. Everything stays editable until publish.
@@ -763,19 +765,17 @@ GUWH.Pages = GUWH.Pages || {};
                           key: p.id,
                           player: p,
                           fromLastWeek: (board.autoPlacedIds || []).indexOf(p.id) !== -1,
-                          action: isTouch
-                            ? h(
-                                "select",
-                                {
-                                  className: inputCls + " !w-auto !py-1 text-xs",
-                                  value: String(team.id),
-                                  "aria-label": "Move " + GUWH.displayName(p) + " to",
-                                  onChange: (e) => moveTo(p, e.target.value),
-                                },
-                                board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
-                                h("option", { value: "unassigned" }, "Unassigned")
-                              )
-                            : h(Button, { size: "sm", variant: "ghost", onClick: () => call({ action: "unassign", memberEmail: p.email }) }, "Remove"),
+                          action: h(
+                            "select",
+                            {
+                              className: inputCls + " !w-auto !py-1 text-xs",
+                              value: String(team.id),
+                              "aria-label": "Move " + GUWH.displayName(p) + " to",
+                              onChange: (e) => moveTo(p, e.target.value),
+                            },
+                            board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
+                            h("option", { value: "unassigned" }, "Unassigned")
+                          ),
                         }))
                       )
                 )
