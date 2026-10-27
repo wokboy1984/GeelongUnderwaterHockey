@@ -128,11 +128,11 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "flex flex-wrap items-center gap-2" },
-        h("h1", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, m.displayName),
+        h("h1", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, m.adminName || m.displayName),
         isChild && h(Pill, { tone: "accent" }, "Child"),
         m.roles.map((r) => h(Pill, { key: r, tone: "accent" }, ROLE_LABELS[r] || r))
       ),
-      h("p", { className: "mt-1 text-sm text-[var(--ink-soft)]" }, [m.firstName, m.lastName].filter(Boolean).join(" ") + (m.email ? " · " + m.email : "")),
+      m.email && h("p", { className: "mt-1 text-sm text-[var(--ink-soft)]" }, m.email),
       // Straight through to what this person owes (20 Oct 2026). Looking
       // someone up in Administration and then hunting for the same name in
       // a long Finance table was the slow way round.
@@ -193,7 +193,7 @@ GUWH.Pages = GUWH.Pages || {};
                 "p",
                 { className: "text-sm text-[var(--ink)]" },
                 "Parent: ",
-                h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + m.parent.id) }, m.parent.fullName || m.parent.displayName),
+                h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + m.parent.id) }, m.parent.adminName || m.parent.fullName || m.parent.displayName),
                 ". Fees for this child's games are billed to their parent."
               ),
             m.kids.length > 0 &&
@@ -204,7 +204,7 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "li",
                     { key: k.id, className: "text-sm text-[var(--ink)]" },
-                    h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + k.id) }, k.fullName || k.displayName),
+                    h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + k.id) }, k.adminName || k.fullName || k.displayName),
                     typeof k.age === "number" ? " · age " + k.age : "",
                     k.removed ? " · removed by parent" : ""
                   )

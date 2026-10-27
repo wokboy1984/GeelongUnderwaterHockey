@@ -20,7 +20,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
@@ -33,6 +33,7 @@ function shapeMember(row: any) {
     lastName: row.last_name,
     nickname: row.nickname || "",
     displayName: shortName(row.nickname, row.first_name, row.last_name),
+    adminName: adminName(row.nickname, row.first_name, row.last_name),
     age: ageFromDOB(row.date_of_birth),
     grade: row.grade,
     roles: (row.roles || []).filter(Boolean),
@@ -177,6 +178,7 @@ async function memberDetail(db: any, id: string) {
       lastName: m.last_name,
       nickname: m.nickname || "",
       displayName: shortName(m.nickname, m.first_name, m.last_name),
+      adminName: adminName(m.nickname, m.first_name, m.last_name),
       age: ageFromDOB(m.date_of_birth),
       dateOfBirth: m.date_of_birth ? new Date(m.date_of_birth).toISOString().slice(0, 10) : null,
       grade: m.grade,
@@ -189,8 +191,8 @@ async function memberDetail(db: any, id: string) {
       waiverNote: m.waiver_signed_name || null,
       joined: m.created_at,
       removedChild: !!m.dependant_removed_at,
-      parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" ") } : null,
-      kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
+      parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" "), adminName: adminName(parent.nickname, parent.first_name, parent.last_name) } : null,
+      kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), adminName: adminName(k.nickname, k.first_name, k.last_name), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
       gamesPlayed: games.n,
       lastGame: lastGame.d || null,
       seasonGoals: season,
@@ -224,8 +226,8 @@ export default async (req: Request, context: Context) => {
       // log in — they get a synthetic *@no-login.guwh email and have no
       // real identity to grant a role to, so they're excluded here.
       //
-      // Sorted by the name shown on the page (nickname, else first name),
-      // then last name (27 Oct 2026, Liam). It used to be newest first
+      // Sorted by first name, then last name, matching the full names this
+      // page shows (27 Oct 2026, Liam). It used to be newest first
       // with a limit of 25, which with 22 members was about to start
       // silently hiding the longest-standing ones; the full list is now
       // capped at 500 instead.
@@ -236,9 +238,9 @@ export default async (req: Request, context: Context) => {
             from members m
             left join member_roles mr on mr.member_id = m.id
             where m.email not like '%@no-login.guwh'
-              and (m.email ilike ${"%" + q + "%"} or m.first_name ilike ${"%" + q + "%"} or m.last_name ilike ${"%" + q + "%"})
+              and (m.email ilike ${"%" + q + "%"} or m.nickname ilike ${"%" + q + "%"} or m.first_name ilike ${"%" + q + "%"} or m.last_name ilike ${"%" + q + "%"})
             group by m.id
-            order by lower(coalesce(nullif(trim(m.nickname), ''), m.first_name)), lower(m.last_name)
+            order by lower(m.first_name), lower(m.last_name)
             limit 25
           `
         : await db.sql`
@@ -248,7 +250,7 @@ export default async (req: Request, context: Context) => {
             left join member_roles mr on mr.member_id = m.id
             where m.email not like '%@no-login.guwh'
             group by m.id
-            order by lower(coalesce(nullif(trim(m.nickname), ''), m.first_name)), lower(m.last_name)
+            order by lower(m.first_name), lower(m.last_name)
             limit 500
           `;
       return new Response(JSON.stringify({ ok: true, members: rows.map(shapeMember) }), {
