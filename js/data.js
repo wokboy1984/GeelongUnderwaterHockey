@@ -44,7 +44,7 @@ GUWH.club = {
 // The club's positions — the same list the server accepts
 // (POSITIONS in netlify/functions/_shared/roles.mts) and the About page
 // describes. One list everywhere since 21 Oct 2026 (site review AB-1/PR-4).
-GUWH.POSITIONS = ["Forward", "Centre", "Wing", "Back", "Full Back"];
+GUWH.POSITIONS = ["Forward", "Centre", "Wing", "Back", "Full Back", "Forward/Back"];
 GUWH.GRADES = ["A-grade", "B-grade", "Junior"];
 GUWH.CAP_COLOURS = ["White", "Black"];
 GUWH.POOLS = ["Pool A", "Pool B"];
