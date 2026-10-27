@@ -193,10 +193,12 @@ export function memberDisplayName(row: { nickname?: string | null; first_name?: 
   return shortName(row.nickname, row.first_name, row.last_name);
 }
 
-// The name shown in Administration (27 Oct 2026, Liam): full name, with the
-// nickname in brackets ("Sam Taylor (Tayls)"), so admins always know who
-// they're dealing with. The brackets are left off when the nickname is just
-// the first or full name again.
+// The name shown on every staff page (27 Oct 2026, Liam): full name, with
+// the nickname in brackets ("Sam Taylor (Tayls)"), so whoever is running
+// things always knows who they're dealing with. Use it in endpoints only
+// staff can call (Administration, Finance, Game Coordination, Attendance,
+// forum moderation); anything an ordinary member sees uses shortName. The
+// brackets are left off when the nickname is just the first or full name.
 export function adminName(nickname: string | null | undefined, first: string | null | undefined, last: string | null | undefined): string {
   const full = [(first || "").trim(), (last || "").trim()].filter(Boolean).join(" ");
   const nick = (nickname || "").trim();

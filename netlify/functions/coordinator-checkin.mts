@@ -1,5 +1,5 @@
 import {getDatabase} from '@netlify/database';
-import {ensureAttendanceKinds,ensureFamilyColumns,ensureNicknameColumn,getVerifiedUser,ensureMember,hasPermission,logAudit,shortName,unauthorized,forbidden} from './_shared/roles.mts';
+import {ensureAttendanceKinds,ensureFamilyColumns,ensureNicknameColumn,getVerifiedUser,ensureMember,hasPermission,logAudit,adminName,unauthorized,forbidden} from './_shared/roles.mts';
 import {clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
 const json=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 
@@ -112,7 +112,7 @@ export default async(req:Request)=>{
    from members m left join members pp on pp.id=m.parent_id left join session_attendance a on a.member_id=m.id and a.session_date=${sessionDate}::date
    where m.dependant_removed_at is null or a.attended is not null
    order by m.first_name,m.last_name,m.id`;
-  players.forEach((p:any)=>{p.displayName=shortName(p.nickname,p.firstName,p.lastName);delete p.nickname;});
+  players.forEach((p:any)=>{p.displayName=adminName(p.nickname,p.firstName,p.lastName);delete p.nickname;});
   const closeout=await closeoutFor(db,sessionDate);
   return json({ok:true,sessionDate,today,upcoming:nextSessionDateISO(),players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null});
  }catch(error){console.error('Attendance request failed',error);return json({ok:false,error:'Could not load or save attendance. Please try again.'},500);}

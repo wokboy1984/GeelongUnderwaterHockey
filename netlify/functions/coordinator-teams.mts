@@ -14,7 +14,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
@@ -86,7 +86,7 @@ async function loadRowSnapsForValidation(db: any, sessionId: number): Promise<{ 
 const nextWednesdayISO = nextSessionDateISO;
 
 function shapePlayer(r: any) {
-  return { id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new, grade: r.grade || null, position: r.position || null };
+  return { id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name), isNew: r.is_new, grade: r.grade || null, position: r.position || null };
 }
 
 async function fullBoard(db: any, sessionId: number, published: boolean, sessionDate: string) {

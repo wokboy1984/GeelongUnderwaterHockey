@@ -20,9 +20,8 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, ensureNicknameColumn, getVerifiedUser, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
+import { adminName, ensureMember, ensureNicknameColumn, getVerifiedUser, logAudit, unauthorized, forbidden } from "./_shared/roles.mts";
 import { requireModerator } from "./_shared/forum-access.mts";
-import { forumDisplayName } from "./_shared/forum.mts";
 
 function badRequest(message: string) {
   return new Response(JSON.stringify({ ok: false, error: message }), { status: 400, headers: { "content-type": "application/json" } });
@@ -156,7 +155,7 @@ export default async (req: Request, context: Context) => {
       where a.action like 'forum_%' order by a.created_at desc limit 25
     `;
     const recentActivity = activityRows.map((a: any) => {
-      const who = a.first_name ? forumDisplayName(a.first_name, a.last_name, a.nickname) : "A member";
+      const who = a.first_name ? adminName(a.nickname, a.first_name, a.last_name) : "A member";
       const note = a.note && a.actor_email ? a.note.split(a.actor_email).join(who) : a.note;
       return { action: a.action, resource_type: a.resource_type, resource_id: a.resource_id, note, created_at: a.created_at };
     });
@@ -168,14 +167,14 @@ export default async (req: Request, context: Context) => {
         openReports: openReports.map((r: any) => ({
           id: r.id, targetType: r.target_type, targetId: r.target_id, reason: r.reason, explanation: r.explanation,
           status: r.status, assignedModeratorId: r.assigned_moderator_id, createdAt: r.created_at,
-          reporterDisplay: forumDisplayName(r.first_name, r.last_name, r.nickname),
+          reporterDisplay: adminName(r.nickname, r.first_name, r.last_name),
         })),
         mediaAwaitingApproval: mediaAwaitingApproval.map((a: any) => ({
           id: a.id, kind: a.kind, fileName: a.file_name, contentType: a.content_type, postId: a.post_id, createdAt: a.created_at,
-          uploadedBy: a.first_name ? forumDisplayName(a.first_name, a.last_name, a.nickname) : "Unknown",
+          uploadedBy: a.first_name ? adminName(a.nickname, a.first_name, a.last_name) : "Unknown",
         })),
-        restrictedMembers: restrictedMembers.map((m: any) => ({ memberId: m.member_id, display: forumDisplayName(m.first_name, m.last_name, m.nickname), reason: m.restricted_reason, since: m.restricted_at })),
-        suspendedMembers: suspendedMembers.map((m: any) => ({ memberId: m.member_id, display: forumDisplayName(m.first_name, m.last_name, m.nickname), reason: m.suspended_reason, since: m.suspended_at, until: m.suspended_until })),
+        restrictedMembers: restrictedMembers.map((m: any) => ({ memberId: m.member_id, display: adminName(m.nickname, m.first_name, m.last_name), reason: m.restricted_reason, since: m.restricted_at })),
+        suspendedMembers: suspendedMembers.map((m: any) => ({ memberId: m.member_id, display: adminName(m.nickname, m.first_name, m.last_name), reason: m.suspended_reason, since: m.suspended_at, until: m.suspended_until })),
         recentDiscussions,
         recentActivity,
       }),

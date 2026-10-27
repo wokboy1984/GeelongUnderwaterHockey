@@ -1,5 +1,5 @@
 import { getDatabase } from '@netlify/database';
-import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, ensureAttendanceKinds, hasPermission, logAudit, shortName, unauthorized, forbidden } from './_shared/roles.mts';
+import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, ensureAttendanceKinds, adminName, hasPermission, logAudit, unauthorized, forbidden } from './_shared/roles.mts';
 import { FEES, cents, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
@@ -142,7 +142,7 @@ export default async (req: Request) => {
   }
   const month = new URL(req.url).searchParams.get('month') || new Date().toISOString().slice(0,7);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ok:false,error:'Invalid month'},400);
-  const members = await db.sql`select m.id,m.nickname,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by m.last_name,m.first_name`;
+  const members = await db.sql`select m.id,m.nickname,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by lower(m.first_name),lower(m.last_name)`;
   // Game fees are derived from actual check-ins. Unchecking attendance removes
   // the charge, and setting up an account later automatically includes history.
   const entries = await db.sql`
@@ -194,9 +194,11 @@ export default async (req: Request) => {
     (select count(*)::int from session_attendance sa where sa.member_id=m.id and sa.attended=true) as games
    from members m where m.parent_id is not null and (m.dependant_removed_at is null or exists(select 1 from session_attendance sa where sa.member_id=m.id and sa.attended=true))
    order by m.created_at,m.id`;
-  return json({ok:true,month,members:members.map((m:any)=>({...m,displayName:shortName(m.nickname,m.first_name,m.last_name),...totals(entries.filter((e:any)=>e.member_id===m.id),month)})),entries,
-   kids:kids.map((k:any)=>({id:k.id,parentId:k.parent_id,displayName:shortName(k.nickname,k.first_name,k.last_name),trialFree:k.trial_free,games:k.games})),
-   unbilled:unbilled.map((u:any)=>({memberId:u.payer_id,displayName:shortName(u.nickname,u.first_name,u.last_name),games:u.games,childGames:u.child_games}))});
+  // Finance is Treasurer/Administrator only, so names are full names with
+  // the nickname in brackets, as in Administration (27 Oct 2026, Liam).
+  return json({ok:true,month,members:members.map((m:any)=>({...m,displayName:adminName(m.nickname,m.first_name,m.last_name),...totals(entries.filter((e:any)=>e.member_id===m.id),month)})),entries,
+   kids:kids.map((k:any)=>({id:k.id,parentId:k.parent_id,displayName:adminName(k.nickname,k.first_name,k.last_name),trialFree:k.trial_free,games:k.games})),
+   unbilled:unbilled.map((u:any)=>({memberId:u.payer_id,displayName:adminName(u.nickname,u.first_name,u.last_name),games:u.games,childGames:u.child_games}))});
  } catch(error) {
   console.error('Finance request failed',error);
   return json({ok:false,error: error instanceof Error && error.message.startsWith('Payment') ? error.message : 'Could not save or load finance records. Check the database migration and input.'},400);
