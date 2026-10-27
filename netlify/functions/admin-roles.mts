@@ -223,6 +223,12 @@ export default async (req: Request, context: Context) => {
       // account, no email) feature are placeholder members that can never
       // log in — they get a synthetic *@no-login.guwh email and have no
       // real identity to grant a role to, so they're excluded here.
+      //
+      // Sorted by the name shown on the page (nickname, else first name),
+      // then last name (27 Oct 2026, Liam). It used to be newest first
+      // with a limit of 25, which with 22 members was about to start
+      // silently hiding the longest-standing ones; the full list is now
+      // capped at 500 instead.
       const rows = q
         ? await db.sql`
             select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
@@ -232,7 +238,7 @@ export default async (req: Request, context: Context) => {
             where m.email not like '%@no-login.guwh'
               and (m.email ilike ${"%" + q + "%"} or m.first_name ilike ${"%" + q + "%"} or m.last_name ilike ${"%" + q + "%"})
             group by m.id
-            order by m.created_at desc
+            order by lower(coalesce(nullif(trim(m.nickname), ''), m.first_name)), lower(m.last_name)
             limit 25
           `
         : await db.sql`
@@ -242,8 +248,8 @@ export default async (req: Request, context: Context) => {
             left join member_roles mr on mr.member_id = m.id
             where m.email not like '%@no-login.guwh'
             group by m.id
-            order by m.created_at desc
-            limit 25
+            order by lower(coalesce(nullif(trim(m.nickname), ''), m.first_name)), lower(m.last_name)
+            limit 500
           `;
       return new Response(JSON.stringify({ ok: true, members: rows.map(shapeMember) }), {
         headers: { "content-type": "application/json" },
