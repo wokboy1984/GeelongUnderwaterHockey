@@ -35,3 +35,16 @@ test('Administration shows full name with the nickname in brackets', () => {
   assert.equal(adminName('sam', 'Sam', 'Taylor'), 'Sam Taylor');
   assert.equal(adminName('Cheongy', '', ''), 'Cheongy');
 });
+
+import { startingTeamFor } from '../netlify/functions/_shared/team-roster.mts';
+
+test('startingTeamFor matches the starting list by name, cautiously', () => {
+  assert.equal(startingTeamFor('Liam', 'Cooke'), 'Sharks');
+  assert.equal(startingTeamFor('kevin', 'chisholm'), 'Crays');      // short form, any case
+  assert.equal(startingTeamFor('Jack', 'Curwen Walker'), 'Sharks'); // hyphen/space ignored
+  assert.equal(startingTeamFor('Stu', 'McCallum'), 'Sharks');
+  assert.equal(startingTeamFor('Isabelle', 'Hogan', 'Miley'), 'Dolphins'); // via nickname
+  assert.equal(startingTeamFor('Oscar', 'Hatty'), 'Dolphins');
+  assert.equal(startingTeamFor('Jane', 'Hogan'), null);   // family name, unknown first name
+  assert.equal(startingTeamFor('Liam', ''), null);
+});
