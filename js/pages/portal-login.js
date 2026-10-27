@@ -136,7 +136,14 @@ GUWH.Pages = GUWH.Pages || {};
     async function submit(ev) {
       ev.preventDefault();
       setError(null);
-      if (!form.email.trim() || !form.password) {
+      // Chrome can autofill a saved password without telling React (no
+      // change event until the person touches the page), so read what's
+      // actually in the boxes if state is still empty.
+      const els = ev.target.elements;
+      const email = form.email || (els.email && els.email.value) || "";
+      const password = form.password || (els.password && els.password.value) || "";
+      if (email !== form.email || password !== form.password) setForm({ email, password });
+      if (!email.trim() || !password) {
         setError("Enter your email and password.");
         return;
       }
@@ -152,7 +159,7 @@ GUWH.Pages = GUWH.Pages || {};
         // would have after the pop-up. Doing the token call by hand and
         // then injecting the result risks the two disagreeing about who is
         // logged in. `true` remembers the session, as the pop-up did.
-        await gotrue.login(form.email.trim(), form.password, true);
+        await gotrue.login(email.trim(), password, true);
         // The widget only emits "login" for its own UI, so nudge our side
         // to load the member record before the dashboard asks for it.
         if (GUWH.Identity.refreshMember) await GUWH.Identity.refreshMember();
@@ -204,8 +211,11 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "form",
       { onSubmit: submit, noValidate: true, className: "mt-8 rounded-2xl bg-white ring-1 ring-black/5 p-6 flex flex-col gap-4" },
-      h(FormField, { label: "Email" }, h("input", { type: "email", className: inputCls, autoComplete: "email", value: form.email, onChange: (e) => set("email", e.target.value) })),
-      h(FormField, { label: "Password" }, h("input", { type: "password", className: inputCls, autoComplete: "current-password", value: form.password, onChange: (e) => set("password", e.target.value) })),
+      // name/id and autoComplete "username" (27 Oct 2026): without them the
+      // browser treated Email as an ordinary contact field, filling the
+      // address from autofill but never the saved password with it.
+      h(FormField, { label: "Email" }, h("input", { type: "email", name: "email", id: "login-email", className: inputCls, autoComplete: "username", value: form.email, onChange: (e) => set("email", e.target.value) })),
+      h(FormField, { label: "Password" }, h("input", { type: "password", name: "password", id: "login-password", className: inputCls, autoComplete: "current-password", value: form.password, onChange: (e) => set("password", e.target.value) })),
       error && h("p", { className: "text-sm text-[var(--bad)]", role: "alert" }, error),
       h(
         "div",
