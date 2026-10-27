@@ -19,8 +19,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Pre-built Tailwind (27 Oct 2026), replacing the in-browser Play CDN.
+       After changing Tailwind classes, run `npm run build:css` and commit
+       tailwind.css. Loaded AFTER styles.css on purpose: the CDN injected
+       its CSS after styles.css, so Tailwind won any clash, and this keeps
+       that order. -->
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/tailwind.css">
 </head>
 <body>
   <div id="root"></div>

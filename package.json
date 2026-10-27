@@ -5,7 +5,9 @@
   "description": "Geelong Underwater Hockey club site — live build (Netlify + Netlify DB + Netlify Identity).",
   "scripts": {
     "test": "node --test test/attendance-test.mjs test/finance-test.mjs test/forum-logic-test.mjs test/timetable-logic-test.mjs && node test/logic-test.js",
-    "build-check": "esbuild netlify/functions/*.mts netlify/functions/_shared/*.mts --bundle --platform=node --format=esm --outdir=.buildcheck --external:@netlify/*"
+    "build-check": "esbuild netlify/functions/*.mts netlify/functions/_shared/*.mts --bundle --platform=node --format=esm --outdir=.buildcheck --external:@netlify/*",
+    "build:css": "tailwindcss -c tailwind.config.js -i tailwind.input.css -o tailwind.css --minify",
+    "check:css": "npm run build:css && git diff --exit-code -- tailwind.css"
   },
   "dependencies": {
     "@netlify/blobs": "latest",
@@ -13,6 +15,7 @@
     "@netlify/functions": "latest"
   },
   "devDependencies": {
-    "esbuild": "^0.24.2"
+    "esbuild": "^0.24.2",
+    "tailwindcss": "^3.4.17"
   }
 }
