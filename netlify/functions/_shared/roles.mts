@@ -42,7 +42,7 @@ export const PERMISSIONS = {
 // Playing position and grade are fixed lists shared by the Profile page (self
 // set) and Game Coordinators/Administrators (can override grade after
 // seeing someone play).
-export const POSITIONS = ["Forward", "Back", "Wing", "Full Back", "Centre", "Unknown"] as const;
+export const POSITIONS = ["Forward", "Back", "Forward/Back", "Wing", "Full Back", "Centre", "Unknown"] as const;
 export type Position = (typeof POSITIONS)[number];
 export function isPosition(value: string): value is Position {
   return (POSITIONS as readonly string[]).includes(value);

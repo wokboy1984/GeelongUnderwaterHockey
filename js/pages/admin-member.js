@@ -90,6 +90,25 @@ GUWH.Pages = GUWH.Pages || {};
         .finally(() => setLoading(false));
     }, [id]);
 
+    async function savePosition(value) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_position", memberId: m.id, position: value }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function saveNickname(value) {
       setBusy(true);
       setError(null);
@@ -174,14 +193,24 @@ GUWH.Pages = GUWH.Pages || {};
             h(Field, { label: "Age", value: typeof m.age === "number" ? String(m.age) : null }),
             h(Field, { label: "Date of birth", value: m.dateOfBirth ? fmtDate(m.dateOfBirth) : null }),
             h(Field, { label: "Grade", value: m.grade }),
-            h(Field, { label: "Position", value: m.position }),
+            // Editable here (27 Oct 2026, Liam); saves as soon as it's picked.
+            h(
+              "label",
+              { className: "min-w-0" },
+              h("span", { className: "block text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-0.5" }, "Position"),
+              h(
+                "select",
+                { className: inputCls + " !w-auto !py-1 text-sm", value: m.position || "Unknown", disabled: busy, onChange: (e) => savePosition(e.target.value) },
+                GUWH.POSITIONS.concat("Unknown").map((p) => h("option", { key: p, value: p }, p))
+              )
+            ),
             h(Field, { label: "Phone", value: m.phone }),
             h(Field, { label: "Joined", value: fmtDate(m.joined) }),
             h(Field, { label: "Emergency contact", value: m.emergencyName }),
             h(Field, { label: "Emergency phone", value: m.emergencyPhone }),
             h(Field, { label: "Waiver", value: m.waiverSigned ? "Signed" + (m.waiverNote ? " (" + m.waiverNote + ")" : "") : "Not signed" })
           ),
-          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list.")
+          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position saves as soon as you pick it.")
         ),
 
         (isChild || m.kids.length > 0) &&

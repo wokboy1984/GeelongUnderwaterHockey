@@ -29,6 +29,7 @@ GUWH.Pages = GUWH.Pages || {};
     { name: "Wing", body: "Attacks down the left or right side, ready to take a pass and carry the puck forward." },
     { name: "Back", body: "Defends on the left or right, wins the puck back and moves it up to the forwards." },
     { name: "Full Back", body: "Last line before the goal, reads the game and clears the puck out." },
+    { name: "Forward/Back", body: "Happy in either role, attacking up front or defending at the back, wherever the team needs them." },
   ];
 
   // Moved off the homepage (12 Sept 2026) to keep the home page focused on

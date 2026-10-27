@@ -6,6 +6,7 @@
 // POST   /api/admin/roles  { memberEmail, role, note } -> grant
 // DELETE /api/admin/roles  { memberEmail, role, note } -> revoke
 // POST   /api/admin/roles  { action: "grade", memberEmail, grade }
+// POST   /api/admin/roles  { action: "set_position", memberId, position }
 // POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
 //        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
@@ -20,7 +21,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
@@ -278,6 +279,29 @@ export default async (req: Request, context: Context) => {
         resourceType: "member", resourceId: target.id,
         previousValue: { nickname: target.nickname || null }, newValue: { nickname },
         note: `${caller.email} changed ${target.email}'s nickname from "${target.nickname || ""}" to "${nickname || ""}"`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
+    // Position (27 Oct 2026, Liam): members pick their own on Profile; an
+    // Administrator can correct it here. Works by id so children (who have
+    // no login email) can be changed too.
+    if (req.method === "POST" && body.action === "set_position") {
+      const id = String(body.memberId || "").trim();
+      const position = String(body.position || "").trim() || "Unknown";
+      if (!isPosition(position)) {
+        return new Response(JSON.stringify({ ok: false, error: "Not a valid position" }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const [target] = await db.sql`select id, email, position from members where id = ${id}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      await db.sql`update members set position = ${position} where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "position_changed",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { position: target.position || null }, newValue: { position },
+        note: `${caller.email} changed ${target.email}'s position from "${target.position || ""}" to "${position}"`,
       });
       return await memberDetail(db, target.id);
     }
