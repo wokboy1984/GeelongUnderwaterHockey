@@ -36,7 +36,13 @@ window.GUWH = window.GUWH || {};
   }
 
   function Container({ className = "", children }) {
-    return h("div", { className: cx("mx-auto w-full max-w-6xl px-4 sm:px-6", className) }, children);
+    // A page's own max-w-* replaces the default rather than sitting beside
+    // it (27 Oct 2026). Two max-w classes on one element is decided by rule
+    // order in the CSS, which the old Tailwind CDN set by discovery order —
+    // so the narrower width usually won, but not always — and the pre-built
+    // tailwind.css always lets max-w-6xl win.
+    const width = /(^|\s)max-w-/.test(className) ? "" : "max-w-6xl";
+    return h("div", { className: cx("mx-auto w-full", width, "px-4 sm:px-6", className) }, children);
   }
 
   function Button({ variant = "primary", size = "md", className = "", children, ...props }) {

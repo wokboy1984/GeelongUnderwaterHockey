@@ -44,8 +44,31 @@ served as part of the live site and should be left alone.
 
 ## Before you push
 
-Run `npm run build-check` and `npm test`. CI runs both on every push, and
-`main` won't accept a merge unless they pass.
+Run `npm run build-check`, `npm test` and `npm run check:css`. CI runs
+all three on every push, and `main` won't accept a merge unless they pass.
+
+## Tailwind is pre-built: rebuild `tailwind.css` after changing classes
+
+Styling comes from Tailwind classes in `index.html` and `js/`. Since 27 Oct
+2026 they're compiled ahead of time into `tailwind.css`, which is committed
+and served as a plain stylesheet (it replaced the in-browser Play CDN, so
+Netlify still has no build step). **Whenever you add, remove or change a
+Tailwind class, run `npm run build:css` and commit the updated
+`tailwind.css` in the same commit.** Otherwise the new styles simply don't
+exist on the live site. `npm run check:css` rebuilds and fails if the
+committed file was stale; CI runs it too. Alex is exempt from the required
+check on `main`, so for his direct pushes CI only warns.
+
+- Write class names out in full. Tailwind finds them by scanning the
+  source, so a name glued together in code (`"bg-" + colour`) is never
+  generated.
+- Don't put two classes for the same property on one element and rely on
+  which wins (e.g. `max-w-6xl max-w-4xl`); the outcome depends on rule
+  order in the CSS. `Container` in `js/ui.js` drops its default
+  `max-w-6xl` when given a `max-w-*` for this reason.
+- `tailwind.css` loads after `styles.css` on purpose (matches the old CDN
+  order, so Tailwind wins a clash). Keep that order.
+- `artifact-entry.html` still uses the CDN; leave it alone.
 
 `build-check` bundles the functions with esbuild, the same thing Netlify
 uses. It exists because `node --check` only verifies syntax: in Oct 2026 a
