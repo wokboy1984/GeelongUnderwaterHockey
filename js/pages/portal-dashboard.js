@@ -578,8 +578,8 @@ GUWH.Pages = GUWH.Pages || {};
               h(
                 "div",
                 { key: i, className: "flex justify-between gap-2 text-sm py-0.5" },
-                h("span", { className: "text-[var(--ink)] truncate" }, g.black.name + " v " + g.white.name),
-                h("span", { className: "font-semibold tabular-nums text-[var(--ink)] shrink-0" }, g.black.score + " - " + g.white.score)
+                h("span", { className: "text-[var(--ink)] truncate" }, g.white.name + " v " + g.black.name),
+                h("span", { className: "font-semibold tabular-nums text-[var(--ink)] shrink-0" }, g.white.score + " - " + g.black.score)
               )
             )
           )

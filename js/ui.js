@@ -465,33 +465,40 @@ window.GUWH = window.GUWH || {};
     });
   }
 
-  // One game written out in full: "Crays (Black sticks) v Sharks (White
+  // One game written out in full: "Sharks (White sticks) v Crays (Black
   // sticks)" (20 Oct 2026). Naming both sides and both colours is what
   // makes it obvious which one is yours — "Black sticks v Sharks" left you
   // working out whether the colour belonged to you or to them.
+  // White sticks are always listed first (27 Oct 2026, Liam), so when
+  // you're on black your opponent comes first; your team stays highlighted.
   function GameLine({ c }) {
-    return h(
-      "span",
-      { className: "flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm" },
+    const mine = h(
+      React.Fragment,
+      { key: "mine" },
       h("span", { className: "font-bold text-[var(--accent-dark)]" }, c.teamName),
       h(
         "span",
         { className: "inline-flex items-center gap-1 text-[var(--ink)]" },
         "(", h(StickSwatch, { colour: c.colour }), c.colourLabel, ")"
-      ),
-      h("span", { className: "text-[var(--ink-soft)]" }, "v"),
-      c.opponent
-        ? h(
-            React.Fragment,
-            null,
-            h("span", { className: "font-semibold text-[var(--ink)]" }, c.opponent),
-            h(
-              "span",
-              { className: "inline-flex items-center gap-1 text-[var(--ink-soft)]" },
-              "(", h(StickSwatch, { colour: c.colour === "black" ? "white" : "black" }), c.opponentColourLabel, ")"
-            )
+      )
+    );
+    const theirs = c.opponent
+      ? h(
+          React.Fragment,
+          { key: "theirs" },
+          h("span", { className: "font-semibold text-[var(--ink)]" }, c.opponent),
+          h(
+            "span",
+            { className: "inline-flex items-center gap-1 text-[var(--ink-soft)]" },
+            "(", h(StickSwatch, { colour: c.colour === "black" ? "white" : "black" }), c.opponentColourLabel, ")"
           )
-        : h("span", { className: "text-[var(--ink-soft)]" }, "TBC")
+        )
+      : h("span", { key: "theirs", className: "text-[var(--ink-soft)]" }, "TBC");
+    const v = h("span", { key: "v", className: "text-[var(--ink-soft)]" }, "v");
+    return h(
+      "span",
+      { className: "flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm" },
+      c.colour === "black" ? [theirs, v, mine] : [mine, v, theirs]
     );
   }
 
