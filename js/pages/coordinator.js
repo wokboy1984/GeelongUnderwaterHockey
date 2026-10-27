@@ -936,7 +936,7 @@ GUWH.Pages = GUWH.Pages || {};
       "div",
       { className: "rounded-2xl bg-[var(--sand)] p-4 mb-6" },
       h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)] mb-1" }, "Available Teams"),
-      h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Drag a team onto a Black or White stick slot below, or use the dropdown on the slot itself."),
+      h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Drag a team onto a White or Black stick slot below, or use the dropdown on the slot itself."),
       teams.length === 0
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Create teams in the Teams tab first.")
         : h(
@@ -975,7 +975,7 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // ---- One Black/White stick drop zone: drag target + accessible <select> ----
+  // ---- One White/Black stick drop zone: drag target + accessible <select> ----
   function TeamSlot({ rowId, pool, slot, cur, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign, onSwapOrMove }) {
     const key = rowId + ":" + pool + ":" + slot;
     const isOver = dragOverKey === key;
@@ -1122,8 +1122,9 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "grid grid-cols-2 gap-2" },
-        h(TeamSlot, { rowId, pool, slot: "black", cur: poolGame.black, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign: onAssignTeam, onSwapOrMove }),
-        h(TeamSlot, { rowId, pool, slot: "white", cur: poolGame.white, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign: onAssignTeam, onSwapOrMove })
+        // White before black everywhere (27 Oct 2026, Liam).
+        h(TeamSlot, { rowId, pool, slot: "white", cur: poolGame.white, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign: onAssignTeam, onSwapOrMove }),
+        h(TeamSlot, { rowId, pool, slot: "black", cur: poolGame.black, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssign: onAssignTeam, onSwapOrMove })
       ),
       h(RefereeSelector, { rowId, pool, title, poolGame, onAssign: onAssignRef, onUnassign: onUnassignRef })
     );
@@ -1627,19 +1628,19 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           null,
           h("div", { className: "flex items-center justify-between mb-2" },
-            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, pg.black ? pg.black.name : "Black"),
-            h("input", { type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center", value: blackScore, onChange: (e) => setBlackScore(e.target.value) })
+            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, pg.white ? pg.white.name : "White"),
+            h("input", { type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center", value: whiteScore, onChange: (e) => setWhiteScore(e.target.value) })
           ),
-          h(TeamGoalsColumn, { team: pg.black })
+          h(TeamGoalsColumn, { team: pg.white })
         ),
         h(
           "div",
           null,
           h("div", { className: "flex items-center justify-between mb-2" },
-            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, pg.white ? pg.white.name : "White"),
-            h("input", { type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center", value: whiteScore, onChange: (e) => setWhiteScore(e.target.value) })
+            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, pg.black ? pg.black.name : "Black"),
+            h("input", { type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center", value: blackScore, onChange: (e) => setBlackScore(e.target.value) })
           ),
-          h(TeamGoalsColumn, { team: pg.white })
+          h(TeamGoalsColumn, { team: pg.black })
         )
       ),
       h(

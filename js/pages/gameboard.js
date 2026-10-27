@@ -90,8 +90,8 @@ GUWH.Pages = GUWH.Pages || {};
   // below AND by the Game Coordinator's "Preview the public timetable"
   // toggle in the Timetable builder (same component, fed live draft rows
   // instead of the published ones, so a preview is the real render, not a
-  // mockup of it). Time / Pool A — Black / Pool A — White / Pool B — Black /
-  // Pool B — White, in that order, with non-game rows spanning the four
+  // mockup of it). Time / Pool A — White / Pool A — Black / Pool B — White /
+  // Pool B — Black, in that order, with non-game rows spanning the four
   // pool columns. Never relies on colour alone — every cell is labelled.
   // teamCell renders one team-name cell in the desktop grid, highlighting it
   // when it's the logged-in member's own team (see highlightTeamName below)
@@ -164,10 +164,10 @@ GUWH.Pages = GUWH.Pages || {};
                         h(
                           "p",
                           { className: "text-sm text-[var(--ink)]" },
-                          h("span", { className: "text-[var(--ink-soft)]" }, "Black: "),
-                          teamNameInline(data.blackTeamName, highlightTeamName),
-                          h("span", { className: "text-[var(--ink-soft)] ml-3" }, "White: "),
-                          teamNameInline(data.whiteTeamName, highlightTeamName)
+                          h("span", { className: "text-[var(--ink-soft)]" }, "White: "),
+                          teamNameInline(data.whiteTeamName, highlightTeamName),
+                          h("span", { className: "text-[var(--ink-soft)] ml-3" }, "Black: "),
+                          teamNameInline(data.blackTeamName, highlightTeamName)
                         ),
                         data.referees && data.referees.length > 0 && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(data.referees))
                       )
@@ -183,7 +183,8 @@ GUWH.Pages = GUWH.Pages || {};
       return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No timetable rows yet.");
     }
     // Every game tonight is one-at-a-time (12 Oct 2026): a simpler desktop
-    // grid - Time / Black Stick / White Stick - instead of four pool columns.
+    // grid - Time / White Stick / Black Stick - instead of four pool columns.
+    // White is always listed before black (27 Oct 2026, Liam).
     const anyDouble = rows.some((r) => r.isGame && (r.gameCount || (r.poolGames || []).length) === 2);
     if (!anyDouble) {
       const head = "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10";
@@ -191,8 +192,8 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "hidden md:grid gap-x-3 gap-y-0", style: { gridTemplateColumns: "88px 1fr 1fr" } },
         h("div", { className: head }, "Time"),
-        h("div", { className: head }, "Black Stick"),
         h("div", { className: head }, "White Stick"),
+        h("div", { className: head }, "Black Stick"),
         rows.map((row) => {
           const g = (row.poolGames || [])[0];
           const time = h("div", { key: row.id + "-t", className: "py-2.5 border-b border-black/5 font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" }, minToClockReal(row.startMin) || "—");
@@ -208,8 +209,8 @@ GUWH.Pages = GUWH.Pages || {};
             React.Fragment,
             { key: row.id },
             time,
-            teamCell(g && g.blackTeamName, highlightTeamName),
             teamCell(g && g.whiteTeamName, highlightTeamName),
+            teamCell(g && g.blackTeamName, highlightTeamName),
             g && g.referees && g.referees.length > 0 &&
               h(React.Fragment, null, h("div", { className: "pb-2.5 border-b border-black/5" }), h("div", { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" }, "Referees: " + refNames(g.referees)))
           );
@@ -225,10 +226,10 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "hidden md:grid gap-x-3 gap-y-0", style: { gridTemplateColumns: "88px repeat(4, 1fr)" } },
         h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Time"),
-        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool A — Black Stick"),
         h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool A — White Stick"),
-        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool B — Black Stick"),
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool A — Black Stick"),
         h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool B — White Stick"),
+        h("div", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] pb-2 border-b-2 border-black/10" }, "Pool B — Black Stick"),
         rows.map((row) => {
           const poolA = row.poolGames && row.poolGames.find((p) => p.pool === "Pool A");
           const poolB = row.poolGames && row.poolGames.find((p) => p.pool === "Pool B");
@@ -255,7 +256,7 @@ GUWH.Pages = GUWH.Pages || {};
           // pool columns, and the referee line spans all four.
           if ((row.gameCount || (row.poolGames || []).length) === 1) {
             // One game at a time (12 Oct 2026): a single matchup across all
-            // four pool columns ("Black: X v White: Y"), referees underneath.
+            // four pool columns ("White: X v Black: Y"), referees underneath.
             const refs = poolA && poolA.referees && poolA.referees.length > 0 ? poolA.referees : null;
             return h(
               React.Fragment,
@@ -264,11 +265,11 @@ GUWH.Pages = GUWH.Pages || {};
               h(
                 "div",
                 { className: "py-2.5 border-b border-black/5 col-span-4 text-sm font-semibold text-[var(--ink)] flex flex-wrap items-baseline gap-x-2" },
-                h("span", { className: "text-[var(--ink-soft)] font-normal" }, "Black:"),
-                teamNameInline(poolA && poolA.blackTeamName, highlightTeamName),
-                h("span", { className: "text-[var(--ink-soft)] font-normal px-1" }, "v"),
                 h("span", { className: "text-[var(--ink-soft)] font-normal" }, "White:"),
                 teamNameInline(poolA && poolA.whiteTeamName, highlightTeamName),
+                h("span", { className: "text-[var(--ink-soft)] font-normal px-1" }, "v"),
+                h("span", { className: "text-[var(--ink-soft)] font-normal" }, "Black:"),
+                teamNameInline(poolA && poolA.blackTeamName, highlightTeamName),
                 refs && h("span", { className: "basis-full text-xs font-normal text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(refs))
               )
             );
@@ -277,10 +278,10 @@ GUWH.Pages = GUWH.Pages || {};
             React.Fragment,
             { key: row.id },
             timeCell,
-            teamCell(poolA && poolA.blackTeamName, highlightTeamName),
             teamCell(poolA && poolA.whiteTeamName, highlightTeamName),
-            teamCell(poolB && poolB.blackTeamName, highlightTeamName),
+            teamCell(poolA && poolA.blackTeamName, highlightTeamName),
             teamCell(poolB && poolB.whiteTeamName, highlightTeamName),
+            teamCell(poolB && poolB.blackTeamName, highlightTeamName),
             showRefLine &&
               h(
                 React.Fragment,
@@ -394,16 +395,16 @@ GUWH.Pages = GUWH.Pages || {};
             h(
               "div",
               { className: "flex items-center justify-between gap-3 mt-0.5" },
-              h("span", { className: "text-sm text-[var(--ink)]" }, h("span", { className: "text-[var(--ink-soft)]" }, "Black: "), teamNameInline(pg.blackTeamName, highlightTeamName)),
-              h("span", { className: "font-display font-bold tabular-nums text-[var(--ink)] shrink-0" }, pg.blackScore + " - " + pg.whiteScore),
-              h("span", { className: "text-sm text-[var(--ink)] text-right" }, h("span", { className: "text-[var(--ink-soft)]" }, "White: "), teamNameInline(pg.whiteTeamName, highlightTeamName))
+              h("span", { className: "text-sm text-[var(--ink)]" }, h("span", { className: "text-[var(--ink-soft)]" }, "White: "), teamNameInline(pg.whiteTeamName, highlightTeamName)),
+              h("span", { className: "font-display font-bold tabular-nums text-[var(--ink)] shrink-0" }, pg.whiteScore + " - " + pg.blackScore),
+              h("span", { className: "text-sm text-[var(--ink)] text-right" }, h("span", { className: "text-[var(--ink-soft)]" }, "Black: "), teamNameInline(pg.blackTeamName, highlightTeamName))
             ),
             pg.scorers && pg.scorers.length > 0 &&
               h(
                 "div",
                 { className: "flex justify-between gap-3 text-xs text-[var(--ink-soft)] mt-0.5" },
-                h("span", null, scorerLine(pg, "black")),
-                h("span", { className: "text-right" }, scorerLine(pg, "white"))
+                h("span", null, scorerLine(pg, "white")),
+                h("span", { className: "text-right" }, scorerLine(pg, "black"))
               )
           )
         )
