@@ -40,7 +40,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import {
@@ -66,7 +66,7 @@ import {
 const nextWednesdayISO = nextSessionDateISO;
 
 function shapePlayer(r: any) {
-  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new };
+  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name), isNew: r.is_new };
 }
 
 function badRequest(message: string) {
@@ -89,7 +89,7 @@ async function loadSnapshot(db: any, sessionId: number) {
   const teamPlayers: Record<number, { id: string; firstName: string; lastName: string; displayName: string; grade: string | null }[]> = {};
   assignmentRows.forEach((r: any) => {
     if (!teamPlayers[r.team_id]) teamPlayers[r.team_id] = [];
-    teamPlayers[r.team_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), grade: r.grade });
+    teamPlayers[r.team_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name), grade: r.grade });
   });
 
   const teams: Record<number, TeamInfo> = {};
@@ -134,7 +134,7 @@ async function loadSnapshot(db: any, sessionId: number) {
   );
   const memberNames: Record<string, { firstName: string; lastName: string; displayName?: string; isNew: boolean }> = {};
   confirmedRows.forEach((r: any) => {
-    memberNames[r.id] = { firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new };
+    memberNames[r.id] = { firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name), isNew: r.is_new };
   });
 
   const rowRows = await db.sql`
@@ -158,7 +158,7 @@ async function loadSnapshot(db: any, sessionId: number) {
   const refsByPoolGame: Record<number, { id: string; firstName: string; lastName: string; displayName: string }[]> = {};
   refRows.forEach((r: any) => {
     if (!refsByPoolGame[r.pool_game_id]) refsByPoolGame[r.pool_game_id] = [];
-    refsByPoolGame[r.pool_game_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) });
+    refsByPoolGame[r.pool_game_id].push({ id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name) });
   });
 
   const poolGamesByRow: Record<number, any[]> = {};

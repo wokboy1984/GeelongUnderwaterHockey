@@ -24,7 +24,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, memberDisplayName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, adminName, hasPermission, unauthorized, forbidden } from "./_shared/roles.mts";
 import { cleanRef, ensureInviteColumns, newToken, resolveRef } from "./_shared/invite-links.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
@@ -112,7 +112,7 @@ export default async (req: Request, context: Context) => {
           emergencyName: r.emergency_name,
           emergencyPhone: r.emergency_phone,
           heardFrom: r.heard_from,
-          invitedBy: r.inv_first_name || r.inv_nickname ? memberDisplayName({ nickname: r.inv_nickname, first_name: r.inv_first_name, last_name: r.inv_last_name }) : null,
+          invitedBy: r.inv_first_name || r.inv_nickname ? adminName(r.inv_nickname, r.inv_first_name, r.inv_last_name) : null,
           createdAt: r.created_at,
         })),
       });

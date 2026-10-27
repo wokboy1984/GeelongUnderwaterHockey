@@ -23,7 +23,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized } from "./_shared/roles.mts";
+import { adminName, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized } from "./_shared/roles.mts";
 import { requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
@@ -85,10 +85,10 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string, ca
     const byNominee: Record<string, { nomineeId: string; name: string; votes: number; notes: { by: string; note: string | null }[] }> = {};
     detailRows.forEach((r: any) => {
       if (!byNominee[r.nominee_id]) {
-        byNominee[r.nominee_id] = { nomineeId: r.nominee_id, name: shortName(r.nominee_nick, r.nominee_first, r.nominee_last), votes: 0, notes: [] };
+        byNominee[r.nominee_id] = { nomineeId: r.nominee_id, name: adminName(r.nominee_nick, r.nominee_first, r.nominee_last), votes: 0, notes: [] };
       }
       byNominee[r.nominee_id].votes += 1;
-      byNominee[r.nominee_id].notes.push({ by: shortName(r.ref_nick, r.ref_first, r.ref_last), note: r.note });
+      byNominee[r.nominee_id].notes.push({ by: adminName(r.ref_nick, r.ref_first, r.ref_last), note: r.note });
     });
     out.results = Object.values(byNominee).sort((a, b) => b.votes - a.votes);
   }

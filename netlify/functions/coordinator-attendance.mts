@@ -15,7 +15,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 import { inviteMember } from "./_shared/identity-admin.mts";
 
@@ -41,7 +41,7 @@ async function playerList(db: any, sessionId: number) {
     where b.session_id = ${sessionId} and b.status = 'in'
     order by b.created_at asc
   `;
-  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name), isNew: r.is_new, grade: r.grade, parentName: r.parent_name || null, kind: r.kind || 'player' }));
+  return rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name), isNew: r.is_new, grade: r.grade, parentName: r.parent_name || null, kind: r.kind || 'player' }));
 }
 
 // Who said no (20 Oct 2026). Members can now decline explicitly, which is
@@ -57,7 +57,7 @@ async function declinedList(db: any, sessionId: number) {
     where b.session_id = ${sessionId} and b.status = 'out'
     order by b.created_at asc
   `;
-  return rows.map((r: any) => ({ id: r.id, displayName: shortName(r.nickname, r.first_name, r.last_name) }));
+  return rows.map((r: any) => ({ id: r.id, displayName: adminName(r.nickname, r.first_name, r.last_name) }));
 }
 
 // Members who have a login and haven't answered either way this week.
@@ -103,7 +103,7 @@ export default async (req: Request, context: Context) => {
         limit 8
       `;
       return new Response(
-        JSON.stringify({ ok: true, matches: rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) })) }),
+        JSON.stringify({ ok: true, matches: rows.map((r: any) => ({ id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name) })) }),
         { headers: { "content-type": "application/json" } }
       );
     }

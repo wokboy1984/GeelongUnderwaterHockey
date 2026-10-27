@@ -17,12 +17,12 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { POOLS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
 function shapePlayer(r: any) {
-  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: shortName(r.nickname, r.first_name, r.last_name) };
+  return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name) };
 }
 
 // Weeks that have at least one game row, newest first, up to the upcoming
@@ -131,7 +131,7 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
     order by total_goals desc
     limit 20
   `;
-  const seasonLeaders = seasonRows.map((r: any) => ({ memberId: r.member_id, name: shortName(r.nickname, r.first_name, r.last_name), totalGoals: r.total_goals }));
+  const seasonLeaders = seasonRows.map((r: any) => ({ memberId: r.member_id, name: adminName(r.nickname, r.first_name, r.last_name), totalGoals: r.total_goals }));
 
   return { ok: true, sessionDate, upcoming, weeks, games, seasonLeaders };
 }
