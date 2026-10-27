@@ -72,7 +72,13 @@ window.GUWH = window.GUWH || {};
 
   function init() {
     if (!ready()) return;
-    window.netlifyIdentity.on("login", () => { memberSettled = false; refreshMember(); listeners.forEach((fn) => fn()); });
+    // Close the widget on login (27 Oct 2026). Its modal is a full-screen
+    // transparent iframe that stays open after a confirmation link or a
+    // modal login; on some mobile browsers (Vanadium) its "Logged in as"
+    // box doesn't draw, leaving an invisible layer that swallows every tap
+    // on the Profile form. Safe for password-reset and invite links: the
+    // widget only fires "login" after the new password is saved.
+    window.netlifyIdentity.on("login", () => { window.netlifyIdentity.close(); memberSettled = false; refreshMember(); listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.on("logout", () => { cachedMember = null; memberSettled = true; listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.on("init", (user) => { initDone = true; if (user && !cachedMember) refreshMember(); listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.init();
