@@ -1145,6 +1145,30 @@ GUWH.Pages = GUWH.Pages || {};
       if (trimmed !== (row.notes || "")) onUpdateRow(row, { notes: trimmed || null });
     }
 
+    // Start time and minutes are edited locally and saved once, on blur or
+    // Enter (27 Oct 2026, Liam). Saving every keystroke made the boxes jump:
+    // replies came back out of order and overwrote newer typing, and the
+    // server re-sorts rows by start time on each save, so a half-typed time
+    // moved the card mid-edit.
+    const [time, setTime] = React.useState(minToTimeInput(row.startMin));
+    const [dur, setDur] = React.useState(row.durationMin == null ? "" : String(row.durationMin));
+    React.useEffect(() => { setTime(minToTimeInput(row.startMin)); }, [row.startMin]);
+    React.useEffect(() => { setDur(row.durationMin == null ? "" : String(row.durationMin)); }, [row.durationMin]);
+
+    function commitTime() {
+      const startMin = timeInputToMin(time);
+      // A blank or half-typed time puts the old one back rather than
+      // clearing it.
+      if (startMin == null) { setTime(minToTimeInput(row.startMin)); return; }
+      if (startMin !== row.startMin) onUpdateRow(row, { startMin });
+    }
+    function commitDur() {
+      const durationMin = dur.trim() === "" ? null : Math.max(0, Math.round(Number(dur)));
+      if (Number.isNaN(durationMin)) { setDur(row.durationMin == null ? "" : String(row.durationMin)); return; }
+      if (durationMin !== row.durationMin) onUpdateRow(row, { durationMin });
+    }
+    const blurOnEnter = (e) => { if (e.key === "Enter") e.target.blur(); };
+
     const isGame = row.rowType === "game";
     const single = row.gameCount === 1;
     const poolA = (row.poolGames || []).find((p) => p.pool === "Pool A") || { pool: "Pool A", black: null, white: null, referees: [], eligible: [], unavailable: [] };
@@ -1201,16 +1225,20 @@ GUWH.Pages = GUWH.Pages || {};
         h("input", {
           type: "time",
           className: inputCls + " !w-auto !py-1.5 text-sm",
-          value: minToTimeInput(row.startMin),
-          onChange: (e) => onUpdateRow(row, { startMin: timeInputToMin(e.target.value) }),
+          value: time,
+          onChange: (e) => setTime(e.target.value),
+          onBlur: commitTime,
+          onKeyDown: blurOnEnter,
         }),
         h("input", {
           type: "number",
           min: "0",
           placeholder: "min",
           className: inputCls + " !w-20 !py-1.5 text-sm",
-          value: row.durationMin == null ? "" : row.durationMin,
-          onChange: (e) => onUpdateRow(row, { durationMin: e.target.value === "" ? null : Number(e.target.value) }),
+          value: dur,
+          onChange: (e) => setDur(e.target.value),
+          onBlur: commitDur,
+          onKeyDown: blurOnEnter,
         }),
         row.startMin != null && row.durationMin != null && h("span", { className: "text-xs text-[var(--ink-soft)]" }, "ends " + minToClock(row.startMin + row.durationMin)),
         isGame &&
