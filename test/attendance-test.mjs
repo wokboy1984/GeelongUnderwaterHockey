@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { clubToday, isAttendanceKind, toAttendanceKind } from '../netlify/functions/_shared/attendance.mts';
-import { hasPermission } from '../netlify/functions/_shared/roles.mts';
+import { adminName, hasPermission } from '../netlify/functions/_shared/roles.mts';
 
 test('club attendance date uses Melbourne time', () => {
   assert.equal(clubToday(new Date('2026-09-12T15:30:00Z')), '2026-09-13');
@@ -27,4 +27,11 @@ test('attendance kinds validate, and anything else means playing', () => {
     assert.equal(isAttendanceKind(bad), false);
     assert.equal(toAttendanceKind(bad), 'player');
   }
+});
+
+test('Administration shows full name with the nickname in brackets', () => {
+  assert.equal(adminName('Tayls', 'Sam', 'Taylor'), 'Sam Taylor (Tayls)');
+  assert.equal(adminName('', 'Sam', 'Taylor'), 'Sam Taylor');
+  assert.equal(adminName('sam', 'Sam', 'Taylor'), 'Sam Taylor');
+  assert.equal(adminName('Cheongy', '', ''), 'Cheongy');
 });
