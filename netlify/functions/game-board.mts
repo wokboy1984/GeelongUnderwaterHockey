@@ -25,7 +25,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, shortName, unauthorized } from "./_shared/roles.mts";
+import { ensureDevelopmentTeams, ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, shortName, unauthorized } from "./_shared/roles.mts";
 import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 
@@ -47,6 +47,7 @@ export default async (req: Request, context: Context) => {
 
     await ensureNicknameColumn(db);
     await ensureGameCountColumn(db);
+    await ensureDevelopmentTeams(db);
     const upcoming = nextSessionDateISO();
     const sessionDate = requestedSessionDate(new URL(req.url).searchParams.get("date"));
     const weekRows = await db.sql`
@@ -76,7 +77,7 @@ export default async (req: Request, context: Context) => {
     // did, so nothing that keys off it changes behaviour.
     const published = !!session.published;
 
-    const teamRows = await db.sql`select id, name from game_teams where session_id = ${session.id} order by created_at asc`;
+    const teamRows = await db.sql`select id, name, is_development from game_teams where session_id = ${session.id} order by created_at asc`;
     const teamNames: Record<number, string> = {};
     teamRows.forEach((t: any) => { teamNames[t.id] = t.name; });
 
@@ -90,7 +91,7 @@ export default async (req: Request, context: Context) => {
       if (!byTeam[r.team_id]) byTeam[r.team_id] = [];
       byTeam[r.team_id].push(shapePlayer(r));
     });
-    const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
+    const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, isDevelopment: !!t.is_development, players: byTeam[t.id] || [] }));
 
     const rowRows = await db.sql`
       select id, row_order, row_type, label, start_min, duration_min, notes, game_count
@@ -116,7 +117,12 @@ export default async (req: Request, context: Context) => {
           select gg.pool_game_id, gg.goals, m.id, m.nickname, m.first_name, m.last_name, ta.team_id
           from game_goals gg
           join members m on m.id = gg.member_id
+          join timetable_pool_games pg on pg.id = gg.pool_game_id
+          -- Only the team that was in this game: a player can be in a
+          -- development team and a main team, and joining both would list
+          -- every goal twice (27 Oct 2026).
           left join team_assignments ta on ta.member_id = gg.member_id and ta.session_id = ${session.id}
+            and ta.team_id in (pg.black_team_id, pg.white_team_id)
           where gg.pool_game_id = any(${poolGameIds}) and gg.goals > 0
           order by gg.goals desc, m.first_name asc
         `

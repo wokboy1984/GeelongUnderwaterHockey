@@ -14,13 +14,17 @@
 //    confirmed player who isn't on a team yet goes back into the team of
 //    the same name they were last on. Each player is only tried once per
 //    week (team_autoplaced), so if the coordinator moves or removes them,
-//    they stay where the coordinator put them.
+//    they stay where the coordinator put them. Development teams carry
+//    over the same way, separately from the main team (27 Oct 2026).
 //
 // Both only ever touch the upcoming session. Everything here can be
 // changed by the coordinator before publishing.
 
+import { ensureDevelopmentTeams } from "./roles.mts";
+
 let columnsReady = false;
 export async function ensureCarryForwardColumns(db: any): Promise<void> {
+  await ensureDevelopmentTeams(db);
   if (columnsReady) return;
   await db.sql`alter table sessions add column if not exists timetable_copied_at timestamptz`;
   await db.sql`alter table sessions add column if not exists timetable_copied_from date`;
@@ -70,10 +74,10 @@ export async function copyForwardWeek(
   const teamMap: Record<number, number> = {}; // last week's team id -> this week's
   const [{ teamCount }] = await db.sql`select count(*)::int as "teamCount" from game_teams where session_id = ${sessionId}`;
   const thisWeekTeams = await db.sql`select id, name from game_teams where session_id = ${sessionId}`;
-  const prevTeams = await db.sql`select id, name from game_teams where session_id = ${prev.id} order by created_at asc, id asc`;
+  const prevTeams = await db.sql`select id, name, is_development from game_teams where session_id = ${prev.id} order by created_at asc, id asc`;
   if (teamCount === 0) {
     for (const t of prevTeams) {
-      const [nt] = await db.sql`insert into game_teams (session_id, name) values (${sessionId}, ${t.name}) returning id`;
+      const [nt] = await db.sql`insert into game_teams (session_id, name, is_development) values (${sessionId}, ${t.name}, ${!!t.is_development}) returning id`;
       teamMap[t.id] = nt.id;
     }
   } else {
@@ -133,38 +137,49 @@ export async function autoPlaceReturningPlayers(db: any, sessionId: number, sess
   const [s] = await db.sql`select published from sessions where id = ${sessionId}`;
   if (!s || s.published) return;
 
-  // Confirmed, not on a team this week, and not already tried this week.
+  // Confirmed and not already tried this week.
   const candidates = await db.sql`
     select b.member_id
     from bookings b
     where b.session_id = ${sessionId} and b.status = 'in'
-      and not exists (select 1 from team_assignments ta where ta.session_id = ${sessionId} and ta.member_id = b.member_id)
       and not exists (select 1 from team_autoplaced tp where tp.session_id = ${sessionId} and tp.member_id = b.member_id)
   `;
   if (!candidates.length) return;
-  const teams = await db.sql`select id, name from game_teams where session_id = ${sessionId}`;
+  const teams = await db.sql`select id, name, is_development from game_teams where session_id = ${sessionId}`;
 
   for (const c of candidates) {
-    const [last] = await db.sql`
-      select gt.name
-      from team_assignments ta
-      join game_teams gt on gt.id = ta.team_id
-      join sessions s on s.id = ta.session_id
-      where ta.member_id = ${c.member_id} and s.session_date < ${sessionDate}
-      order by s.session_date desc
-      limit 1
-    `;
-    const match = last ? teams.find((t: any) => t.name.trim().toLowerCase() === String(last.name).trim().toLowerCase()) : null;
-    if (match) {
+    // Main team and development team are placed separately (27 Oct 2026):
+    // each goes back to the last team of that kind they were in, unless
+    // they're already in one of that kind this week.
+    let placed: number | null = null;
+    for (const dev of [false, true]) {
+      const [already] = await db.sql`
+        select 1 from team_assignments where session_id = ${sessionId} and member_id = ${c.member_id} and is_development = ${dev}
+      `;
+      if (already) continue;
+      const [last] = await db.sql`
+        select gt.name
+        from team_assignments ta
+        join game_teams gt on gt.id = ta.team_id
+        join sessions s on s.id = ta.session_id
+        where ta.member_id = ${c.member_id} and s.session_date < ${sessionDate} and gt.is_development = ${dev}
+        order by s.session_date desc
+        limit 1
+      `;
+      const match = last
+        ? teams.find((t: any) => !!t.is_development === dev && t.name.trim().toLowerCase() === String(last.name).trim().toLowerCase())
+        : null;
+      if (!match) continue;
       await db.sql`
-        insert into team_assignments (session_id, member_id, team_id)
-        values (${sessionId}, ${c.member_id}, ${match.id})
+        insert into team_assignments (session_id, member_id, team_id, is_development)
+        values (${sessionId}, ${c.member_id}, ${match.id}, ${dev})
         on conflict do nothing
       `;
+      if (placed == null) placed = match.id;
     }
     await db.sql`
       insert into team_autoplaced (session_id, member_id, placed_team_id)
-      values (${sessionId}, ${c.member_id}, ${match ? match.id : null})
+      values (${sessionId}, ${c.member_id}, ${placed})
       on conflict do nothing
     `;
   }

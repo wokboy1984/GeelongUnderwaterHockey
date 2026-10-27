@@ -590,6 +590,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [error, setError] = React.useState(null);
     const [assignTo, setAssignTo] = React.useState({}); // memberId -> teamId
     const [newTeamName, setNewTeamName] = React.useState("");
+    const [newTeamDev, setNewTeamDev] = React.useState(false);
     const [renaming, setRenaming] = React.useState({}); // teamId -> draft name
     // Drag players between teams (12 Oct 2026, Cheongy: "can we just drag
     // them?"). Drag any player onto a team to move them there, or onto
@@ -607,16 +608,29 @@ GUWH.Pages = GUWH.Pages || {};
         onDrop: (e) => { e.preventDefault(); const p = dragging; setDragging(null); setDropKey(null); if (p) onDropPlayer(p); },
       };
     }
-    function teamOf(player) {
-      const t = (board.teams || []).find((x) => x.players.some((pp) => pp.id === player.id));
+    // Development teams (27 Oct 2026, Liam): a player can be in one
+    // development team (the 6:15 development game) and one main team (the
+    // later games). Everything below works per kind: moving between main
+    // teams leaves their development team alone, and vice versa.
+    const [dragFromDev, setDragFromDev] = React.useState(false);
+    function teamOf(player, dev) {
+      const t = (board.teams || []).find((x) => !!x.isDevelopment === !!dev && x.players.some((pp) => pp.id === player.id));
       return t ? t.id : null;
     }
-    function moveTo(player, teamId) {
-      if (teamId === "unassigned") { if (teamOf(player) != null) call({ action: "unassign", memberEmail: player.email }); return; }
-      if (teamOf(player) === Number(teamId)) return;
-      call({ action: "assign", memberEmail: player.email, teamId: Number(teamId) });
+    function moveTo(player, teamId, dev) {
+      if (teamId === "unassigned" || teamId === "none") {
+        if (teamOf(player, dev) != null) call({ action: "unassign", memberEmail: player.email, development: !!dev });
+        return;
+      }
+      const team = (board.teams || []).find((t) => t.id === Number(teamId));
+      if (!team || teamOf(player, team.isDevelopment) === team.id) return;
+      call({ action: "assign", memberEmail: player.email, teamId: team.id });
     }
-    const dragProps = { onDragStart: (p) => setDragging(p), onDragEnd: () => { setDragging(null); setDropKey(null); } };
+    const dragPropsFor = (dev) => ({
+      onDragStart: (p) => { setDragging(p); setDragFromDev(dev); },
+      onDragEnd: () => { setDragging(null); setDropKey(null); },
+    });
+    const dragProps = dragPropsFor(false);
 
     function load() {
       setLoading(true);
@@ -645,8 +659,9 @@ GUWH.Pages = GUWH.Pages || {};
     function createTeam(ev) {
       ev.preventDefault();
       if (!newTeamName.trim()) return;
-      call({ action: "create_team", name: newTeamName.trim() });
+      call({ action: "create_team", name: newTeamName.trim(), isDevelopment: newTeamDev });
       setNewTeamName("");
+      setNewTeamDev(false);
     }
 
     function renameTeam(teamId) {
@@ -657,7 +672,8 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     function assign(player) {
-      const teamId = assignTo[player.id] || (board.teams[0] && board.teams[0].id);
+      const firstMain = board.teams.find((t) => !t.isDevelopment);
+      const teamId = assignTo[player.id] || (firstMain && firstMain.id);
       if (!teamId) return;
       call({ action: "assign", memberEmail: player.email, teamId: Number(teamId) });
     }
@@ -674,6 +690,97 @@ GUWH.Pages = GUWH.Pages || {};
 
     if (loading) return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…");
     if (!board) return error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
+
+    const mainTeams = board.teams.filter((t) => !t.isDevelopment);
+    const devTeams = board.teams.filter((t) => t.isDevelopment);
+
+    // A player's development game team, or "No dev game". Only shown once
+    // there's a development team to choose.
+    function devSelect(p) {
+      if (!devTeams.length) return null;
+      const cur = teamOf(p, true);
+      return h(
+        "select",
+        {
+          className: inputCls + " !w-auto !py-1 text-xs",
+          value: cur != null ? String(cur) : "none",
+          "aria-label": "Development game team for " + GUWH.displayName(p),
+          onChange: (e) => moveTo(p, e.target.value, true),
+        },
+        h("option", { value: "none" }, "No dev game"),
+        devTeams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name))
+      );
+    }
+    function mainSelect(p, team) {
+      return h(
+        "select",
+        {
+          className: inputCls + " !w-auto !py-1 text-xs",
+          value: String(team.id),
+          "aria-label": "Move " + GUWH.displayName(p) + " to",
+          onChange: (e) => moveTo(p, e.target.value, false),
+        },
+        mainTeams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
+        h("option", { value: "unassigned" }, "Unassigned")
+      );
+    }
+
+    function teamCard(team) {
+      const dev = !!team.isDevelopment;
+      return h(
+        "div",
+        Object.assign(
+          { key: team.id, className: cx("rounded-2xl p-4 flex flex-col gap-3 transition", dev ? "bg-[var(--accent-12)]" : "bg-[var(--sand)]", dropKey === team.id && "ring-2 ring-[var(--accent)]") },
+          dropZone(team.id, (p) => moveTo(p, team.id))
+        ),
+        h(
+          "div",
+          { className: "flex items-center justify-between gap-2" },
+          renaming[team.id] != null
+            ? h(
+                "div",
+                { className: "flex items-center gap-2 flex-1" },
+                h("input", {
+                  className: inputCls + " !py-1.5 text-sm",
+                  value: renaming[team.id],
+                  onChange: (e) => setRenaming((prev) => Object.assign({}, prev, { [team.id]: e.target.value })),
+                  autoFocus: true,
+                }),
+                h(Button, { size: "sm", onClick: () => renameTeam(team.id) }, "Save")
+              )
+            : h(
+                "button",
+                { className: "text-left font-display font-bold text-[var(--ink)] hover:underline", onClick: () => setRenaming((prev) => Object.assign({}, prev, { [team.id]: team.name })) },
+                team.name + " (" + team.players.length + ")"
+              ),
+          h(Button, { size: "sm", variant: "ghost", onClick: () => call({ action: "delete_team", teamId: team.id }) }, "Delete team")
+        ),
+        h(
+          "div",
+          { className: "flex flex-col gap-2" },
+          team.players.length === 0
+            ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No players yet.")
+            : team.players.map((p) => {
+                const main = dev ? mainTeams.find((t) => t.id === teamOf(p, false)) : null;
+                return h(PlayerRow, Object.assign({}, dragPropsFor(dev), {
+                  key: p.id,
+                  player: p,
+                  fromLastWeek: (board.autoPlacedIds || []).indexOf(p.id) !== -1,
+                  action: dev
+                    ? h(
+                        "div",
+                        { className: "flex items-center gap-2 flex-wrap justify-end" },
+                        // Warn, don't block (Liam): someone might only play
+                        // the development game.
+                        h("span", { className: cx("text-[10px] font-semibold", main ? "text-[var(--ink-soft)]" : "text-[var(--bad)]") }, main ? "Later: " + main.name : "No main team yet"),
+                        devSelect(p)
+                      )
+                    : h("div", { className: "flex items-center gap-2 flex-wrap justify-end" }, mainSelect(p, team), devSelect(p)),
+                }));
+              })
+        )
+      );
+    }
 
     return h(
       React.Fragment,
@@ -694,20 +801,26 @@ GUWH.Pages = GUWH.Pages || {};
 
       h(
         "form",
-        { onSubmit: createTeam, className: "flex gap-3 items-end mb-6" },
-        h(FormField, { label: "New team name" }, h("input", { className: inputCls, value: newTeamName, onChange: (e) => setNewTeamName(e.target.value), placeholder: "e.g. Freedivers" })),
+        { onSubmit: createTeam, className: "flex flex-wrap gap-3 items-end mb-6" },
+        h(FormField, { label: "New team name" }, h("input", { className: inputCls, value: newTeamName, onChange: (e) => setNewTeamName(e.target.value), placeholder: newTeamDev ? "e.g. Dev Team 1" : "e.g. Freedivers" })),
+        h(
+          "label",
+          { className: "flex items-center gap-2 text-sm text-[var(--ink)] pb-3" },
+          h("input", { type: "checkbox", checked: newTeamDev, onChange: (e) => setNewTeamDev(e.target.checked) }),
+          "Development team"
+        ),
         h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Add team")
       ),
 
-      (board.unassigned.length > 0 || (dragging && teamOf(dragging) != null)) &&
+      (board.unassigned.length > 0 || (dragging && teamOf(dragging, dragFromDev) != null)) &&
         h(
           "div",
           Object.assign(
             { className: cx("rounded-2xl bg-[var(--warn-10)] p-5 mb-6 transition", dropKey === "unassigned" && "ring-2 ring-[var(--accent)]") },
-            dropZone("unassigned", (p) => moveTo(p, "unassigned"))
+            dropZone("unassigned", (p) => moveTo(p, "unassigned", dragFromDev))
           ),
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-3" }, "Unassigned (" + board.unassigned.length + ")"),
-          board.teams.length === 0
+          mainTeams.length === 0
             ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Create a team above before assigning players.")
             : h(
                 "div",
@@ -718,13 +831,14 @@ GUWH.Pages = GUWH.Pages || {};
                     player: p,
                     action: h(
                       "div",
-                      { className: "flex items-center gap-2" },
+                      { className: "flex items-center gap-2 flex-wrap justify-end" },
                       h(
                         "select",
-                        { className: inputCls + " !w-auto !py-1.5 text-sm", value: assignTo[p.id] || board.teams[0].id, onChange: (e) => setAssignTo((prev) => Object.assign({}, prev, { [p.id]: e.target.value })) },
-                        board.teams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
+                        { className: inputCls + " !w-auto !py-1.5 text-sm", value: assignTo[p.id] || mainTeams[0].id, onChange: (e) => setAssignTo((prev) => Object.assign({}, prev, { [p.id]: e.target.value })) },
+                        mainTeams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
                       ),
-                      h(Button, { size: "sm", onClick: () => assign(p) }, "Assign")
+                      h(Button, { size: "sm", onClick: () => assign(p) }, "Assign"),
+                      devSelect(p)
                     ),
                   }))
                 )
@@ -733,65 +847,16 @@ GUWH.Pages = GUWH.Pages || {};
 
       board.teams.length === 0
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No teams yet — add one above.")
-        : h(
-            "div",
-            { className: "grid sm:grid-cols-2 gap-5" },
-            board.teams.map((team) =>
-              h(
-                "div",
-                Object.assign(
-                  { key: team.id, className: cx("rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3 transition", dropKey === team.id && "ring-2 ring-[var(--accent)]") },
-                  dropZone(team.id, (p) => moveTo(p, team.id))
-                ),
-                h(
-                  "div",
-                  { className: "flex items-center justify-between gap-2" },
-                  renaming[team.id] != null
-                    ? h(
-                        "div",
-                        { className: "flex items-center gap-2 flex-1" },
-                        h("input", {
-                          className: inputCls + " !py-1.5 text-sm",
-                          value: renaming[team.id],
-                          onChange: (e) => setRenaming((prev) => Object.assign({}, prev, { [team.id]: e.target.value })),
-                          autoFocus: true,
-                        }),
-                        h(Button, { size: "sm", onClick: () => renameTeam(team.id) }, "Save")
-                      )
-                    : h(
-                        "button",
-                        { className: "text-left font-display font-bold text-[var(--ink)] hover:underline", onClick: () => setRenaming((prev) => Object.assign({}, prev, { [team.id]: team.name })) },
-                        team.name + " (" + team.players.length + ")"
-                      ),
-                  h(Button, { size: "sm", variant: "ghost", onClick: () => call({ action: "delete_team", teamId: team.id }) }, "Delete team")
-                ),
-                h(
-                  "div",
-                  { className: "flex flex-col gap-2" },
-                  team.players.length === 0
-                    ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No players yet.")
-                    : team.players.map((p) =>
-                        h(PlayerRow, Object.assign({}, dragProps, {
-                          key: p.id,
-                          player: p,
-                          fromLastWeek: (board.autoPlacedIds || []).indexOf(p.id) !== -1,
-                          action: h(
-                            "select",
-                            {
-                              className: inputCls + " !w-auto !py-1 text-xs",
-                              value: String(team.id),
-                              "aria-label": "Move " + GUWH.displayName(p) + " to",
-                              onChange: (e) => moveTo(p, e.target.value),
-                            },
-                            board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
-                            h("option", { value: "unassigned" }, "Unassigned")
-                          ),
-                        }))
-                      )
-                )
-              )
-            )
-          ),
+        : mainTeams.length > 0 && h("div", { className: "grid sm:grid-cols-2 gap-5" }, mainTeams.map(teamCard)),
+
+      devTeams.length > 0 &&
+        h(
+          "div",
+          { className: "mt-8" },
+          h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Development teams"),
+          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "For the development game. Each player here also keeps their main team for the later games."),
+          h("div", { className: "grid sm:grid-cols-2 gap-5" }, devTeams.map(teamCard))
+        ),
 
       // Said they're not coming. Kept at the bottom, out of the way, but
       // here so the coordinator can still place them if they turn up.

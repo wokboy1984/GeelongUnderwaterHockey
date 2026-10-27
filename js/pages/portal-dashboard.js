@@ -125,7 +125,8 @@ GUWH.Pages = GUWH.Pages || {};
   // MyTeamSummary so Profile and This Week's Game say the same thing.
   function MyTeamCard({ board, memberId }) {
     const team = myTeamFor(board, memberId);
-    const colours = myGameColours(board, team);
+    const devTeam = myDevTeamFor(board, memberId);
+    const colours = myGameColours(board, [devTeam, team]);
     return h(
       "div",
       { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
@@ -140,7 +141,7 @@ GUWH.Pages = GUWH.Pages || {};
             "Draft"
           )
       ),
-      h(GUWH.UI.MyTeamSummary, { team, colours, memberId }),
+      h(GUWH.UI.MyTeamSummary, { team, devTeam, colours, memberId }),
       // Spelled out immediately above the link through to the board, where
       // a member is about to act on what they've just read. The pill up top
       // is easy to skim past; this sentence is the one that lands.

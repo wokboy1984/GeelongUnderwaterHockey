@@ -167,6 +167,20 @@ export async function ensureForumAttachments(db: any): Promise<void> {
   forumAttachmentsReady = true;
 }
 
+// Development teams (27 Oct 2026). Added by migration
+// 20261027000001_development_teams; ensured here too, same reason as the
+// columns above. A player may be in one development team and one main team
+// on the same night, never two of the same kind.
+let developmentTeamsReady = false;
+export async function ensureDevelopmentTeams(db: any): Promise<void> {
+  if (developmentTeamsReady) return;
+  await db.sql`alter table game_teams add column if not exists is_development boolean not null default false`;
+  await db.sql`alter table team_assignments add column if not exists is_development boolean not null default false`;
+  await db.sql`alter table team_assignments drop constraint if exists team_assignments_session_member_unique`;
+  await db.sql`create unique index if not exists team_assignments_session_member_kind on team_assignments (session_id, member_id, is_development)`;
+  developmentTeamsReady = true;
+}
+
 // One-or-two-games timetable rows (12 Oct 2026). Column added by migration
 // 20261012000001_timetable_game_count; ensured here too, same reason as
 // the nickname column above.

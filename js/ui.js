@@ -527,7 +527,10 @@ window.GUWH = window.GUWH || {};
     );
   }
 
-  function MyTeamSummary({ team, colours, memberId, className }) {
+  // devTeam (27 Oct 2026): the development team they play the early game
+  // in, alongside their main team. Either can be missing.
+  function MyTeamSummary({ team, devTeam, colours, memberId, className }) {
+    if (!team && devTeam) { team = devTeam; devTeam = null; }
     if (!team) {
       return h(
         "div",
@@ -543,7 +546,10 @@ window.GUWH = window.GUWH || {};
         "p",
         { className: "text-sm text-[var(--ink)]" },
         "You're in ",
-        h("span", { className: "font-bold text-[var(--accent-dark)]" }, team.name)
+        h("span", { className: "font-bold text-[var(--accent-dark)]" }, team.name),
+        devTeam && " and ",
+        devTeam && h("span", { className: "font-bold text-[var(--accent-dark)]" }, devTeam.name),
+        devTeam && " for the development game"
       ),
       colours.length === 0
         ? h("p", { className: "text-xs text-[var(--ink-soft)]" }, "No games scheduled for your team yet.")

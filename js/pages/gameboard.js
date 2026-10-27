@@ -97,8 +97,15 @@ GUWH.Pages = GUWH.Pages || {};
   // when it's the logged-in member's own team (see highlightTeamName below)
   // — an accent border/background plus a "YOUR TEAM" label, never colour
   // alone, so it still reads under colour-blindness or on a bad screen.
+  // highlightTeamName can be one name or a list: a player in a development
+  // team and a main team (27 Oct 2026) has both highlighted.
+  function isMyTeam(name, highlightTeamName) {
+    if (!name || !highlightTeamName) return false;
+    return Array.isArray(highlightTeamName) ? highlightTeamName.indexOf(name) !== -1 : name === highlightTeamName;
+  }
+
   function teamCell(name, highlightTeamName, extraClass, prefix) {
-    const mine = !!(name && highlightTeamName && name === highlightTeamName);
+    const mine = isMyTeam(name, highlightTeamName);
     return h(
       "div",
       { className: cx("py-2.5 border-b border-black/5 text-sm font-semibold", extraClass, mine ? "text-[var(--accent-dark)]" : "text-[var(--ink)]") },
@@ -112,7 +119,7 @@ GUWH.Pages = GUWH.Pages || {};
   // team" is shown with a bold accent colour plus a "(you)" word, never
   // colour alone.
   function teamNameInline(name, highlightTeamName) {
-    const mine = !!(name && highlightTeamName && name === highlightTeamName);
+    const mine = isMyTeam(name, highlightTeamName);
     return h(
       "span",
       { className: mine ? "font-bold text-[var(--accent-dark)]" : undefined },
@@ -442,7 +449,8 @@ GUWH.Pages = GUWH.Pages || {};
     // Highlighting works on drafts too (20 Oct 2026) — knowing your team
     // early is most of the point of showing an unfinished board.
     const myTeam = myId ? myTeamFor(data, myId) : null;
-    const myTeamName = myTeam ? myTeam.name : null;
+    const myDevTeam = myId ? myDevTeamFor(data, myId) : null;
+    const myTeamName = [myTeam, myDevTeam].filter(Boolean).map((t) => t.name);
     const showBoard = !!(data && data.hasDraft);
 
     return h(
@@ -475,7 +483,7 @@ GUWH.Pages = GUWH.Pages || {};
                   "div",
                   { className: "grid sm:grid-cols-2 gap-4" },
                   data.teams.map((team) => {
-                    const mine = team.name === myTeamName;
+                    const mine = isMyTeam(team.name, myTeamName);
                     return h(
                       "div",
                       { key: team.id, className: cx("rounded-2xl p-4", mine ? "bg-[var(--accent-12)] ring-2 ring-[var(--accent)]" : "bg-[var(--sand)]") },
