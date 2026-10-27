@@ -3,11 +3,18 @@
 // Real data, backed by game_teams + team_assignments.
 //
 // GET  /api/coordinator/teams -> { ok, sessionDate, published, confirmed, teams, unassigned, notAttending }
-// POST /api/coordinator/teams { action: "create_team", name }
+// POST /api/coordinator/teams { action: "create_team", name, isDevelopment? }
 // POST /api/coordinator/teams { action: "rename_team", teamId, name }
 // POST /api/coordinator/teams { action: "delete_team", teamId }
 // POST /api/coordinator/teams { action: "assign", memberEmail, teamId }
-// POST /api/coordinator/teams { action: "unassign", memberEmail }
+// POST /api/coordinator/teams { action: "unassign", memberEmail, development? }
+//      -> takes them out of their main team, or their development team
+//         when development is true
+//
+// Development teams (27 Oct 2026, Liam): a team created with isDevelopment
+// is for the development game. A player can be in one development team and
+// one main team at once; assigning to a team only replaces their team of
+// the same kind.
 // POST /api/coordinator/teams { action: "book_in", memberEmail, teamId? }
 //      -> books in someone who said they weren't coming (they turned up
 //         anyway), and puts them in that team if one is given
@@ -17,7 +24,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureDevelopmentTeams, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
@@ -102,45 +109,50 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   const confirmed = confirmedRows.map(shapePlayer);
 
   const teamRows = await db.sql`
-    select id, name from game_teams where session_id = ${sessionId} order by created_at asc
+    select id, name, is_development from game_teams where session_id = ${sessionId} order by created_at asc
   `;
 
   const assignedRows = await db.sql`
-    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade, m.position, ta.team_id
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade, m.position, ta.team_id, ta.is_development
     from team_assignments ta join members m on m.id = ta.member_id
     where ta.session_id = ${sessionId}
   `;
   const byTeam: Record<number, any[]> = {};
-  const assignedIds = new Set<string>();
+  // Each member's main and development team, for the Teams tab.
+  const memberTeams: Record<string, { main: number | null; dev: number | null }> = {};
   assignedRows.forEach((r: any) => {
     if (!byTeam[r.team_id]) byTeam[r.team_id] = [];
     byTeam[r.team_id].push(shapePlayer(r));
-    assignedIds.add(r.id);
+    const mt = memberTeams[r.id] || (memberTeams[r.id] = { main: null, dev: null });
+    if (r.is_development) mt.dev = r.team_id; else mt.main = r.team_id;
   });
 
-  const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
-  const unassigned = confirmed.filter((p: any) => !assignedIds.has(p.id));
+  const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, isDevelopment: !!t.is_development, players: byTeam[t.id] || [] }));
+  // Unassigned = no main team yet. A development player with no main team
+  // shows here too, which is the warning that they still need one.
+  const unassigned = confirmed.filter((p: any) => !(memberTeams[p.id] && memberTeams[p.id].main));
 
   // Everyone who said they're not coming (27 Oct 2026, Liam), shown in
   // their own box at the bottom of the Teams tab in case they turn up
   // anyway. Someone already in a team who later said no stays in that
   // team (removing them is the coordinator's call), so teamId says where.
-  const teamOfMember: Record<string, number> = {};
-  assignedRows.forEach((r: any) => { teamOfMember[r.id] = r.team_id; });
   const outRows = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade, m.position
     from bookings b join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'out'
     order by lower(m.first_name), lower(m.last_name)
   `;
-  const notAttending = outRows.map((r: any) => ({ ...shapePlayer(r), teamId: teamOfMember[r.id] || null }));
+  const notAttending = outRows.map((r: any) => {
+    const mt = memberTeams[r.id];
+    return { ...shapePlayer(r), teamId: (mt && (mt.main || mt.dev)) || null };
+  });
 
   // Carried forward from last week (12 Oct 2026) - for the Teams tab notice.
   const [carry] = await db.sql`select timetable_copied_from::text as copied_from from sessions where id = ${sessionId}`;
   const autoRows = await db.sql`select member_id from team_autoplaced where session_id = ${sessionId} and placed_team_id is not null`;
 
   return {
-    ok: true, sessionDate, published, confirmed, teams, unassigned, notAttending,
+    ok: true, sessionDate, published, confirmed, teams, unassigned, notAttending, memberTeams,
     copiedFrom: carry ? carry.copied_from : null,
     autoPlacedIds: autoRows.map((r: any) => r.member_id),
   };
@@ -169,6 +181,7 @@ export default async (req: Request, context: Context) => {
   const db = getDatabase();
   await ensureNicknameColumn(db);
   await ensureAttendanceKinds(db);
+  await ensureDevelopmentTeams(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "arrange_teams")) {
     return forbidden("Only Game Coordinators and Administrators can arrange teams");
@@ -200,13 +213,14 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
+        const isDevelopment = body.isDevelopment === true;
         const [team] = await db.sql`
-          insert into game_teams (session_id, name) values (${sessionId}, ${name}) returning id
+          insert into game_teams (session_id, name, is_development) values (${sessionId}, ${name}, ${isDevelopment}) returning id
         `;
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "team_created",
           resourceType: "game_team", resourceId: String(team.id),
-          newValue: { sessionDate, name }, note: `${caller.email} created team "${name}"`,
+          newValue: { sessionDate, name, isDevelopment }, note: `${caller.email} created ${isDevelopment ? "development " : ""}team "${name}"`,
         });
       } else if (action === "rename_team") {
         const teamId = Number(body.teamId);
@@ -248,7 +262,7 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
-        const [team] = await db.sql`select id from game_teams where id = ${teamId} and session_id = ${sessionId}`;
+        const [team] = await db.sql`select id, is_development from game_teams where id = ${teamId} and session_id = ${sessionId}`;
         if (!team) {
           return new Response(JSON.stringify({ ok: false, error: "That team doesn't exist for this session" }), {
             status: 400,
@@ -261,11 +275,14 @@ export default async (req: Request, context: Context) => {
         // added to another). Done as delete-then-insert rather than
         // "on conflict (session_id, member_id)": that needs the unique
         // constraint from migration 20260912000002, and migrations have
-        // not always reached production on this project.
-        await db.sql`delete from team_assignments where session_id = ${sessionId} and member_id = ${target.id}`;
+        // not always reached production on this project. Only their team
+        // of the same kind is replaced: moving someone between main teams
+        // leaves their development team alone, and vice versa.
+        const dev = !!team.is_development;
+        await db.sql`delete from team_assignments where session_id = ${sessionId} and member_id = ${target.id} and is_development = ${dev}`;
         await db.sql`
-          insert into team_assignments (session_id, team_id, member_id)
-          values (${sessionId}, ${teamId}, ${target.id})
+          insert into team_assignments (session_id, team_id, member_id, is_development)
+          values (${sessionId}, ${teamId}, ${target.id}, ${dev})
         `;
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "team_assignment_changed",
@@ -275,11 +292,12 @@ export default async (req: Request, context: Context) => {
       } else if (action === "unassign") {
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;
         if (target) {
-          await db.sql`delete from team_assignments where session_id = ${sessionId} and member_id = ${target.id}`;
+          const dev = body.development === true;
+          await db.sql`delete from team_assignments where session_id = ${sessionId} and member_id = ${target.id} and is_development = ${dev}`;
           await logAudit(db, {
             actorId: caller.id, actorEmail: caller.email, action: "team_assignment_changed",
             resourceType: "team_assignment", resourceId: target.id,
-            previousValue: { sessionDate }, note: `${caller.email} unassigned ${target.email}`,
+            previousValue: { sessionDate, development: dev }, note: `${caller.email} unassigned ${target.email}${dev ? " from their development team" : ""}`,
           });
         }
       } else if (action === "publish") {

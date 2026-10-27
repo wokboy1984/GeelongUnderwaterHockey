@@ -61,10 +61,16 @@ async function shareOrCopy({ title, text, url }) {
 // label it, these two only read what's there.
 // ---------------------------------------------------------------------------
 
-// The member's team for that board, or null if they haven't been assigned.
+// The member's main team for that board, or null if they haven't been
+// assigned. Development teams (27 Oct 2026) are separate: a player can be
+// in one of each, so myDevTeamFor() finds the other one.
 function myTeamFor(board, memberId) {
   if (!board || !memberId || !Array.isArray(board.teams)) return null;
-  return board.teams.find((t) => (t.players || []).some((p) => p.id === memberId)) || null;
+  return board.teams.find((t) => !t.isDevelopment && (t.players || []).some((p) => p.id === memberId)) || null;
+}
+function myDevTeamFor(board, memberId) {
+  if (!board || !memberId || !Array.isArray(board.teams)) return null;
+  return board.teams.find((t) => t.isDevelopment && (t.players || []).some((p) => p.id === memberId)) || null;
 }
 
 // Timetable minutes are an offset from a 6:00pm start, not a clock time.
@@ -87,14 +93,18 @@ function minToClock(min) {
 // appear. `label` and `timeLabel` are what make the list readable — four
 // rows all reading "Black sticks, Pool A" tell a member nothing about
 // when they're actually on.
+// `team` can also be a list (a development team and a main team), giving
+// every game the member plays in time order.
 function myGameColours(board, team) {
-  if (!board || !team || !Array.isArray(board.rows)) return [];
+  const teams = (Array.isArray(team) ? team : [team]).filter(Boolean);
+  if (!board || !teams.length || !Array.isArray(board.rows)) return [];
   const out = [];
   board.rows.forEach((row) => {
     if (!row || !row.isGame) return;
     (row.poolGames || []).forEach((pg) => {
-      const colour = pg.blackTeamName === team.name ? "black" : pg.whiteTeamName === team.name ? "white" : null;
-      if (!colour) return;
+      const team = teams.find((t) => pg.blackTeamName === t.name || pg.whiteTeamName === t.name);
+      if (!team) return;
+      const colour = pg.blackTeamName === team.name ? "black" : "white";
       out.push({
         pool: pg.pool,
         colour,

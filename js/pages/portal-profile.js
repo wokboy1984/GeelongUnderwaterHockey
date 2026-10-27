@@ -233,7 +233,8 @@ GUWH.Pages = GUWH.Pages || {};
     if (!loaded || !board || !board.hasDraft) return null;
 
     const myTeam = myTeamFor(board, memberId);
-    const colours = myGameColours(board, myTeam);
+    const devTeam = myDevTeamFor(board, memberId);
+    const colours = myGameColours(board, [devTeam, myTeam]);
 
     return h(
       "div",
@@ -245,11 +246,11 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "text-xs text-[var(--ink-soft)]" }, GUWH.formatDate(new Date(board.sessionDate + "T00:00:00")))
       ),
       !board.published && h(GUWH.UI.DraftNotice),
-      h(GUWH.UI.MyTeamSummary, { team: myTeam, colours, memberId }),
+      h(GUWH.UI.MyTeamSummary, { team: myTeam, devTeam, colours, memberId }),
       h(
         "div",
         { className: "rounded-2xl bg-white p-4" },
-        h(GUWH.Pages.PublicTimetable, { rows: board.rows, highlightTeamName: myTeam ? myTeam.name : null })
+        h(GUWH.Pages.PublicTimetable, { rows: board.rows, highlightTeamName: [myTeam, devTeam].filter(Boolean).map((t) => t.name) })
       )
     );
   }
