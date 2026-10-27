@@ -2,12 +2,15 @@
 // teams for the night, assigns confirmed players to them, and publishes.
 // Real data, backed by game_teams + team_assignments.
 //
-// GET  /api/coordinator/teams -> { ok, sessionDate, published, confirmed, teams, unassigned }
+// GET  /api/coordinator/teams -> { ok, sessionDate, published, confirmed, teams, unassigned, notAttending }
 // POST /api/coordinator/teams { action: "create_team", name }
 // POST /api/coordinator/teams { action: "rename_team", teamId, name }
 // POST /api/coordinator/teams { action: "delete_team", teamId }
 // POST /api/coordinator/teams { action: "assign", memberEmail, teamId }
 // POST /api/coordinator/teams { action: "unassign", memberEmail }
+// POST /api/coordinator/teams { action: "book_in", memberEmail, teamId? }
+//      -> books in someone who said they weren't coming (they turned up
+//         anyway), and puts them in that team if one is given
 // POST /api/coordinator/teams { action: "publish", published }
 //
 // Requires 'game_coordinator' or 'administrator'.
@@ -118,15 +121,45 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, players: byTeam[t.id] || [] }));
   const unassigned = confirmed.filter((p: any) => !assignedIds.has(p.id));
 
+  // Everyone who said they're not coming (27 Oct 2026, Liam), shown in
+  // their own box at the bottom of the Teams tab in case they turn up
+  // anyway. Someone already in a team who later said no stays in that
+  // team (removing them is the coordinator's call), so teamId says where.
+  const teamOfMember: Record<string, number> = {};
+  assignedRows.forEach((r: any) => { teamOfMember[r.id] = r.team_id; });
+  const outRows = await db.sql`
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade, m.position
+    from bookings b join members m on m.id = b.member_id
+    where b.session_id = ${sessionId} and b.status = 'out'
+    order by lower(m.first_name), lower(m.last_name)
+  `;
+  const notAttending = outRows.map((r: any) => ({ ...shapePlayer(r), teamId: teamOfMember[r.id] || null }));
+
   // Carried forward from last week (12 Oct 2026) - for the Teams tab notice.
   const [carry] = await db.sql`select timetable_copied_from::text as copied_from from sessions where id = ${sessionId}`;
   const autoRows = await db.sql`select member_id from team_autoplaced where session_id = ${sessionId} and placed_team_id is not null`;
 
   return {
-    ok: true, sessionDate, published, confirmed, teams, unassigned,
+    ok: true, sessionDate, published, confirmed, teams, unassigned, notAttending,
     copiedFrom: carry ? carry.copied_from : null,
     autoPlacedIds: autoRows.map((r: any) => r.member_id),
   };
+}
+
+// Changes a "not coming" reply to "in" as a player, the same booking the
+// roll call's "add player" makes, so they count everywhere a booked-in
+// player does (roll call, fees, the dashboard).
+async function bookIn(db: any, sessionId: number, target: { id: string; email: string }, caller: { id: string; email: string }, sessionDate: string) {
+  await db.sql`
+    insert into bookings (session_id, member_id, status, kind)
+    values (${sessionId}, ${target.id}, 'in', 'player')
+    on conflict (session_id, member_id) do update set status = 'in', kind = 'player'
+  `;
+  await logAudit(db, {
+    actorId: caller.id, actorEmail: caller.email, action: "booking_changed",
+    resourceType: "booking", resourceId: target.id,
+    newValue: { sessionDate, status: "in" }, note: `${caller.email} booked in ${target.email} from Teams (said they weren't coming)`,
+  });
 }
 
 export default async (req: Request, context: Context) => {
@@ -196,7 +229,17 @@ export default async (req: Request, context: Context) => {
             note: `${caller.email} deleted a team`,
           });
         }
-      } else if (action === "assign") {
+      } else if (action === "book_in" && !body.teamId) {
+        // Booked in but not placed yet: they land in Unassigned.
+        const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;
+        if (!target) {
+          return new Response(JSON.stringify({ ok: false, error: "No member found with that email" }), {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        await bookIn(db, sessionId, target, caller, sessionDate);
+      } else if (action === "assign" || action === "book_in") {
         const teamId = Number(body.teamId);
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;
         if (!target) {
@@ -212,6 +255,7 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
+        if (action === "book_in") await bookIn(db, sessionId, target, caller, sessionDate);
         // Move = replace, never "remove first" (14 Oct 2026, Cheongy: a
         // player already in a team had to be deleted before they could be
         // added to another). Done as delete-then-insert rather than
