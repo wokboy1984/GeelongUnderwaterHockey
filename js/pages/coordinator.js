@@ -662,6 +662,16 @@ GUWH.Pages = GUWH.Pages || {};
       call({ action: "assign", memberEmail: player.email, teamId: Number(teamId) });
     }
 
+    // Someone who said they weren't coming turned up anyway (27 Oct 2026,
+    // Liam): book them in and, unless "Unassigned" was picked, place them.
+    function bookInAnyway(player, value) {
+      if (!value) return;
+      const team = value === "unassigned" ? null : board.teams.find((t) => String(t.id) === value);
+      const where = team ? " and put them in " + team.name : "";
+      if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session" + where + "?")) return;
+      call({ action: "book_in", memberEmail: player.email, teamId: team ? team.id : null });
+    }
+
     if (loading) return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…");
     if (!board) return error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
@@ -781,7 +791,45 @@ GUWH.Pages = GUWH.Pages || {};
                 )
               )
             )
+          ),
+
+      // Said they're not coming. Kept at the bottom, out of the way, but
+      // here so the coordinator can still place them if they turn up.
+      (board.notAttending || []).length > 0 &&
+        h(
+          "div",
+          { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mt-6" },
+          h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Not attending (" + board.notAttending.length + ")"),
+          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "These players said they're not coming. If one turns up anyway, pick a team next to their name to book them in and place them."),
+          h(
+            "div",
+            { className: "flex flex-col gap-2" },
+            board.notAttending.map((p) => {
+              const stillIn = p.teamId && board.teams.find((t) => t.id === p.teamId);
+              return h(PlayerRow, {
+                key: p.id,
+                player: p,
+                action: h(
+                  "div",
+                  { className: "flex items-center gap-2 flex-wrap justify-end" },
+                  stillIn && h("span", { className: "text-[10px] font-semibold text-[var(--bad)]" }, "Still in " + stillIn.name),
+                  h(
+                    "select",
+                    {
+                      className: inputCls + " !w-auto !py-1 text-xs",
+                      value: "",
+                      "aria-label": "Book " + GUWH.displayName(p) + " in and move to",
+                      onChange: (e) => bookInAnyway(p, e.target.value),
+                    },
+                    h("option", { value: "" }, "Turned up? Move to…"),
+                    board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
+                    h("option", { value: "unassigned" }, "Unassigned")
+                  )
+                ),
+              });
+            })
           )
+        )
     );
   }
 
