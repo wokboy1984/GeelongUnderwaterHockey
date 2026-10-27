@@ -48,3 +48,16 @@ test('startingTeamFor matches the starting list by name, cautiously', () => {
   assert.equal(startingTeamFor('Jane', 'Hogan'), null);   // family name, unknown first name
   assert.equal(startingTeamFor('Liam', ''), null);
 });
+
+import { roundRows } from '../netlify/functions/_shared/timetable-templates.mts';
+
+test('A round matches the printed sheet', () => {
+  const rows = roundRows([["Dolphins", "Crays", "Sharks"], ["Dolphins", "Sharks", "Crays"], ["Crays", "Sharks", "Dolphins"]], ['ref1']);
+  assert.deepEqual(rows.map((r) => [r.label, r.startMin, r.durationMin]), [
+    ['Set Up', 0, 15], ['Development', 15, 28], ['Game 1', 44, 18], ['Game 2', 63, 18], ['Game 3', 82, 18],
+  ]);
+  assert.deepEqual(rows[1].games, [{ pool: 'Pool A', white: 'Stingrays', black: 'Seahorses', refereeIds: ['ref1'] }]);
+  assert.deepEqual(rows[2].games[0], { pool: 'Pool A', white: 'Dolphins', black: 'Crays', refereeIds: [] });
+  assert.equal(rows[2].notes, 'Ref / drills / coach: Sharks');
+  assert.ok(rows.slice(1).every((r) => r.gameCount === 1));
+});
