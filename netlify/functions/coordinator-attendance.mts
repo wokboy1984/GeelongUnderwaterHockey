@@ -15,20 +15,13 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden, isLikelyEmail } from "./_shared/roles.mts";
 import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 import { inviteMember } from "./_shared/identity-admin.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
   const parts = fullName.trim().split(/\s+/);
   return { firstName: parts[0] || fullName.trim(), lastName: parts.slice(1).join(" ") };
-}
-
-// Loose on purpose: the job is catching a typo or a name typed into the
-// wrong box, not adjudicating what a valid address is. The confirm-email
-// field in the form is the real defence against a wrong address.
-function isLikelyEmail(value: string): boolean {
-  return /^[^s@]+@[^s@.]+.[^s@]+$/.test(value);
 }
 
 async function playerList(db: any, sessionId: number) {

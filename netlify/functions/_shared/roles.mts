@@ -150,6 +150,15 @@ export async function familyMembers(db: any, family: string): Promise<any[]> {
   `;
 }
 
+// A loose "is this an email address" check, to catch the wrong thing typed
+// in the wrong box, not to adjudicate what a valid address is. Shared by
+// the coordinator's Add a player and Administration's child login (28 Oct
+// 2026). The coordinator's copy had lost its backslashes (\s became s),
+// so it refused every address containing the letter s.
+export function isLikelyEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(value);
+}
+
 // Attendance kinds (20 Oct 2026). Columns added by migration
 // 20261020000002_attendance_kinds; ensured here for the same reason as the
 // ones above — and with better evidence than most, since the waived-fees

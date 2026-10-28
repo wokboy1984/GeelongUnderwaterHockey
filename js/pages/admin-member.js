@@ -68,6 +68,9 @@ GUWH.Pages = GUWH.Pages || {};
     const [saved, setSaved] = React.useState(false);
     const [familyQ, setFamilyQ] = React.useState("");
     const [familyResults, setFamilyResults] = React.useState(null);
+    const [loginEmail, setLoginEmail] = React.useState("");
+    const [loginInvite, setLoginInvite] = React.useState(true);
+    const [notice, setNotice] = React.useState(null);
 
     // Moving between a parent and a child changes only the query string, so
     // the page watches the hash itself.
@@ -142,6 +145,31 @@ GUWH.Pages = GUWH.Pages || {};
         setM(data.member);
         setFamilyQ("");
         setFamilyResults(null);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // A child's own login (28 Oct 2026): give the child record a real email
+    // so they can sign in and keep their history. Fees stay with the parent.
+    async function giveLogin(ev) {
+      ev.preventDefault();
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "child_login", memberId: m.id, email: loginEmail.trim(), invite: loginInvite }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+        setLoginEmail("");
+        setNotice(data.notice || null);
       } catch (e) {
         setError(String(e.message || e));
       } finally {
@@ -271,6 +299,7 @@ GUWH.Pages = GUWH.Pages || {};
                   )
                 )
               ),
+            notice && h("p", { className: "mb-3 rounded-xl bg-[var(--accent-12)] p-3 text-sm text-[var(--ink)]" }, notice),
             isChild &&
               h(
                 "p",
@@ -278,6 +307,24 @@ GUWH.Pages = GUWH.Pages || {};
                 "Parent: ",
                 h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + m.parent.id) }, m.parent.adminName || m.parent.fullName || m.parent.displayName),
                 ". Fees for this child's games are billed to their parent."
+              ),
+            isChild && !m.email &&
+              h(
+                "form",
+                { className: "mt-3 flex flex-col gap-2", onSubmit: giveLogin },
+                h("p", { className: "text-sm text-[var(--ink-soft)]" }, m.firstName + " has no login of their own. Give them one with their email address: their games, goals and teams stay theirs, their parent can still book them in, and their fees still go to their parent."),
+                h(
+                  "div",
+                  { className: "flex flex-wrap items-center gap-2" },
+                  h("input", { type: "email", className: inputCls + " !w-full sm:!w-64", value: loginEmail, placeholder: "Their email address", onChange: (e) => setLoginEmail(e.target.value) }),
+                  h(
+                    "label",
+                    { className: "flex items-center gap-2 text-sm text-[var(--ink)]" },
+                    h("input", { type: "checkbox", checked: loginInvite, onChange: (e) => setLoginInvite(e.target.checked) }),
+                    "Email them an invitation"
+                  ),
+                  h(Button, { type: "submit", size: "sm", disabled: busy || !loginEmail.trim() }, busy ? "Saving…" : "Give login")
+                )
               ),
             m.kids.length > 0 &&
               h(

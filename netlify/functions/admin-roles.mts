@@ -10,6 +10,8 @@
 // POST   /api/admin/roles  { action: "family_add", memberId, otherId }
 // POST   /api/admin/roles  { action: "family_remove", memberId, viewId? }
 //        -> put login accounts in one family, or take one out (28 Oct 2026)
+// POST   /api/admin/roles  { action: "child_login", memberId, email, invite }
+//        -> give a child under a parent their own login (28 Oct 2026)
 // POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
 //        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
@@ -24,7 +26,8 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { inviteMember } from "./_shared/identity-admin.mts";
+import { SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { byDate, gameFeeEntries, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
@@ -89,7 +92,7 @@ async function historyBlockers(db: any, id: string): Promise<string[]> {
 // games are worked out from session_attendance, a child's games bill to
 // their parent, and none of it counts unless the person being billed has a
 // finance account (set up by the Treasurer) - `unbilledGames` flags that gap.
-async function memberDetail(db: any, id: string) {
+async function memberDetail(db: any, id: string, extra: Record<string, unknown> = {}) {
   const json = (data: any, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
   const [m] = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
@@ -163,6 +166,7 @@ async function memberDetail(db: any, id: string) {
 
   return json({
     ok: true,
+    ...extra,
     member: {
       id: m.id,
       email: m.email.endsWith("@no-login.guwh") ? null : m.email,
@@ -342,6 +346,42 @@ export default async (req: Request, context: Context) => {
         note: `${caller.email} put ${other.email} in the same family as ${target.email}`,
       });
       return await memberDetail(db, target.id);
+    }
+
+    // A child's own login (28 Oct 2026, Liam). A child under a parent is a
+    // members row with a placeholder *@no-login.guwh email, and everything
+    // that asks "can this person log in?" goes by that email. Giving the
+    // row a real one is all it takes: when they sign up (or accept the
+    // invitation) with that address, ensureMember() adopts this row, so
+    // their games, goals and teams stay theirs. They stay under the parent
+    // (parent_id), so the parent can still book them in and their fees
+    // still go on the parent's account.
+    if (req.method === "POST" && body.action === "child_login") {
+      const fail = (error: string, status = 400) =>
+        new Response(JSON.stringify({ ok: false, error }), { status, headers: { "content-type": "application/json" } });
+      const [kid] = await db.sql`select id, email, parent_id, first_name, last_name from members where id = ${String(body.memberId || "")}`;
+      if (!kid || !kid.parent_id) return fail("That isn't a child under a parent's profile", 404);
+      if (!kid.email.endsWith("@no-login.guwh")) return fail("They already have a login email: " + kid.email);
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!isLikelyEmail(email)) return fail("That email address doesn't look right");
+      const [taken] = await db.sql`select id, nickname, first_name, last_name from members where lower(email) = ${email}`;
+      if (taken) {
+        return fail(`${adminName(taken.nickname, taken.first_name, taken.last_name)} already uses that email. If they signed up separately, delete that new account in Administration first (it has no history yet), then try again.`);
+      }
+      await db.sql`update members set email = ${email} where id = ${kid.id}`;
+      let notice = "Saved. When they sign up with " + email + ", they'll get this record and its history.";
+      if (body.invite === true) {
+        const invite = await inviteMember(context, email, [kid.first_name, kid.last_name].filter(Boolean).join(" "));
+        notice = invite.ok
+          ? "Invitation sent to " + email + ". When they set a password they'll get this record and its history."
+          : "Saved, but the invitation couldn't be sent (" + invite.reason + "). They can still sign up with " + email + ".";
+      }
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "child_login_added",
+        resourceType: "member", resourceId: kid.id, previousValue: { email: kid.email }, newValue: { email, invited: body.invite === true },
+        note: `${caller.email} gave child ${kid.first_name} the login email ${email}`,
+      });
+      return await memberDetail(db, kid.id, { notice });
     }
 
     if (req.method === "POST" && body.action === "grade") {
