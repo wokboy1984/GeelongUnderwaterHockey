@@ -5,12 +5,14 @@
 // GET    /api/admin/roles?q=<search>        -> { ok, members: [...] }
 // POST   /api/admin/roles  { memberEmail, role, note } -> grant
 // DELETE /api/admin/roles  { memberEmail, role, note } -> revoke
-// POST   /api/admin/roles  { action: "grade", memberEmail, grade }
+// POST   /api/admin/roles  { action: "grade", memberId, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
 // POST   /api/admin/roles  { action: "family_add", memberId, otherId }
 // POST   /api/admin/roles  { action: "family_remove", memberId, viewId? }
 //        -> put login accounts in one family, or take one out (28 Oct 2026)
-// POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
+// POST   /api/admin/roles  { action: "child_login", memberId, email, invite }
+//        -> give a child under a parent their own login (28 Oct 2026)
+// POST   /api/admin/roles  { action: "waiver", memberId, signed } -> record
 //        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
 // POST   /api/admin/roles  { action: "delete_member", memberEmail, confirm: true }
@@ -24,15 +26,27 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { inviteMember } from "./_shared/identity-admin.mts";
+import { SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { byDate, gameFeeEntries, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
+// Who a child is under, for the Administration list: their parent plus any
+// other adult in the parent's family, e.g. "Liam Cooke & Allison Cooke".
+function parentsLabel(row: any): string | null {
+  if (!row.parent_first_name && !row.parent_last_name) return null;
+  const parent = [row.parent_first_name, row.parent_last_name].filter(Boolean).join(" ");
+  return [parent, ...(row.other_adults || [])].join(" & ");
+}
+
 function shapeMember(row: any) {
+  const hasLogin = !!row.email && !row.email.endsWith("@no-login.guwh");
   return {
     id: row.id,
-    email: row.email,
+    email: hasLogin ? row.email : null,
+    hasLogin,
+    childOf: parentsLabel(row),
     firstName: row.first_name,
     lastName: row.last_name,
     nickname: row.nickname || "",
@@ -45,6 +59,18 @@ function shapeMember(row: any) {
   };
 }
 
+
+// The parent columns parentsLabel reads, for one member (empty if not a child).
+async function parentNames(db: any, m: any) {
+  if (!m.parent_id) return {};
+  const [row] = await db.sql`
+    select p.first_name as parent_first_name, p.last_name as parent_last_name,
+           (select coalesce(array_agg(o.first_name || ' ' || o.last_name order by o.created_at, o.id), '{}')
+              from members o
+              where p.family_id is not null and o.family_id = p.family_id and o.id <> p.id and o.parent_id is null) as other_adults
+    from members p where p.id = ${m.parent_id}`;
+  return row || {};
+}
 
 // Why a member can't be deleted (14 Oct 2026). Most of what hangs off a
 // member is removed with them by the database (bookings, roles, goals,
@@ -89,7 +115,7 @@ async function historyBlockers(db: any, id: string): Promise<string[]> {
 // games are worked out from session_attendance, a child's games bill to
 // their parent, and none of it counts unless the person being billed has a
 // finance account (set up by the Treasurer) - `unbilledGames` flags that gap.
-async function memberDetail(db: any, id: string) {
+async function memberDetail(db: any, id: string, extra: Record<string, unknown> = {}) {
   const json = (data: any, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
   const [m] = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
@@ -163,6 +189,7 @@ async function memberDetail(db: any, id: string) {
 
   return json({
     ok: true,
+    ...extra,
     member: {
       id: m.id,
       email: m.email.endsWith("@no-login.guwh") ? null : m.email,
@@ -214,38 +241,36 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "GET") {
       const q = new URL(req.url).searchParams.get("q")?.trim() || "";
-      // Walk-in players added via the coordinator's "Add Player" (no
-      // account, no email) feature are placeholder members that can never
-      // log in — they get a synthetic *@no-login.guwh email and have no
-      // real identity to grant a role to, so they're excluded here.
+      // Everyone who plays (28 Oct 2026, Liam: "shows all players"): login
+      // accounts, children under a parent's profile, and walk-ins added at
+      // the pool with "Add Player". The last two have a placeholder
+      // *@no-login.guwh email; shapeMember hides it, and the page only
+      // offers roles and Delete to people with a login. Children removed by
+      // their parent from My kids are left out.
       //
       // Sorted by first name, then last name, matching the full names this
       // page shows (27 Oct 2026, Liam). It used to be newest first
       // with a limit of 25, which with 22 members was about to start
       // silently hiding the longest-standing ones; the full list is now
       // capped at 500 instead.
-      const rows = q
-        ? await db.sql`
-            select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
-                   array_remove(array_agg(mr.role), null) as roles
-            from members m
-            left join member_roles mr on mr.member_id = m.id
-            where m.email not like '%@no-login.guwh'
-              and (m.email ilike ${"%" + q + "%"} or m.nickname ilike ${"%" + q + "%"} or m.first_name ilike ${"%" + q + "%"} or m.last_name ilike ${"%" + q + "%"})
-            group by m.id
-            order by lower(m.first_name), lower(m.last_name)
-            limit 25
-          `
-        : await db.sql`
-            select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
-                   array_remove(array_agg(mr.role), null) as roles
-            from members m
-            left join member_roles mr on mr.member_id = m.id
-            where m.email not like '%@no-login.guwh'
-            group by m.id
-            order by lower(m.first_name), lower(m.last_name)
-            limit 500
-          `;
+      const like = "%" + q + "%";
+      const rows = await db.sql`
+        select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.waiver_accepted_at,
+               p.first_name as parent_first_name, p.last_name as parent_last_name,
+               (select coalesce(array_agg(o.first_name || ' ' || o.last_name order by o.created_at, o.id), '{}')
+                  from members o
+                  where p.family_id is not null and o.family_id = p.family_id and o.id <> p.id and o.parent_id is null) as other_adults,
+               array_remove(array_agg(mr.role), null) as roles
+        from members m
+        left join members p on p.id = m.parent_id
+        left join member_roles mr on mr.member_id = m.id
+        where m.dependant_removed_at is null
+          and (${q} = '' or (m.email not like '%@no-login.guwh' and m.email ilike ${like})
+               or m.nickname ilike ${like} or m.first_name ilike ${like} or m.last_name ilike ${like})
+        group by m.id, p.id
+        order by lower(m.first_name), lower(m.last_name)
+        limit ${q ? 25 : 500}
+      `;
       return new Response(JSON.stringify({ ok: true, members: rows.map(shapeMember) }), {
         headers: { "content-type": "application/json" },
       });
@@ -344,21 +369,60 @@ export default async (req: Request, context: Context) => {
       return await memberDetail(db, target.id);
     }
 
+    // A child's own login (28 Oct 2026, Liam). A child under a parent is a
+    // members row with a placeholder *@no-login.guwh email, and everything
+    // that asks "can this person log in?" goes by that email. Giving the
+    // row a real one is all it takes: when they sign up (or accept the
+    // invitation) with that address, ensureMember() adopts this row, so
+    // their games, goals and teams stay theirs. They stay under the parent
+    // (parent_id), so the parent can still book them in and their fees
+    // still go on the parent's account.
+    if (req.method === "POST" && body.action === "child_login") {
+      const fail = (error: string, status = 400) =>
+        new Response(JSON.stringify({ ok: false, error }), { status, headers: { "content-type": "application/json" } });
+      const [kid] = await db.sql`select id, email, parent_id, first_name, last_name from members where id = ${String(body.memberId || "")}`;
+      if (!kid || !kid.parent_id) return fail("That isn't a child under a parent's profile", 404);
+      if (!kid.email.endsWith("@no-login.guwh")) return fail("They already have a login email: " + kid.email);
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!isLikelyEmail(email)) return fail("That email address doesn't look right");
+      const [taken] = await db.sql`select id, nickname, first_name, last_name from members where lower(email) = ${email}`;
+      if (taken) {
+        return fail(`${adminName(taken.nickname, taken.first_name, taken.last_name)} already uses that email. If they signed up separately, delete that new account in Administration first (it has no history yet), then try again.`);
+      }
+      await db.sql`update members set email = ${email} where id = ${kid.id}`;
+      let notice = "Saved. When they sign up with " + email + ", they'll get this record and its history.";
+      if (body.invite === true) {
+        const invite = await inviteMember(context, email, [kid.first_name, kid.last_name].filter(Boolean).join(" "));
+        notice = invite.ok
+          ? "Invitation sent to " + email + ". When they set a password they'll get this record and its history."
+          : "Saved, but the invitation couldn't be sent (" + invite.reason + "). They can still sign up with " + email + ".";
+      }
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "child_login_added",
+        resourceType: "member", resourceId: kid.id, previousValue: { email: kid.email }, newValue: { email, invited: body.invite === true },
+        note: `${caller.email} gave child ${kid.first_name} the login email ${email}`,
+      });
+      return await memberDetail(db, kid.id, { notice });
+    }
+
+    // Grade and waiver take memberId (28 Oct 2026) so they also work for
+    // children and walk-ins, who have no login email; memberEmail still works.
+    const memberId = String(body.memberId || "").trim();
+
     if (req.method === "POST" && body.action === "grade") {
-      if (!memberEmail) {
-        return new Response(JSON.stringify({ ok: false, error: "memberEmail is required" }), { status: 400, headers: { "content-type": "application/json" } });
+      if (!memberEmail && !memberId) {
+        return new Response(JSON.stringify({ ok: false, error: "memberId is required" }), { status: 400, headers: { "content-type": "application/json" } });
       }
       const rawGrade = String(body.grade || "").trim();
       if (rawGrade && !isGrade(rawGrade)) {
         return new Response(JSON.stringify({ ok: false, error: "Not a valid grade" }), { status: 400, headers: { "content-type": "application/json" } });
       }
       const grade = rawGrade || null;
-      const [target] = await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, waiver_accepted_at from members where email = ${memberEmail}`;
-      if (!target || target.email.endsWith("@no-login.guwh")) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
-          { status: 404, headers: { "content-type": "application/json" } }
-        );
+      const [target] = memberId
+        ? await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, waiver_accepted_at, parent_id from members where id = ${memberId}`
+        : await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, waiver_accepted_at, parent_id from members where email = ${memberEmail}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
       }
       await db.sql`update members set grade = ${grade} where id = ${target.id}`;
       await logAudit(db, {
@@ -368,7 +432,7 @@ export default async (req: Request, context: Context) => {
       });
       const roleRows = await db.sql`select role from member_roles where member_id = ${target.id}`;
       return new Response(
-        JSON.stringify({ ok: true, member: shapeMember({ ...target, grade, roles: roleRows.map((r: any) => r.role) }) }),
+        JSON.stringify({ ok: true, member: shapeMember({ ...target, ...(await parentNames(db, target)), grade, roles: roleRows.map((r: any) => r.role) }) }),
         { headers: { "content-type": "application/json" } }
       );
     }
@@ -378,16 +442,15 @@ export default async (req: Request, context: Context) => {
     // signed stamps waiver_accepted_at with now and notes who recorded it;
     // "Undo" clears it again for a mis-click. Audit-logged either way.
     if (req.method === "POST" && body.action === "waiver") {
-      if (!memberEmail) {
-        return new Response(JSON.stringify({ ok: false, error: "memberEmail is required" }), { status: 400, headers: { "content-type": "application/json" } });
+      if (!memberEmail && !memberId) {
+        return new Response(JSON.stringify({ ok: false, error: "memberId is required" }), { status: 400, headers: { "content-type": "application/json" } });
       }
       const signed = !!body.signed;
-      const [target] = await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, grade from members where email = ${memberEmail}`;
-      if (!target || target.email.endsWith("@no-login.guwh")) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "No member found with that email — they need to log in at least once first" }),
-          { status: 404, headers: { "content-type": "application/json" } }
-        );
+      const [target] = memberId
+        ? await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, grade, parent_id from members where id = ${memberId}`
+        : await db.sql`select id, email, nickname, first_name, last_name, date_of_birth, grade, parent_id from members where email = ${memberEmail}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
       }
       const recordedBy = "Signed in person - recorded by " + caller.email;
       const [updated] = signed
@@ -408,7 +471,7 @@ export default async (req: Request, context: Context) => {
       });
       const roleRows = await db.sql`select role from member_roles where member_id = ${target.id}`;
       return new Response(
-        JSON.stringify({ ok: true, member: shapeMember({ ...target, waiver_accepted_at: updated.waiver_accepted_at, roles: roleRows.map((r: any) => r.role) }) }),
+        JSON.stringify({ ok: true, member: shapeMember({ ...target, ...(await parentNames(db, target)), waiver_accepted_at: updated.waiver_accepted_at, roles: roleRows.map((r: any) => r.role) }) }),
         { headers: { "content-type": "application/json" } }
       );
     }

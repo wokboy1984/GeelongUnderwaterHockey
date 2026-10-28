@@ -82,7 +82,7 @@ GUWH.Pages = GUWH.Pages || {};
       try {
         const res = await GUWH.Identity.authFetch("/api/admin/roles", {
           method: "POST",
-          body: JSON.stringify({ action: "waiver", memberEmail: member.email, signed }),
+          body: JSON.stringify({ action: "waiver", memberId: member.id, signed }),
         });
         const data = await res.json();
         if (data.ok) setMembers((prev) => prev.map((m) => (m.id === data.member.id ? data.member : m)));
@@ -128,7 +128,7 @@ GUWH.Pages = GUWH.Pages || {};
       try {
         const res = await GUWH.Identity.authFetch("/api/admin/roles", {
           method: "POST",
-          body: JSON.stringify({ action: "grade", memberEmail: member.email, grade }),
+          body: JSON.stringify({ action: "grade", memberId: member.id, grade }),
         });
         const data = await res.json();
         if (data.ok) setMembers((prev) => prev.map((m) => (m.id === data.member.id ? data.member : m)));
@@ -179,9 +179,13 @@ GUWH.Pages = GUWH.Pages || {};
                     "div",
                     { className: "min-w-0" },
                     h("button", { type: "button", className: "font-semibold text-[var(--ink)] hover:text-[var(--accent-dark)] hover:underline text-left", onClick: () => navigate("/admin/member?id=" + encodeURIComponent(m.id)) }, m.adminName || GUWH.displayName(m)),
-                    h("p", { className: "text-xs text-[var(--ink-soft)] break-all" }, m.email + (typeof m.age === "number" ? " · Age " + m.age : ""))
+                    h("p", { className: "text-xs text-[var(--ink-soft)] break-all" }, [
+                      m.email || (m.childOf ? null : "No login · added at the pool"),
+                      m.childOf ? "Child of " + m.childOf : null,
+                      typeof m.age === "number" ? "Age " + m.age : null,
+                    ].filter(Boolean).join(" · "))
                   ),
-                  !isSelf && (confirmDeleteId === m.id
+                  !isSelf && m.hasLogin && (confirmDeleteId === m.id
                     ? h(
                         "div",
                         { className: "flex items-center gap-1 shrink-0" },
@@ -241,6 +245,7 @@ GUWH.Pages = GUWH.Pages || {};
                       : h("span", { className: "text-xs text-[var(--ink-soft)]" }, "None")
                   )
                 ),
+                m.hasLogin &&
                 h(
                   "div",
                   null,
@@ -282,8 +287,8 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "p",
         { className: "text-xs text-[var(--ink-soft)] mt-8" },
-        "A member needs to have logged in at least once before you can search for them here. Walk-in players added via " +
-          "“Add Player” on the Attendance tab have no login and never appear here."
+        "Everyone who plays is listed, including children under a parent's profile and walk-ins added with " +
+          "“Add Player” on the Attendance tab. Roles and Delete need a login; to give a child their own, open their page."
       )
     );
   }

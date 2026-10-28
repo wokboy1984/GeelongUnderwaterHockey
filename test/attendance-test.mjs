@@ -66,3 +66,10 @@ test('round notes name only the ref / drills / coach team', () => {
   const rows = roundRows([["Crays", "Sharks", "Dolphins"], ["Crays", "Dolphins", "Sharks"], ["Sharks", "Dolphins", "Crays"]]);
   assert.deepEqual(rows.slice(2).map((r) => r.notes), ['Ref / drills / coach: Dolphins', 'Ref / drills / coach: Sharks', 'Ref / drills / coach: Crays']);
 });
+
+import { isLikelyEmail } from '../netlify/functions/_shared/roles.mts';
+
+test('isLikelyEmail accepts ordinary addresses, including ones with an s', () => {
+  for (const ok of ['lucas@gmail.com', 'wokboy@gmail.com', 'liam_cooke@bio-rad.com', 'a@mail.bio.com']) assert.ok(isLikelyEmail(ok), ok);
+  for (const bad of ['', 'no at sign', 'x@y', 'two words@x.com', 'a@@b.com']) assert.ok(!isLikelyEmail(bad), bad);
+});
