@@ -119,7 +119,35 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   await db.sql`alter table members add column if not exists parent_id text references members(id)`;
   await db.sql`alter table members add column if not exists dependant_removed_at timestamptz`;
   await db.sql`alter table members add column if not exists trial_free boolean not null default false`;
+  // Families (28 Oct 2026): login accounts an Administrator groups into one
+  // family (children under a parent follow the parent). For booking each
+  // other in and the family fee cap.
+  await db.sql`alter table members add column if not exists family_id text`;
   familyColumnsReady = true;
+}
+
+// Which family a member is in (28 Oct 2026): their family_id, or for a child
+// under a parent, the parent's; anyone not in a family is a family of one
+// (their own id).
+export async function familyOf(db: any, memberId: string): Promise<string> {
+  const [r] = await db.sql`
+    select coalesce(p.family_id, p.id, m.family_id, m.id) as family
+    from members m left join members p on p.id = m.parent_id
+    where m.id = ${memberId}
+  `;
+  return r ? r.family : memberId;
+}
+
+// Everyone in that family, the member themselves included (children who
+// have been removed by their parent left out).
+export async function familyMembers(db: any, family: string): Promise<any[]> {
+  return await db.sql`
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.parent_id, m.date_of_birth, m.created_at
+    from members m left join members p on p.id = m.parent_id
+    where coalesce(p.family_id, p.id, m.family_id, m.id) = ${family}
+      and (m.parent_id is null or m.dependant_removed_at is null)
+    order by (m.parent_id is not null), m.created_at, m.id
+  `;
 }
 
 // Attendance kinds (20 Oct 2026). Columns added by migration

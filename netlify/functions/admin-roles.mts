@@ -7,6 +7,9 @@
 // DELETE /api/admin/roles  { memberEmail, role, note } -> revoke
 // POST   /api/admin/roles  { action: "grade", memberEmail, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
+// POST   /api/admin/roles  { action: "family_add", memberId, otherId }
+// POST   /api/admin/roles  { action: "family_remove", memberId, viewId? }
+//        -> put login accounts in one family, or take one out (28 Oct 2026)
 // POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
 //        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
@@ -21,8 +24,8 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
-import { totals } from "./_shared/finance.mts";
+import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { byDate, gameFeeEntries, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -106,6 +109,9 @@ async function memberDetail(db: any, id: string) {
     select id, nickname, first_name, last_name, date_of_birth, dependant_removed_at
     from members where parent_id = ${m.id} order by created_at asc, id
   `;
+  // The rest of their family: other logins, and children under them
+  // (this member's own children are listed under kids already).
+  const family = (await familyMembers(db, await familyOf(db, m.id))).filter((f: any) => f.id !== m.id && f.parent_id !== m.id && f.id !== m.parent_id);
 
   const [games] = await db.sql`select count(*)::int as n from session_attendance where member_id = ${m.id} and attended = true`;
   const [lastGame] = await db.sql`select to_char(max(session_date), 'YYYY-MM-DD') as d from session_attendance where member_id = ${m.id} and attended = true`;
@@ -124,27 +130,12 @@ async function memberDetail(db: any, id: string) {
   if (!m.parent_id) {
     const [account] = await db.sql`select category, trial_eligible, trial_evidence from finance_accounts where member_id = ${m.id}`;
     const month = new Date().toISOString().slice(0, 7);
+    // Same game fees as the Finance page (shared, with the family cap).
     const entries = account
-      ? await db.sql`
-          with attended as (
-            select sa.member_id, (mm.parent_id is not null) as is_child, mm.trial_free, mm.first_name, sa.session_date,
-              row_number() over (partition by sa.member_id order by sa.session_date) as attendance_number
-            from session_attendance sa join members mm on mm.id = sa.member_id
-            where sa.attended = true and coalesce(mm.parent_id, sa.member_id) = ${m.id}
-          ), game_entries as (
-            select 'game'::text as kind, to_char(a.session_date, 'YYYY-MM-DD') as entry_date,
-              case when a.is_child then (case when a.trial_free and a.attendance_number <= 3 then 0 else 1000 end)
-                   when fa.trial_eligible and a.attendance_number <= 3 then 0
-                   when fa.category = 'waged' then 2000 else 1000 end as amount_cents,
-              case when a.is_child then a.first_name || ' (child) - ' || (case when a.trial_free and a.attendance_number <= 3 then 'free session' else 'confirmed attendance' end)
-                   when fa.trial_eligible and a.attendance_number <= 3 then 'Try Underwater Hockey - free session' else 'Confirmed attendance' end as note,
-              a.session_date::timestamptz as created_at
-            from attended a join finance_accounts fa on fa.member_id = ${m.id}
-          ), manual_entries as (
-            select kind, to_char(entry_date, 'YYYY-MM-DD') as entry_date, amount_cents, note, created_at
-            from finance_entries where member_id = ${m.id}
-          ) select * from (select * from game_entries union all select * from manual_entries) all_entries order by entry_date desc, created_at desc
-        `
+      ? [
+          ...(await gameFeeEntries(db, m.id)),
+          ...(await db.sql`select kind, to_char(entry_date, 'YYYY-MM-DD') as entry_date, amount_cents, note, created_at from finance_entries where member_id = ${m.id}`),
+        ].sort(byDate).reverse()
       : [];
     const charged = entries.filter((e: any) => e.kind !== "payment").reduce((a: number, e: any) => a + Number(e.amount_cents), 0);
     const paid = entries.filter((e: any) => e.kind === "payment").reduce((a: number, e: any) => a + Number(e.amount_cents), 0);
@@ -193,6 +184,7 @@ async function memberDetail(db: any, id: string) {
       joined: m.created_at,
       removedChild: !!m.dependant_removed_at,
       parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" "), adminName: adminName(parent.nickname, parent.first_name, parent.last_name) } : null,
+      family: family.map((f: any) => ({ id: f.id, adminName: adminName(f.nickname, f.first_name, f.last_name), isChild: !!f.parent_id, age: ageFromDOB(f.date_of_birth) })),
       kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), adminName: adminName(k.nickname, k.first_name, k.last_name), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
       gamesPlayed: games.n,
       lastGame: lastGame.d || null,
@@ -302,6 +294,52 @@ export default async (req: Request, context: Context) => {
         resourceType: "member", resourceId: target.id,
         previousValue: { position: target.position || null }, newValue: { position },
         note: `${caller.email} changed ${target.email}'s position from "${target.position || ""}" to "${position}"`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
+    // Families (28 Oct 2026, committee decision on family pricing): an
+    // Administrator puts login accounts - partners, juniors with their own
+    // login - into one family. Children under a parent follow the parent.
+    // Anyone in a family can book the others in, and the family's game
+    // fees are capped per night (_shared/finance.mts). Joining two people
+    // who are each already in a different family is refused, so a mistake
+    // is undone by removing someone first rather than merging families.
+    if (req.method === "POST" && (body.action === "family_add" || body.action === "family_remove")) {
+      const fail = (error: string, status = 400) =>
+        new Response(JSON.stringify({ ok: false, error }), { status, headers: { "content-type": "application/json" } });
+      const [target] = await db.sql`select id, email, parent_id, family_id from members where id = ${String(body.memberId || "")}`;
+      if (!target) return fail("Member not found", 404);
+      if (target.parent_id) return fail("A child under a parent's profile is always in their parent's family - add or remove the parent instead");
+
+      if (body.action === "family_remove") {
+        if (target.family_id) {
+          await db.sql`update members set family_id = null where id = ${target.id}`;
+          // A family of one is no family: clear the last member too.
+          const left = await db.sql`select id from members where family_id = ${target.family_id}`;
+          if (left.length === 1) await db.sql`update members set family_id = null where id = ${left[0].id}`;
+          await logAudit(db, {
+            actorId: caller.id, actorEmail: caller.email, action: "family_member_removed",
+            resourceType: "member", resourceId: target.id, previousValue: { familyId: target.family_id },
+            note: `${caller.email} took ${target.email} out of their family`,
+          });
+        }
+        return await memberDetail(db, String(body.viewId || target.id));
+      }
+
+      const [other] = await db.sql`select id, email, parent_id, family_id from members where id = ${String(body.otherId || "")}`;
+      if (!other) return fail("That member wasn't found", 404);
+      if (other.id === target.id) return fail("Pick someone else");
+      if (other.parent_id) return fail("A child under a parent's profile is already in their parent's family - add the parent instead");
+      if (target.family_id && other.family_id && target.family_id !== other.family_id) {
+        return fail("They're each already in a different family - take one of them out of theirs first");
+      }
+      const familyId = target.family_id || other.family_id || `family_${crypto.randomUUID()}`;
+      await db.sql`update members set family_id = ${familyId} where id in (${target.id}, ${other.id})`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "family_member_added",
+        resourceType: "member", resourceId: other.id, newValue: { familyId, with: target.id },
+        note: `${caller.email} put ${other.email} in the same family as ${target.email}`,
       });
       return await memberDetail(db, target.id);
     }

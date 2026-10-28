@@ -66,6 +66,8 @@ GUWH.Pages = GUWH.Pages || {};
     const [nick, setNick] = React.useState("");
     const [busy, setBusy] = React.useState(false);
     const [saved, setSaved] = React.useState(false);
+    const [familyQ, setFamilyQ] = React.useState("");
+    const [familyResults, setFamilyResults] = React.useState(null);
 
     // Moving between a parent and a child changes only the query string, so
     // the page watches the hash itself.
@@ -102,6 +104,44 @@ GUWH.Pages = GUWH.Pages || {};
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "Couldn't save");
         setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // Families (28 Oct 2026): put login accounts (partners, juniors with
+    // their own login) in one family, for booking each other in and the
+    // family fee cap. Children under a parent follow the parent.
+    async function findFamily(ev) {
+      ev.preventDefault();
+      if (!familyQ.trim()) return;
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles?q=" + encodeURIComponent(familyQ.trim()));
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Search failed");
+        const already = new Set([m.id].concat((m.family || []).map((f) => f.id)));
+        setFamilyResults(data.members.filter((x) => !already.has(x.id)));
+      } catch (e) {
+        setError(String(e.message || e));
+      }
+    }
+    async function familyCall(body) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+        setFamilyQ("");
+        setFamilyResults(null);
       } catch (e) {
         setError(String(e.message || e));
       } finally {
@@ -213,10 +253,24 @@ GUWH.Pages = GUWH.Pages || {};
           h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position saves as soon as you pick it.")
         ),
 
-        (isChild || m.kids.length > 0) &&
-          h(
+        h(
             Card,
             { title: "Family" },
+            // Everyone else in the family, then (for adults) adding someone.
+            (m.family || []).length > 0 &&
+              h(
+                "ul",
+                { className: "flex flex-col gap-2 mb-3" },
+                m.family.map((f) =>
+                  h(
+                    "li",
+                    { key: f.id, className: "text-sm text-[var(--ink)] flex flex-wrap items-center gap-2" },
+                    h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + f.id) }, f.adminName),
+                    h("span", { className: "text-[var(--ink-soft)]" }, [f.isChild ? "child" : null, typeof f.age === "number" ? "age " + f.age : null].filter(Boolean).join(" · ")),
+                    !f.isChild && h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => { if (window.confirm("Take " + f.adminName + " out of this family?")) familyCall({ action: "family_remove", memberId: f.id, viewId: m.id }); } }, "Remove from family")
+                  )
+                )
+              ),
             isChild &&
               h(
                 "p",
@@ -238,6 +292,41 @@ GUWH.Pages = GUWH.Pages || {};
                     k.removed ? " · removed by parent" : ""
                   )
                 )
+              ),
+            !isChild &&
+              h(
+                "div",
+                { className: "mt-3" },
+                h(
+                  "p",
+                  { className: "text-sm text-[var(--ink-soft)] mb-2" },
+                  (m.family || []).length > 0
+                    ? "Everyone in a family can book the others in, and the family's game fees are capped each night. Add someone else with their own login:"
+                    : "Not in a family. Add a partner, or a junior with their own login, so they can book each other in and the family fee cap applies. Children under this member's profile are included automatically."
+                ),
+                h(
+                  "form",
+                  { className: "flex flex-wrap gap-2", onSubmit: findFamily },
+                  h("input", { className: inputCls + " !w-full sm:!w-64", value: familyQ, placeholder: "Search by name or email", onChange: (e) => setFamilyQ(e.target.value) }),
+                  h(Button, { type: "submit", size: "sm", variant: "secondary", disabled: busy || !familyQ.trim() }, "Find")
+                ),
+                familyResults &&
+                  (familyResults.length === 0
+                    ? h("p", { className: "mt-2 text-sm text-[var(--ink-soft)]" }, "No members found.")
+                    : h(
+                        "ul",
+                        { className: "mt-2 flex flex-col gap-1.5" },
+                        familyResults.map((x) =>
+                          h(
+                            "li",
+                            { key: x.id, className: "flex items-center justify-between gap-3 text-sm text-[var(--ink)]" },
+                            h("span", null, x.adminName || x.displayName, x.email ? h("span", { className: "text-[var(--ink-soft)]" }, " · " + x.email) : null),
+                            h(Button, { type: "button", size: "sm", disabled: busy, onClick: () => familyCall({ action: "family_add", memberId: m.id, otherId: x.id }) }, "Add to family")
+                          )
+                        )
+                      )),
+                (m.family || []).some((f) => !f.isChild) &&
+                  h(Button, { type: "button", size: "sm", variant: "ghost", className: "mt-2", disabled: busy, onClick: () => { if (window.confirm("Take " + (m.adminName || m.displayName) + " out of this family?")) familyCall({ action: "family_remove", memberId: m.id }); } }, "Take this member out of the family")
               )
           ),
 

@@ -8,6 +8,9 @@
 // POST { in, dependantId? } (14 Oct 2026): with dependantId, books/cancels
 // one of the caller's own children instead of the caller. Response also
 // carries family[]: the caller's children with inSession for this Wednesday.
+// Since 28 Oct 2026 that's the whole family: everyone an Administrator
+// has put in the caller's family and the children under any of them, and
+// dependantId can be any of them.
 //
 // confirmed[] (2 Oct 2026): who's coming, for the Dashboard's Who's Coming
 // list - id, display name (nickname, else real name), photo version. Only
@@ -24,7 +27,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
 import { nextSessionDateISO, toAttendanceKind } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
@@ -84,23 +87,27 @@ export default async (req: Request, context: Context) => {
       // back to 'player', which is what booking in meant before this
       // existed. Only meaningful when booking in; an "out" keeps whatever
       // was last chosen rather than resetting it.
-      const kind = toAttendanceKind(body.kind);
+      let kind = toAttendanceKind(body.kind);
 
-      // Booking one of the caller's own children (14 Oct 2026, "My kids").
-      // Same cut-off rules as booking yourself; the child must belong to
-      // the caller and not be removed.
+      // Booking someone in the caller's family (14 Oct 2026 for "My kids";
+      // whole families 28 Oct 2026). Removed children aren't in the list.
       let targetId = memberId;
       if (body.dependantId) {
-        const [kid] = await db.sql`
-          select id from members where id = ${String(body.dependantId)} and parent_id = ${memberId} and dependant_removed_at is null
-        `;
-        if (!kid) {
-          return new Response(JSON.stringify({ ok: false, error: "Child not found on your profile." }), {
+        const fam = await familyMembers(db, await familyOf(db, memberId));
+        const who = fam.find((f: any) => f.id === String(body.dependantId) && f.id !== memberId);
+        if (!who) {
+          return new Response(JSON.stringify({ ok: false, error: "That person isn't in your family on the club's records." }), {
             status: 404,
             headers: { "content-type": "application/json" },
           });
         }
-        targetId = kid.id;
+        targetId = who.id;
+        // The family list has no "what for" picker: keep whatever they
+        // last booked as (a partner who volunteers stays a volunteer).
+        if (body.kind == null) {
+          const [prev] = await db.sql`select kind from bookings where session_id = ${sessionId} and member_id = ${targetId}`;
+          if (prev) kind = toAttendanceKind(prev.kind);
+        }
       }
 
       // The client route already gates the whole portal behind the waiver
@@ -142,19 +149,19 @@ export default async (req: Request, context: Context) => {
     }));
     const count = confirmed.length;
 
-    // The caller's children and whether each is booked in for this session.
-    const familyRows = await db.sql`
-      select m.id, m.first_name, m.last_name,
-        coalesce((select b.status = 'in' from bookings b where b.session_id = ${sessionId} and b.member_id = m.id), false) as booked
-      from members m
-      where m.parent_id = ${memberId} and m.dependant_removed_at is null
-      order by m.created_at asc, m.id
-    `;
-    const family = familyRows.map((r: any) => ({
+    // The caller's family (people with their own login first, then the
+    // children under anyone in it) and whether each is booked in.
+    const famRows = (await familyMembers(db, await familyOf(db, memberId))).filter((f: any) => f.id !== memberId);
+    const bookedIn = famRows.length
+      ? await db.sql`select member_id from bookings where session_id = ${sessionId} and status = 'in' and member_id = any(${famRows.map((f: any) => f.id)})`
+      : [];
+    const family = famRows.map((r: any) => ({
       id: r.id,
       name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim(),
       firstName: r.first_name,
-      inSession: !!r.booked,
+      // Has their own login (not a child under a parent).
+      isMember: !r.parent_id,
+      inSession: bookedIn.some((b: any) => b.member_id === r.id),
     }));
 
     return new Response(
