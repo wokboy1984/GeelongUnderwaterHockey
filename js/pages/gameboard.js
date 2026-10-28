@@ -180,6 +180,25 @@ GUWH.Pages = GUWH.Pages || {};
       );
   }
 
+  // Teams in the order they first play tonight (28 Oct 2026, Liam): down
+  // the timetable, white stick before black. So the development teams come
+  // first, then the main teams by their first game. Teams with no game yet
+  // keep their usual order at the end.
+  function teamsInPlayOrder(teams, rows) {
+    const first = {};
+    let n = 0;
+    (rows || []).filter((r) => r.isGame).forEach((r) =>
+      (r.poolGames || []).forEach((pg) =>
+        [pg.whiteTeamName, pg.blackTeamName].forEach((name) => {
+          const key = String(name || "").trim().toLowerCase();
+          if (key && first[key] == null) first[key] = n++;
+        })
+      )
+    );
+    const rank = (t) => { const v = first[String(t.name || "").trim().toLowerCase()]; return v == null ? Infinity : v; };
+    return teams.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map((x) => x.t);
+  }
+
   function PublicTimetable({ rows, highlightTeamName }) {
     if (!rows || rows.length === 0) {
       return h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No timetable rows yet.");
@@ -501,7 +520,7 @@ GUWH.Pages = GUWH.Pages || {};
               : h(
                   "div",
                   { className: "grid sm:grid-cols-2 gap-4" },
-                  data.teams.map((team) => {
+                  teamsInPlayOrder(data.teams, data.rows).map((team) => {
                     const mine = isMyTeam(team.name, myTeamName);
                     return h(
                       "div",
@@ -509,7 +528,7 @@ GUWH.Pages = GUWH.Pages || {};
                       h(
                         "div",
                         { className: "flex items-center justify-between mb-2" },
-                        h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, team.name),
+                        h("p", { className: "font-display text-xl font-bold text-[var(--ink)]" }, team.name),
                         mine && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, "Your team")
                       ),
                       team.players.length === 0
