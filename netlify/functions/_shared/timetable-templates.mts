@@ -10,9 +10,10 @@
 // (apply_template).
 //
 // A, B and C rounds are seeded the first time the table is empty, from
-// the club's printed sheets. The team that isn't playing referees / runs
-// drills / coaches; the app's referees are people, not teams, so that's
-// kept in the row notes.
+// the club's printed sheets, with no referees (picked each week). The team
+// that isn't playing referees / runs drills / coaches; the app's referees
+// are people, not teams, so that's kept in the row notes, which players
+// see on the public timetable.
 
 export type TemplateGame = { pool: string; white: string | null; black: string | null; refereeIds: string[] };
 export type TemplateRow = {
@@ -60,14 +61,14 @@ const ROUNDS: Record<string, [string, string, string][]> = {
   "C round": [["Sharks", "Dolphins", "Crays"], ["Sharks", "Crays", "Dolphins"], ["Dolphins", "Crays", "Sharks"]],
 };
 
-export function roundRows(games: [string, string, string][], devRefereeIds: string[]): TemplateRow[] {
-  const one = (white: string | null, black: string | null, refereeIds: string[] = []): TemplateGame[] => [{ pool: "Pool A", white, black, refereeIds }];
+export function roundRows(games: [string, string, string][]): TemplateRow[] {
+  const one = (white: string | null, black: string | null): TemplateGame[] => [{ pool: "Pool A", white, black, refereeIds: [] }];
   return [
-    { rowType: "set_up", label: "Set Up", startMin: 0, durationMin: 15, notes: null, gameCount: 2, games: [] },
+    { rowType: "set_up", label: "Set Up", startMin: 0, durationMin: 10, notes: null, gameCount: 2, games: [] },
     {
       rowType: "game", label: "Development", startMin: 15, durationMin: 28,
       notes: "Development game and warm-up. Junior focus", gameCount: 1,
-      games: one("Stingrays", "Seahorses", devRefereeIds),
+      games: one("Stingrays", "Seahorses"),
     },
     ...games.map(([white, black, ref], i) => ({
       rowType: "game", label: "Game " + (i + 1), startMin: 44 + i * 19, durationMin: 18,
@@ -78,16 +79,9 @@ export function roundRows(games: [string, string, string][], devRefereeIds: stri
 }
 
 async function seedRounds(db: any): Promise<void> {
-  // The development game's referees on the sheet: Cookie and Stu. Matched
-  // by name once, here; skipped if that name isn't exactly one member.
-  const devRefereeIds: string[] = [];
-  for (const [first, last] of [["Liam", "Cooke"], ["Stuart", "McCallum"]]) {
-    const found = await db.sql`select id from members where lower(first_name) = lower(${first}) and lower(last_name) = lower(${last})`;
-    if (found.length === 1) devRefereeIds.push(found[0].id);
-  }
   for (const [name, games] of Object.entries(ROUNDS)) {
     await db.sql`
-      insert into timetable_templates (name, rows) values (${name}, ${JSON.stringify(roundRows(games, devRefereeIds))}::jsonb)
+      insert into timetable_templates (name, rows) values (${name}, ${JSON.stringify(roundRows(games))}::jsonb)
       on conflict do nothing
     `;
   }
