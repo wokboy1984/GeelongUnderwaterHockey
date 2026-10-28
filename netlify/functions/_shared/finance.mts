@@ -42,12 +42,15 @@ export function totals(entries: any[], month: string) {
 // Family cap (committee decision, from 28 Oct 2026): on a game night a
 // family pays at most $20, plus $10 for each adult who is charged. So
 // juniors only $20, 1 adult with any number of juniors $30, 2 adults $40.
-// A family is two partners (members.partner_id, linked by an Administrator)
-// plus the children under either of them; a junior is a child under 18 on
-// the night. Volunteers ($0) don't count as an adult, and unwaged adults may
-// come in under the cap anyway. Lane swims aren't covered. The saving comes
-// off the children's charges (it always fits there), so adults' own charges
-// never change and nothing moves between accounts.
+// A family is the login accounts an Administrator has put together
+// (members.family_id) plus the children under any of them; a junior is
+// anyone under 18 on the night, with their own login or not. Volunteers ($0)
+// don't count as an adult, and unwaged adults may come in under the cap
+// anyway. Lane swims aren't covered. The saving comes off the juniors'
+// charges (it always fits there for up to two adults; with more, adults just
+// pay as normal), so adults' own charges never change. A junior with their
+// own login has the saving on their own account; a child under a parent, on
+// the parent's.
 // ---------------------------------------------------------------------------
 export const FAMILY_CAP_FROM = '2026-10-28';
 export function familyCapCents(adultsCharged: number): number {
@@ -59,7 +62,6 @@ function ageOn(dob: unknown, date: string): number | null {
  const [y, m, day] = d.split('-').map(Number), [ty, tm, td] = date.split('-').map(Number);
  return ty - y - (tm < m || (tm === m && td < day) ? 1 : 0);
 }
-const familyKey = (a: string, b: string | null) => (b ? [a, b].sort().join('+') : a);
 
 export type GameFee = {
  id: string; member_id: string; attendee_id: string; kind: 'game'; entry_date: string;
@@ -70,7 +72,7 @@ export type GameFee = {
 // without a database.
 export type AttendedRow = {
  member_id: string; bill_to: string; is_child: boolean; trial_free: boolean; first_name: string;
- date_of_birth: unknown; partner_id: string | null; parent_partner_id: string | null;
+ date_of_birth: unknown; family_key: string;
  session_date: string; marked_by: string | null; kind: string; category: string; trial_eligible: boolean;
  attendance_number: number | string;
 };
@@ -96,11 +98,11 @@ export function priceGames(rows: AttendedRow[]): GameFee[] {
  const nights: Record<string, typeof fees> = {};
  for (const f of fees) {
   if (f.row.kind !== 'player' || f.row.session_date < FAMILY_CAP_FROM) continue;
-  const key = f.row.is_child ? familyKey(f.row.bill_to, f.row.parent_partner_id) : familyKey(f.row.member_id, f.row.partner_id);
-  (nights[key + '@' + f.row.session_date] ||= []).push(f);
+  (nights[f.row.family_key + '@' + f.row.session_date] ||= []).push(f);
  }
  for (const night of Object.values(nights)) {
-  const junior = (f: (typeof fees)[number]) => { const age = ageOn(f.row.date_of_birth, f.row.session_date); return f.row.is_child && (age == null || age < 18); };
+  // No date of birth: a child under a parent is a junior, a login isn't.
+  const junior = (f: (typeof fees)[number]) => { const age = ageOn(f.row.date_of_birth, f.row.session_date); return age == null ? f.row.is_child : age < 18; };
   const adultsCharged = night.filter((f) => !junior(f) && f.fee.amount_cents > 0).length;
   let over = night.reduce((s, f) => s + f.fee.amount_cents, 0) - familyCapCents(adultsCharged);
   for (const f of night.filter(junior).sort((a, b) => b.fee.amount_cents - a.fee.amount_cents || a.fee.attendee_id.localeCompare(b.fee.attendee_id))) {
@@ -108,7 +110,7 @@ export function priceGames(rows: AttendedRow[]): GameFee[] {
    const take = Math.min(over, f.fee.amount_cents);
    if (take <= 0) continue;
    f.fee.amount_cents -= take;
-   f.fee.note = f.row.first_name + ' (child) — family cap';
+   f.fee.note = f.row.is_child ? f.row.first_name + ' (child) — family cap' : 'Confirmed attendance — family cap';
    over -= take;
   }
  }
@@ -121,7 +123,7 @@ export function priceGames(rows: AttendedRow[]): GameFee[] {
 export async function gameFeeEntries(db: any, payerId?: string): Promise<GameFee[]> {
  const rows = await db.sql`
   select sa.member_id, coalesce(m.parent_id, sa.member_id) as bill_to, (m.parent_id is not null) as is_child,
-   m.trial_free, m.first_name, m.date_of_birth, m.partner_id, p.partner_id as parent_partner_id,
+   m.trial_free, m.first_name, m.date_of_birth, coalesce(p.family_id, p.id, m.family_id, m.id) as family_key,
    to_char(sa.session_date, 'YYYY-MM-DD') as session_date, sa.marked_by, sa.kind, fa.category, fa.trial_eligible,
    row_number() over (partition by sa.member_id, sa.kind order by sa.session_date) as attendance_number
   from session_attendance sa

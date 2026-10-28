@@ -66,8 +66,8 @@ GUWH.Pages = GUWH.Pages || {};
     const [nick, setNick] = React.useState("");
     const [busy, setBusy] = React.useState(false);
     const [saved, setSaved] = React.useState(false);
-    const [partnerQ, setPartnerQ] = React.useState("");
-    const [partnerResults, setPartnerResults] = React.useState(null);
+    const [familyQ, setFamilyQ] = React.useState("");
+    const [familyResults, setFamilyResults] = React.useState(null);
 
     // Moving between a parent and a child changes only the query string, so
     // the page watches the hash itself.
@@ -111,35 +111,37 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
-    // Partners (28 Oct 2026): link two adults as one family, for booking
-    // each other in and the family fee cap.
-    async function findPartner(ev) {
+    // Families (28 Oct 2026): put login accounts (partners, juniors with
+    // their own login) in one family, for booking each other in and the
+    // family fee cap. Children under a parent follow the parent.
+    async function findFamily(ev) {
       ev.preventDefault();
-      if (!partnerQ.trim()) return;
+      if (!familyQ.trim()) return;
       setError(null);
       try {
-        const res = await GUWH.Identity.authFetch("/api/admin/roles?q=" + encodeURIComponent(partnerQ.trim()));
+        const res = await GUWH.Identity.authFetch("/api/admin/roles?q=" + encodeURIComponent(familyQ.trim()));
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "Search failed");
-        setPartnerResults(data.members.filter((x) => x.id !== m.id));
+        const already = new Set([m.id].concat((m.family || []).map((f) => f.id)));
+        setFamilyResults(data.members.filter((x) => !already.has(x.id)));
       } catch (e) {
         setError(String(e.message || e));
       }
     }
-    async function savePartner(partnerId) {
+    async function familyCall(body) {
       setBusy(true);
       setError(null);
       try {
         const res = await GUWH.Identity.authFetch("/api/admin/roles", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "set_partner", memberId: m.id, partnerId }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "Couldn't save");
         setM(data.member);
-        setPartnerQ("");
-        setPartnerResults(null);
+        setFamilyQ("");
+        setFamilyResults(null);
       } catch (e) {
         setError(String(e.message || e));
       } finally {
@@ -254,44 +256,20 @@ GUWH.Pages = GUWH.Pages || {};
         h(
             Card,
             { title: "Family" },
-            !isChild &&
+            // Everyone else in the family, then (for adults) adding someone.
+            (m.family || []).length > 0 &&
               h(
-                "div",
-                { className: "mb-3" },
-                m.partner
-                  ? h(
-                      "p",
-                      { className: "text-sm text-[var(--ink)] flex flex-wrap items-center gap-2" },
-                      "Partner: ",
-                      h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + m.partner.id) }, m.partner.adminName),
-                      h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => { if (window.confirm("Unlink " + m.partner.adminName + " as " + (m.adminName || m.displayName) + "'s partner?")) savePartner(null); } }, "Unlink")
-                    )
-                  : h(
-                      React.Fragment,
-                      null,
-                      h("p", { className: "text-sm text-[var(--ink-soft)] mb-2" }, "No partner linked. Partners can book each other and the children under either of them in, and their family's game fees are capped each night."),
-                      h(
-                        "form",
-                        { className: "flex flex-wrap gap-2", onSubmit: findPartner },
-                        h("input", { className: inputCls + " !w-full sm:!w-64", value: partnerQ, placeholder: "Search by name or email", onChange: (e) => setPartnerQ(e.target.value) }),
-                        h(Button, { type: "submit", size: "sm", variant: "secondary", disabled: busy || !partnerQ.trim() }, "Find")
-                      ),
-                      partnerResults &&
-                        (partnerResults.length === 0
-                          ? h("p", { className: "mt-2 text-sm text-[var(--ink-soft)]" }, "No members found.")
-                          : h(
-                              "ul",
-                              { className: "mt-2 flex flex-col gap-1.5" },
-                              partnerResults.map((x) =>
-                                h(
-                                  "li",
-                                  { key: x.id, className: "flex items-center justify-between gap-3 text-sm text-[var(--ink)]" },
-                                  h("span", null, x.adminName || x.displayName, x.email ? h("span", { className: "text-[var(--ink-soft)]" }, " · " + x.email) : null),
-                                  h(Button, { type: "button", size: "sm", disabled: busy, onClick: () => savePartner(x.id) }, "Link as partner")
-                                )
-                              )
-                            ))
-                    )
+                "ul",
+                { className: "flex flex-col gap-2 mb-3" },
+                m.family.map((f) =>
+                  h(
+                    "li",
+                    { key: f.id, className: "text-sm text-[var(--ink)] flex flex-wrap items-center gap-2" },
+                    h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + f.id) }, f.adminName),
+                    h("span", { className: "text-[var(--ink-soft)]" }, [f.isChild ? "child" : null, typeof f.age === "number" ? "age " + f.age : null].filter(Boolean).join(" · ")),
+                    !f.isChild && h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => { if (window.confirm("Take " + f.adminName + " out of this family?")) familyCall({ action: "family_remove", memberId: f.id, viewId: m.id }); } }, "Remove from family")
+                  )
+                )
               ),
             isChild &&
               h(
@@ -314,6 +292,41 @@ GUWH.Pages = GUWH.Pages || {};
                     k.removed ? " · removed by parent" : ""
                   )
                 )
+              ),
+            !isChild &&
+              h(
+                "div",
+                { className: "mt-3" },
+                h(
+                  "p",
+                  { className: "text-sm text-[var(--ink-soft)] mb-2" },
+                  (m.family || []).length > 0
+                    ? "Everyone in a family can book the others in, and the family's game fees are capped each night. Add someone else with their own login:"
+                    : "Not in a family. Add a partner, or a junior with their own login, so they can book each other in and the family fee cap applies. Children under this member's profile are included automatically."
+                ),
+                h(
+                  "form",
+                  { className: "flex flex-wrap gap-2", onSubmit: findFamily },
+                  h("input", { className: inputCls + " !w-full sm:!w-64", value: familyQ, placeholder: "Search by name or email", onChange: (e) => setFamilyQ(e.target.value) }),
+                  h(Button, { type: "submit", size: "sm", variant: "secondary", disabled: busy || !familyQ.trim() }, "Find")
+                ),
+                familyResults &&
+                  (familyResults.length === 0
+                    ? h("p", { className: "mt-2 text-sm text-[var(--ink-soft)]" }, "No members found.")
+                    : h(
+                        "ul",
+                        { className: "mt-2 flex flex-col gap-1.5" },
+                        familyResults.map((x) =>
+                          h(
+                            "li",
+                            { key: x.id, className: "flex items-center justify-between gap-3 text-sm text-[var(--ink)]" },
+                            h("span", null, x.adminName || x.displayName, x.email ? h("span", { className: "text-[var(--ink-soft)]" }, " · " + x.email) : null),
+                            h(Button, { type: "button", size: "sm", disabled: busy, onClick: () => familyCall({ action: "family_add", memberId: m.id, otherId: x.id }) }, "Add to family")
+                          )
+                        )
+                      )),
+                (m.family || []).some((f) => !f.isChild) &&
+                  h(Button, { type: "button", size: "sm", variant: "ghost", className: "mt-2", disabled: busy, onClick: () => { if (window.confirm("Take " + (m.adminName || m.displayName) + " out of this family?")) familyCall({ action: "family_remove", memberId: m.id }); } }, "Take this member out of the family")
               )
           ),
 

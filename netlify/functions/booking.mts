@@ -8,8 +8,8 @@
 // POST { in, dependantId? } (14 Oct 2026): with dependantId, books/cancels
 // one of the caller's own children instead of the caller. Response also
 // carries family[]: the caller's children with inSession for this Wednesday.
-// Since 28 Oct 2026 that's the whole family: the caller's partner (linked
-// by an Administrator) and the children under either of them, and
+// Since 28 Oct 2026 that's the whole family: everyone an Administrator
+// has put in the caller's family and the children under any of them, and
 // dependantId can be any of them.
 //
 // confirmed[] (2 Oct 2026): who's coming, for the Dashboard's Who's Coming
@@ -27,7 +27,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
 import { nextSessionDateISO, toAttendanceKind } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
@@ -90,19 +90,11 @@ export default async (req: Request, context: Context) => {
       let kind = toAttendanceKind(body.kind);
 
       // Booking someone in the caller's family (14 Oct 2026 for "My kids";
-      // partners 28 Oct 2026): their partner, or a child of either of them
-      // who hasn't been removed.
+      // whole families 28 Oct 2026). Removed children aren't in the list.
       let targetId = memberId;
       if (body.dependantId) {
-        const [who] = await db.sql`
-          select m.id from members m
-          where m.id = ${String(body.dependantId)}
-            and (
-              m.id = (select partner_id from members where id = ${memberId})
-              or (m.dependant_removed_at is null and m.parent_id is not null
-                  and (m.parent_id = ${memberId} or m.parent_id = (select partner_id from members where id = ${memberId})))
-            )
-        `;
+        const fam = await familyMembers(db, await familyOf(db, memberId));
+        const who = fam.find((f: any) => f.id === String(body.dependantId) && f.id !== memberId);
         if (!who) {
           return new Response(JSON.stringify({ ok: false, error: "That person isn't in your family on the club's records." }), {
             status: 404,
@@ -157,23 +149,19 @@ export default async (req: Request, context: Context) => {
     }));
     const count = confirmed.length;
 
-    // The caller's family (partner first, then the children under either
-    // of them) and whether each is booked in for this session.
-    const familyRows = await db.sql`
-      select m.id, m.first_name, m.last_name, (m.parent_id is null) as is_partner,
-        coalesce((select b.status = 'in' from bookings b where b.session_id = ${sessionId} and b.member_id = m.id), false) as booked
-      from members m
-      where m.id = (select partner_id from members where id = ${memberId})
-         or (m.dependant_removed_at is null and m.parent_id is not null
-             and (m.parent_id = ${memberId} or m.parent_id = (select partner_id from members where id = ${memberId})))
-      order by (m.parent_id is null) desc, m.created_at asc, m.id
-    `;
-    const family = familyRows.map((r: any) => ({
+    // The caller's family (people with their own login first, then the
+    // children under anyone in it) and whether each is booked in.
+    const famRows = (await familyMembers(db, await familyOf(db, memberId))).filter((f: any) => f.id !== memberId);
+    const bookedIn = famRows.length
+      ? await db.sql`select member_id from bookings where session_id = ${sessionId} and status = 'in' and member_id = any(${famRows.map((f: any) => f.id)})`
+      : [];
+    const family = famRows.map((r: any) => ({
       id: r.id,
       name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim(),
       firstName: r.first_name,
-      isPartner: !!r.is_partner,
-      inSession: !!r.booked,
+      // Has their own login (not a child under a parent).
+      isMember: !r.parent_id,
+      inSession: bookedIn.some((b: any) => b.member_id === r.id),
     }));
 
     return new Response(

@@ -7,8 +7,9 @@
 // DELETE /api/admin/roles  { memberEmail, role, note } -> revoke
 // POST   /api/admin/roles  { action: "grade", memberEmail, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
-// POST   /api/admin/roles  { action: "set_partner", memberId, partnerId | null }
-//        -> link two adults as partners (one family), or unlink (28 Oct 2026)
+// POST   /api/admin/roles  { action: "family_add", memberId, otherId }
+// POST   /api/admin/roles  { action: "family_remove", memberId, viewId? }
+//        -> put login accounts in one family, or take one out (28 Oct 2026)
 // POST   /api/admin/roles  { action: "waiver", memberEmail, signed } -> record
 //        (or clear) a waiver signed in person at the pool (12 Oct 2026)
 //
@@ -23,7 +24,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { SUPER_ADMIN_EMAIL, adminName, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { byDate, gameFeeEntries, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
@@ -93,7 +94,7 @@ async function memberDetail(db: any, id: string) {
   const [m] = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
            m.emergency_name, m.emergency_phone, m.waiver_accepted_at, m.waiver_signed_name, m.created_at,
-           m.parent_id, m.dependant_removed_at, m.partner_id,
+           m.parent_id, m.dependant_removed_at,
            array_remove(array_agg(mr.role), null) as roles
     from members m left join member_roles mr on mr.member_id = m.id
     where m.id = ${id}
@@ -108,9 +109,9 @@ async function memberDetail(db: any, id: string) {
     select id, nickname, first_name, last_name, date_of_birth, dependant_removed_at
     from members where parent_id = ${m.id} order by created_at asc, id
   `;
-  const [partner] = m.partner_id
-    ? await db.sql`select id, nickname, first_name, last_name from members where id = ${m.partner_id}`
-    : [];
+  // The rest of their family: other logins, and children under them
+  // (this member's own children are listed under kids already).
+  const family = (await familyMembers(db, await familyOf(db, m.id))).filter((f: any) => f.id !== m.id && f.parent_id !== m.id && f.id !== m.parent_id);
 
   const [games] = await db.sql`select count(*)::int as n from session_attendance where member_id = ${m.id} and attended = true`;
   const [lastGame] = await db.sql`select to_char(max(session_date), 'YYYY-MM-DD') as d from session_attendance where member_id = ${m.id} and attended = true`;
@@ -183,7 +184,7 @@ async function memberDetail(db: any, id: string) {
       joined: m.created_at,
       removedChild: !!m.dependant_removed_at,
       parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" "), adminName: adminName(parent.nickname, parent.first_name, parent.last_name) } : null,
-      partner: partner ? { id: partner.id, adminName: adminName(partner.nickname, partner.first_name, partner.last_name) } : null,
+      family: family.map((f: any) => ({ id: f.id, adminName: adminName(f.nickname, f.first_name, f.last_name), isChild: !!f.parent_id, age: ageFromDOB(f.date_of_birth) })),
       kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), adminName: adminName(k.nickname, k.first_name, k.last_name), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
       gamesPlayed: games.n,
       lastGame: lastGame.d || null,
@@ -297,42 +298,48 @@ export default async (req: Request, context: Context) => {
       return await memberDetail(db, target.id);
     }
 
-    // Partners (28 Oct 2026, committee decision on family pricing): two
-    // adults linked here are one family with the children under either of
-    // them. Each can book the other and the children in, and the family's
-    // game fees are capped per night (_shared/finance.mts). Linking is
-    // always both ways, and refused if either already has a different
-    // partner, so a mistake is undone by unlinking first.
-    if (req.method === "POST" && body.action === "set_partner") {
+    // Families (28 Oct 2026, committee decision on family pricing): an
+    // Administrator puts login accounts - partners, juniors with their own
+    // login - into one family. Children under a parent follow the parent.
+    // Anyone in a family can book the others in, and the family's game
+    // fees are capped per night (_shared/finance.mts). Joining two people
+    // who are each already in a different family is refused, so a mistake
+    // is undone by removing someone first rather than merging families.
+    if (req.method === "POST" && (body.action === "family_add" || body.action === "family_remove")) {
       const fail = (error: string, status = 400) =>
         new Response(JSON.stringify({ ok: false, error }), { status, headers: { "content-type": "application/json" } });
-      const id = String(body.memberId || "").trim();
-      const partnerId = body.partnerId ? String(body.partnerId).trim() : null;
-      const [target] = await db.sql`select id, email, parent_id, partner_id, first_name, last_name, nickname from members where id = ${id}`;
+      const [target] = await db.sql`select id, email, parent_id, family_id from members where id = ${String(body.memberId || "")}`;
       if (!target) return fail("Member not found", 404);
-      if (!partnerId) {
-        if (target.partner_id) {
-          await db.sql`update members set partner_id = null where id in (${target.id}, ${target.partner_id})`;
+      if (target.parent_id) return fail("A child under a parent's profile is always in their parent's family - add or remove the parent instead");
+
+      if (body.action === "family_remove") {
+        if (target.family_id) {
+          await db.sql`update members set family_id = null where id = ${target.id}`;
+          // A family of one is no family: clear the last member too.
+          const left = await db.sql`select id from members where family_id = ${target.family_id}`;
+          if (left.length === 1) await db.sql`update members set family_id = null where id = ${left[0].id}`;
           await logAudit(db, {
-            actorId: caller.id, actorEmail: caller.email, action: "partner_unlinked",
-            resourceType: "member", resourceId: target.id, previousValue: { partnerId: target.partner_id },
-            note: `${caller.email} unlinked ${target.email} from their partner`,
+            actorId: caller.id, actorEmail: caller.email, action: "family_member_removed",
+            resourceType: "member", resourceId: target.id, previousValue: { familyId: target.family_id },
+            note: `${caller.email} took ${target.email} out of their family`,
           });
         }
-        return await memberDetail(db, target.id);
+        return await memberDetail(db, String(body.viewId || target.id));
       }
-      const [other] = await db.sql`select id, email, parent_id, partner_id from members where id = ${partnerId}`;
-      if (!other) return fail("Partner not found", 404);
-      if (other.id === target.id) return fail("Pick someone else as the partner");
-      if (target.parent_id || other.parent_id) return fail("Children are already part of their parent's family - link the two adults instead");
-      if (target.partner_id && target.partner_id !== other.id) return fail("This member is already linked to another partner - unlink them first");
-      if (other.partner_id && other.partner_id !== target.id) return fail("That person is already linked to another partner - unlink them first");
-      await db.sql`update members set partner_id = ${other.id} where id = ${target.id}`;
-      await db.sql`update members set partner_id = ${target.id} where id = ${other.id}`;
+
+      const [other] = await db.sql`select id, email, parent_id, family_id from members where id = ${String(body.otherId || "")}`;
+      if (!other) return fail("That member wasn't found", 404);
+      if (other.id === target.id) return fail("Pick someone else");
+      if (other.parent_id) return fail("A child under a parent's profile is already in their parent's family - add the parent instead");
+      if (target.family_id && other.family_id && target.family_id !== other.family_id) {
+        return fail("They're each already in a different family - take one of them out of theirs first");
+      }
+      const familyId = target.family_id || other.family_id || `family_${crypto.randomUUID()}`;
+      await db.sql`update members set family_id = ${familyId} where id in (${target.id}, ${other.id})`;
       await logAudit(db, {
-        actorId: caller.id, actorEmail: caller.email, action: "partner_linked",
-        resourceType: "member", resourceId: target.id, newValue: { partnerId: other.id },
-        note: `${caller.email} linked ${target.email} and ${other.email} as partners`,
+        actorId: caller.id, actorEmail: caller.email, action: "family_member_added",
+        resourceType: "member", resourceId: other.id, newValue: { familyId, with: target.id },
+        note: `${caller.email} put ${other.email} in the same family as ${target.email}`,
       });
       return await memberDetail(db, target.id);
     }
