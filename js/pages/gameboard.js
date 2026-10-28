@@ -172,7 +172,9 @@ GUWH.Pages = GUWH.Pages || {};
                         data.referees && data.referees.length > 0 && h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(data.referees))
                       )
                   )
-                )
+                ),
+            // Game notes, e.g. which team referees / runs drills (28 Oct 2026, Liam).
+            row.isGame && row.notes && h("p", { className: "text-xs text-[var(--ink-soft)] mt-2" }, row.notes)
           );
         })
       );
@@ -211,8 +213,17 @@ GUWH.Pages = GUWH.Pages || {};
             time,
             teamCell(g && g.whiteTeamName, highlightTeamName),
             teamCell(g && g.blackTeamName, highlightTeamName),
-            g && g.referees && g.referees.length > 0 &&
-              h(React.Fragment, null, h("div", { className: "pb-2.5 border-b border-black/5" }), h("div", { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" }, "Referees: " + refNames(g.referees)))
+            (row.notes || (g && g.referees && g.referees.length > 0)) &&
+              h(
+                React.Fragment,
+                null,
+                h("div", { className: "pb-2.5 border-b border-black/5" }),
+                h(
+                  "div",
+                  { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" },
+                  [row.notes, g && g.referees && g.referees.length > 0 && "Referees: " + refNames(g.referees)].filter(Boolean).join(" · ")
+                )
+              )
           );
         })
       );
@@ -270,7 +281,7 @@ GUWH.Pages = GUWH.Pages || {};
                 h("span", { className: "text-[var(--ink-soft)] font-normal px-1" }, "v"),
                 h("span", { className: "text-[var(--ink-soft)] font-normal" }, "Black:"),
                 teamNameInline(poolA && poolA.blackTeamName, highlightTeamName),
-                refs && h("span", { className: "basis-full text-xs font-normal text-[var(--ink-soft)] mt-0.5" }, "Referees: " + refNames(refs))
+                (row.notes || refs) && h("span", { className: "basis-full text-xs font-normal text-[var(--ink-soft)] mt-0.5" }, [row.notes, refs && "Referees: " + refNames(refs)].filter(Boolean).join(" · "))
               )
             );
           }
@@ -297,6 +308,13 @@ GUWH.Pages = GUWH.Pages || {};
                   { className: "pb-2.5 border-b border-black/5 col-span-2 text-xs text-[var(--ink-soft)]" },
                   poolB && poolB.referees && poolB.referees.length > 0 ? "Referees: " + refNames(poolB.referees) : ""
                 )
+              ),
+            row.notes &&
+              h(
+                React.Fragment,
+                null,
+                h("div", { className: "pb-2.5 border-b border-black/5" }),
+                h("div", { className: "pb-2.5 border-b border-black/5 col-span-4 text-xs text-[var(--ink-soft)]" }, row.notes)
               )
           );
         })

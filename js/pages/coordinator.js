@@ -1330,6 +1330,74 @@ GUWH.Pages = GUWH.Pages || {};
     }));
   }
 
+  // ---- Saved timetables (28 Oct 2026, Liam) ----
+  // Load A/B/C round (or any timetable saved by name) into this week in one
+  // go, or save this week's timetable by name to use again. Server side is
+  // apply_template / save_template / delete_template in
+  // coordinator-schedule.mts.
+  function TemplatesPanel({ data, call }) {
+    const templates = data.templates || [];
+    // The rounds rotate A, B, C: suggest the one after last week's.
+    const suggested = React.useMemo(() => {
+      const m = data.lastTemplate && /^([a-z]) round$/i.exec(data.lastTemplate.name);
+      if (!m) return null;
+      const byName = (n) => templates.find((t) => t.name.toLowerCase() === n);
+      return byName(String.fromCharCode(m[1].toLowerCase().charCodeAt(0) + 1) + " round") || byName("a round") || null;
+    }, [data.lastTemplate, templates]);
+    const [selected, setSelected] = React.useState("");
+    const sel = templates.find((t) => String(t.id) === selected) || suggested || templates[0] || null;
+
+    function load() {
+      if (sel && window.confirm('Replace this week\'s timetable with "' + sel.name + '"? Every row below is replaced (rows already published are archived, not deleted).')) {
+        call({ action: "apply_template", templateId: sel.id });
+      }
+    }
+    function saveAs() {
+      const name = window.prompt("Save this week's timetable as:", data.currentTemplate || "");
+      if (name == null || !name.trim()) return;
+      const clash = templates.find((t) => t.name.toLowerCase() === name.trim().toLowerCase());
+      if (clash && !window.confirm('Replace the saved timetable "' + clash.name + '" with this week\'s?')) return;
+      call({ action: "save_template", name: clash ? clash.name : name.trim(), overwrite: !!clash });
+    }
+    function remove() {
+      if (sel && window.confirm('Delete the saved timetable "' + sel.name + '"? This week\'s timetable isn\'t changed.')) {
+        setSelected("");
+        call({ action: "delete_template", templateId: sel.id });
+      }
+    }
+
+    const status = [
+      "This week: " + (data.currentTemplate || "not loaded from a saved timetable"),
+      data.lastTemplate && "Last used: " + data.lastTemplate.name + " (" + GUWH.formatDate(new Date(data.lastTemplate.sessionDate + "T00:00:00")) + ")",
+    ].filter(Boolean).join(" · ");
+
+    return h(
+      "div",
+      { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mb-4 flex flex-col gap-3" },
+      h(
+        "div",
+        { className: "flex flex-wrap items-end gap-3" },
+        templates.length > 0
+          ? h(
+              FormField,
+              { label: "Round / saved timetable" },
+              h(
+                "select",
+                { className: inputCls + " !w-56", value: sel ? String(sel.id) : "", onChange: (e) => setSelected(e.target.value) },
+                templates.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name + (suggested && t.id === suggested.id ? " (next)" : "")))
+              )
+            )
+          : h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No saved timetables yet."),
+        sel && h(Button, { size: "sm", onClick: load }, "Load"),
+        h(Button, { size: "sm", variant: "secondary", onClick: saveAs }, "Save current as…"),
+        sel && h(Button, { size: "sm", variant: "ghost", onClick: remove }, "Delete")
+      ),
+      h("p", { className: "text-xs text-[var(--ink-soft)]" }, status + ". Loading replaces the whole timetable below; teams are matched by name."),
+      (data.notices || []).length > 0 &&
+        h("div", { className: "rounded-xl bg-[var(--accent-12)] p-3 text-sm text-[var(--ink)] flex flex-col gap-1" }, data.notices.map((n, i) => h("p", { key: i }, n)))
+    );
+  }
+
   function ScheduleTab() {
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -1478,10 +1546,12 @@ GUWH.Pages = GUWH.Pages || {};
         h(Button, { size: "sm", variant: "secondary", onClick: () => setPreview(true) }, h(Icon, { name: "share", size: 14 }), "Preview public timetable")
       ),
 
+      h(TemplatesPanel, { data, call }),
+
       // Last week's format (12 Oct 2026): the server copies the previous
       // week's row layout into an empty new week once. Say so, and offer a
-      // clean slate.
-      data.copiedFrom && data.rows.length > 0 &&
+      // clean slate. Not once a saved timetable has been loaded over it.
+      data.copiedFrom && !data.currentTemplate && data.rows.length > 0 &&
         h(
           "div",
           { className: "rounded-2xl bg-[var(--accent-12)] p-4 mb-4 flex flex-wrap items-center justify-between gap-3" },

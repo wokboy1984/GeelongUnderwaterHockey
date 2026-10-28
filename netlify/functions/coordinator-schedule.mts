@@ -28,6 +28,10 @@
 //   clear_row_teams  { rowId }
 //   assign_referee   { rowId, pool, memberId }
 //   unassign_referee { rowId, pool, memberId }
+//   apply_template   { templateId }  -- replace this week's timetable with a
+//                    saved one (A/B/C round etc.); see _shared/timetable-templates.mts
+//   save_template    { name, overwrite? }  -- save this week's timetable by name
+//   delete_template  { templateId }
 //
 // Publishing itself stays on the existing session-level toggle in
 // coordinator-teams.mts (POST { action: "publish" }) — that action now also
@@ -43,6 +47,7 @@ import { getDatabase } from "@netlify/database";
 import { ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
+import { ensureTimetableTemplates, parseRows, type TemplateRow } from "./_shared/timetable-templates.mts";
 import {
   ROW_TYPES,
   isRowType,
@@ -349,6 +354,7 @@ export default async (req: Request, context: Context) => {
 
   try {
     await ensureGameCountColumn(db);
+    await ensureTimetableTemplates(db);
     const sessionDate = nextWednesdayISO();
     const [session] = await db.sql`
       insert into sessions (session_date)
@@ -362,13 +368,15 @@ export default async (req: Request, context: Context) => {
     await copyForwardWeek(db, sessionId, sessionDate, caller.id);
     await autoPlaceReturningPlayers(db, sessionId, sessionDate);
 
+    // Messages for the coordinator after loading or saving a timetable.
+    const notices: string[] = [];
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       const action = String(body.action || "");
       const MUTATING_ACTIONS = [
         "add_row", "update_row", "duplicate_row", "remove_row", "archive_row", "unarchive_row",
         "reorder_rows", "assign_team", "swap_teams", "clear_row_teams", "assign_referee", "unassign_referee",
-        "set_game_count", "clear_all_rows",
+        "set_game_count", "clear_all_rows", "apply_template",
       ];
 
       // A one-game row has no Pool B - refuse anything aimed at it.
@@ -637,6 +645,124 @@ export default async (req: Request, context: Context) => {
         }
       }
 
+      if (action === "apply_template") {
+        const [tpl] = await db.sql`select id, name, rows from timetable_templates where id = ${Number(body.templateId)}`;
+        if (!tpl) return badRequest("That saved timetable no longer exists");
+        const tplRows = parseRows(tpl.rows);
+
+        // Same clean slate as clear_all_rows: never-published rows go,
+        // published ones are archived (keeps history).
+        await db.sql`delete from timetable_rows where session_id = ${sessionId} and archived_at is null and published_at is null`;
+        await db.sql`update timetable_rows set archived_at = now(), updated_by = ${caller.id}, updated_at = now() where session_id = ${sessionId} and archived_at is null`;
+
+        // Teams are matched by name to this week's teams.
+        const weekTeams = await db.sql`select id, name from game_teams where session_id = ${sessionId}`;
+        const missingTeams = new Set<string>();
+        const teamId = (name: string | null) => {
+          if (!name) return null;
+          const t = weekTeams.find((x: any) => x.name.trim().toLowerCase() === name.trim().toLowerCase());
+          if (!t) missingTeams.add(name);
+          return t ? t.id : null;
+        };
+        const wantedRefs: { rowId: number; pool: string; memberId: string }[] = [];
+        for (let i = 0; i < tplRows.length; i++) {
+          const r = tplRows[i];
+          if (!isRowType(r.rowType)) continue;
+          const gameCount = Number(r.gameCount) === 1 ? 1 : 2;
+          const [row] = await db.sql`
+            insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
+            values (${sessionId}, ${i + 1}, ${r.rowType}, ${r.label || ROW_TYPE_LABELS[r.rowType]}, ${r.startMin ?? null}, ${r.durationMin ?? null}, ${r.notes || null}, ${caller.id}, ${caller.id}, ${gameCount})
+            returning id
+          `;
+          if (r.rowType !== "game") continue;
+          await ensurePoolGamesExist(db, row.id);
+          for (const g of r.games || []) {
+            if (!isPool(g.pool) || (gameCount === 1 && g.pool === "Pool B")) continue;
+            await db.sql`
+              update timetable_pool_games set white_team_id = ${teamId(g.white)}, black_team_id = ${teamId(g.black)}
+              where row_id = ${row.id} and pool = ${g.pool}
+            `;
+            (g.refereeIds || []).forEach((memberId) => wantedRefs.push({ rowId: row.id, pool: g.pool, memberId }));
+          }
+        }
+        await resequenceRows(db, sessionId);
+
+        // Referees only if they could be picked by hand right now (booked
+        // in, not playing that game, ...), same rule as assign_referee.
+        const skippedRefs: string[] = [];
+        const allowPlayerReferees = await getAllowPlayerReferees(db);
+        for (const ref of wantedRefs) {
+          const snap = await loadSnapshot(db, sessionId);
+          const rowSnaps = toRowSnaps(snap.rowRows, snap.poolGamesByRow, snap.refsByPoolGame);
+          const { eligibleIds } = computeEligibility(ref.rowId, ref.pool as any, rowSnaps, snap.teams, snap.refereeEligibleIds, allowPlayerReferees);
+          if (eligibleIds.includes(ref.memberId)) {
+            const [pg] = await db.sql`select id from timetable_pool_games where row_id = ${ref.rowId} and pool = ${ref.pool}`;
+            await db.sql`insert into timetable_pool_referees (pool_game_id, member_id) values (${pg.id}, ${ref.memberId}) on conflict do nothing`;
+          } else {
+            const [m] = await db.sql`select nickname, first_name, last_name from members where id = ${ref.memberId}`;
+            if (m) skippedRefs.push(adminName(m.nickname, m.first_name, m.last_name));
+          }
+        }
+
+        await db.sql`update sessions set timetable_template = ${tpl.name} where id = ${sessionId}`;
+        if (missingTeams.size) notices.push("No team called " + [...missingTeams].join(", ") + " this week, so those slots are empty.");
+        if (skippedRefs.length) notices.push("Not added as referee (not booked in yet, or playing): " + [...new Set(skippedRefs)].join(", ") + ". Add them once they've booked in.");
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: "timetable_template_applied",
+          resourceType: "session", resourceId: String(sessionId),
+          newValue: { sessionDate, template: tpl.name }, note: `${caller.email} loaded the "${tpl.name}" timetable for ${sessionDate}`,
+        });
+      } else if (action === "save_template") {
+        const name = String(body.name || "").trim().slice(0, 40);
+        if (!name) return badRequest("Give the timetable a name");
+        const [existing] = await db.sql`select id from timetable_templates where lower(name) = lower(${name})`;
+        if (existing && body.overwrite !== true) return badRequest(`There's already a saved timetable called "${name}"`);
+
+        const snap = await loadSnapshot(db, sessionId);
+        const teamName = (id: number | null) => (id != null && snap.teams[id] ? snap.teams[id].name : null);
+        const rows: TemplateRow[] = snap.rowRows
+          .filter((r: any) => !r.archived_at)
+          .map((r: any) => {
+            const gameCount = Number(r.game_count) === 1 ? 1 : 2;
+            return {
+              rowType: r.row_type,
+              label: r.label,
+              startMin: r.start_min,
+              durationMin: r.duration_min,
+              notes: r.notes,
+              gameCount,
+              games: r.row_type !== "game" ? [] : (snap.poolGamesByRow[r.id] || [])
+                .filter((pg: any) => POOLS.slice(0, gameCount).includes(pg.pool))
+                .map((pg: any) => ({
+                  pool: pg.pool,
+                  white: teamName(pg.white_team_id),
+                  black: teamName(pg.black_team_id),
+                  refereeIds: (snap.refsByPoolGame[pg.id] || []).map((x: any) => x.id),
+                })),
+            };
+          });
+        if (!rows.length) return badRequest("There's nothing in this week's timetable to save");
+        if (existing) {
+          await db.sql`update timetable_templates set name = ${name}, rows = ${JSON.stringify(rows)}::jsonb, updated_by = ${caller.id}, updated_at = now() where id = ${existing.id}`;
+        } else {
+          await db.sql`insert into timetable_templates (name, rows, created_by, updated_by) values (${name}, ${JSON.stringify(rows)}::jsonb, ${caller.id}, ${caller.id})`;
+        }
+        await db.sql`update sessions set timetable_template = ${name} where id = ${sessionId}`;
+        notices.push(`Saved as "${name}".`);
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: "timetable_template_saved",
+          resourceType: "timetable_template", resourceId: name,
+          newValue: { name, rows: rows.length, overwrote: !!existing }, note: `${caller.email} saved the timetable as "${name}"`,
+        });
+      } else if (action === "delete_template") {
+        const [tpl] = await db.sql`delete from timetable_templates where id = ${Number(body.templateId)} returning name`;
+        if (!tpl) return badRequest("That saved timetable no longer exists");
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: "timetable_template_deleted",
+          resourceType: "timetable_template", resourceId: tpl.name, note: `${caller.email} deleted the saved timetable "${tpl.name}"`,
+        });
+      }
+
       // The timetable is part of what "the board is published" covers
       // (see coordinator-teams.mts). If members can already see it live,
       // any structural change here is a change to a published timetable,
@@ -653,6 +779,18 @@ export default async (req: Request, context: Context) => {
     const [copyInfo] = await db.sql`select timetable_copied_from::text as copied_from from sessions where id = ${sessionId}`;
     const payload: any = await buildResponse(db, sessionId, sessionDate);
     payload.copiedFrom = copyInfo ? copyInfo.copied_from : null;
+    // Saved timetables, and which one this week and last week came from
+    // (the rounds rotate A, B, C).
+    payload.templates = await db.sql`select id, name from timetable_templates order by lower(name)`;
+    const [cur] = await db.sql`select timetable_template from sessions where id = ${sessionId}`;
+    const [prevTpl] = await db.sql`
+      select timetable_template, session_date::text as session_date from sessions
+      where session_date < ${sessionDate} and timetable_template is not null
+      order by session_date desc limit 1
+    `;
+    payload.currentTemplate = cur ? cur.timetable_template : null;
+    payload.lastTemplate = prevTpl ? { name: prevTpl.timetable_template, sessionDate: prevTpl.session_date } : null;
+    payload.notices = notices;
     return new Response(JSON.stringify(payload), {
       headers: { "content-type": "application/json" },
     });

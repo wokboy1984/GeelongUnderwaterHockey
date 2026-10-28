@@ -16,11 +16,14 @@
 //    week (team_autoplaced), so if the coordinator moves or removes them,
 //    they stay where the coordinator put them. Development teams carry
 //    over the same way, separately from the main team (27 Oct 2026).
+//    Someone who has never been on a main team goes into their team on
+//    the club's starting list instead (team-roster.mts, 28 Oct 2026).
 //
 // Both only ever touch the upcoming session. Everything here can be
 // changed by the coordinator before publishing.
 
 import { ensureDevelopmentTeams } from "./roles.mts";
+import { startingTeamFor } from "./team-roster.mts";
 
 let columnsReady = false;
 export async function ensureCarryForwardColumns(db: any): Promise<void> {
@@ -139,8 +142,9 @@ export async function autoPlaceReturningPlayers(db: any, sessionId: number, sess
 
   // Confirmed and not already tried this week.
   const candidates = await db.sql`
-    select b.member_id
+    select b.member_id, m.first_name, m.last_name, m.nickname
     from bookings b
+    join members m on m.id = b.member_id
     where b.session_id = ${sessionId} and b.status = 'in'
       and not exists (select 1 from team_autoplaced tp where tp.session_id = ${sessionId} and tp.member_id = b.member_id)
   `;
@@ -166,8 +170,10 @@ export async function autoPlaceReturningPlayers(db: any, sessionId: number, sess
         order by s.session_date desc
         limit 1
       `;
-      const match = last
-        ? teams.find((t: any) => !!t.is_development === dev && t.name.trim().toLowerCase() === String(last.name).trim().toLowerCase())
+      // Never on a main team before: their team on the starting list.
+      const name = last ? last.name : dev ? null : startingTeamFor(c.first_name, c.last_name, c.nickname);
+      const match = name
+        ? teams.find((t: any) => !!t.is_development === dev && t.name.trim().toLowerCase() === String(name).trim().toLowerCase())
         : null;
       if (!match) continue;
       await db.sql`
