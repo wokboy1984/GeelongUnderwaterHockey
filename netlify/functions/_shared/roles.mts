@@ -119,6 +119,9 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   await db.sql`alter table members add column if not exists parent_id text references members(id)`;
   await db.sql`alter table members add column if not exists dependant_removed_at timestamptz`;
   await db.sql`alter table members add column if not exists trial_free boolean not null default false`;
+  // Partners (28 Oct 2026): two adults an Administrator links as one family,
+  // for booking each other in and the family fee cap. Always set on both.
+  await db.sql`alter table members add column if not exists partner_id text references members(id) on delete set null`;
   familyColumnsReady = true;
 }
 

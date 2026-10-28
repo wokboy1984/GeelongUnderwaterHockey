@@ -8,6 +8,9 @@
 // POST { in, dependantId? } (14 Oct 2026): with dependantId, books/cancels
 // one of the caller's own children instead of the caller. Response also
 // carries family[]: the caller's children with inSession for this Wednesday.
+// Since 28 Oct 2026 that's the whole family: the caller's partner (linked
+// by an Administrator) and the children under either of them, and
+// dependantId can be any of them.
 //
 // confirmed[] (2 Oct 2026): who's coming, for the Dashboard's Who's Coming
 // list - id, display name (nickname, else real name), photo version. Only
@@ -84,23 +87,35 @@ export default async (req: Request, context: Context) => {
       // back to 'player', which is what booking in meant before this
       // existed. Only meaningful when booking in; an "out" keeps whatever
       // was last chosen rather than resetting it.
-      const kind = toAttendanceKind(body.kind);
+      let kind = toAttendanceKind(body.kind);
 
-      // Booking one of the caller's own children (14 Oct 2026, "My kids").
-      // Same cut-off rules as booking yourself; the child must belong to
-      // the caller and not be removed.
+      // Booking someone in the caller's family (14 Oct 2026 for "My kids";
+      // partners 28 Oct 2026): their partner, or a child of either of them
+      // who hasn't been removed.
       let targetId = memberId;
       if (body.dependantId) {
-        const [kid] = await db.sql`
-          select id from members where id = ${String(body.dependantId)} and parent_id = ${memberId} and dependant_removed_at is null
+        const [who] = await db.sql`
+          select m.id from members m
+          where m.id = ${String(body.dependantId)}
+            and (
+              m.id = (select partner_id from members where id = ${memberId})
+              or (m.dependant_removed_at is null and m.parent_id is not null
+                  and (m.parent_id = ${memberId} or m.parent_id = (select partner_id from members where id = ${memberId})))
+            )
         `;
-        if (!kid) {
-          return new Response(JSON.stringify({ ok: false, error: "Child not found on your profile." }), {
+        if (!who) {
+          return new Response(JSON.stringify({ ok: false, error: "That person isn't in your family on the club's records." }), {
             status: 404,
             headers: { "content-type": "application/json" },
           });
         }
-        targetId = kid.id;
+        targetId = who.id;
+        // The family list has no "what for" picker: keep whatever they
+        // last booked as (a partner who volunteers stays a volunteer).
+        if (body.kind == null) {
+          const [prev] = await db.sql`select kind from bookings where session_id = ${sessionId} and member_id = ${targetId}`;
+          if (prev) kind = toAttendanceKind(prev.kind);
+        }
       }
 
       // The client route already gates the whole portal behind the waiver
@@ -142,18 +157,22 @@ export default async (req: Request, context: Context) => {
     }));
     const count = confirmed.length;
 
-    // The caller's children and whether each is booked in for this session.
+    // The caller's family (partner first, then the children under either
+    // of them) and whether each is booked in for this session.
     const familyRows = await db.sql`
-      select m.id, m.first_name, m.last_name,
+      select m.id, m.first_name, m.last_name, (m.parent_id is null) as is_partner,
         coalesce((select b.status = 'in' from bookings b where b.session_id = ${sessionId} and b.member_id = m.id), false) as booked
       from members m
-      where m.parent_id = ${memberId} and m.dependant_removed_at is null
-      order by m.created_at asc, m.id
+      where m.id = (select partner_id from members where id = ${memberId})
+         or (m.dependant_removed_at is null and m.parent_id is not null
+             and (m.parent_id = ${memberId} or m.parent_id = (select partner_id from members where id = ${memberId})))
+      order by (m.parent_id is null) desc, m.created_at asc, m.id
     `;
     const family = familyRows.map((r: any) => ({
       id: r.id,
       name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim(),
       firstName: r.first_name,
+      isPartner: !!r.is_partner,
       inSession: !!r.booked,
     }));
 

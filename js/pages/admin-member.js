@@ -66,6 +66,8 @@ GUWH.Pages = GUWH.Pages || {};
     const [nick, setNick] = React.useState("");
     const [busy, setBusy] = React.useState(false);
     const [saved, setSaved] = React.useState(false);
+    const [partnerQ, setPartnerQ] = React.useState("");
+    const [partnerResults, setPartnerResults] = React.useState(null);
 
     // Moving between a parent and a child changes only the query string, so
     // the page watches the hash itself.
@@ -102,6 +104,42 @@ GUWH.Pages = GUWH.Pages || {};
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "Couldn't save");
         setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // Partners (28 Oct 2026): link two adults as one family, for booking
+    // each other in and the family fee cap.
+    async function findPartner(ev) {
+      ev.preventDefault();
+      if (!partnerQ.trim()) return;
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles?q=" + encodeURIComponent(partnerQ.trim()));
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Search failed");
+        setPartnerResults(data.members.filter((x) => x.id !== m.id));
+      } catch (e) {
+        setError(String(e.message || e));
+      }
+    }
+    async function savePartner(partnerId) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_partner", memberId: m.id, partnerId }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+        setPartnerQ("");
+        setPartnerResults(null);
       } catch (e) {
         setError(String(e.message || e));
       } finally {
@@ -213,10 +251,48 @@ GUWH.Pages = GUWH.Pages || {};
           h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position saves as soon as you pick it.")
         ),
 
-        (isChild || m.kids.length > 0) &&
-          h(
+        h(
             Card,
             { title: "Family" },
+            !isChild &&
+              h(
+                "div",
+                { className: "mb-3" },
+                m.partner
+                  ? h(
+                      "p",
+                      { className: "text-sm text-[var(--ink)] flex flex-wrap items-center gap-2" },
+                      "Partner: ",
+                      h("button", { type: "button", className: "font-semibold text-[var(--accent-dark)] underline", onClick: () => navigate("/admin/member?id=" + m.partner.id) }, m.partner.adminName),
+                      h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => { if (window.confirm("Unlink " + m.partner.adminName + " as " + (m.adminName || m.displayName) + "'s partner?")) savePartner(null); } }, "Unlink")
+                    )
+                  : h(
+                      React.Fragment,
+                      null,
+                      h("p", { className: "text-sm text-[var(--ink-soft)] mb-2" }, "No partner linked. Partners can book each other and the children under either of them in, and their family's game fees are capped each night."),
+                      h(
+                        "form",
+                        { className: "flex flex-wrap gap-2", onSubmit: findPartner },
+                        h("input", { className: inputCls + " !w-full sm:!w-64", value: partnerQ, placeholder: "Search by name or email", onChange: (e) => setPartnerQ(e.target.value) }),
+                        h(Button, { type: "submit", size: "sm", variant: "secondary", disabled: busy || !partnerQ.trim() }, "Find")
+                      ),
+                      partnerResults &&
+                        (partnerResults.length === 0
+                          ? h("p", { className: "mt-2 text-sm text-[var(--ink-soft)]" }, "No members found.")
+                          : h(
+                              "ul",
+                              { className: "mt-2 flex flex-col gap-1.5" },
+                              partnerResults.map((x) =>
+                                h(
+                                  "li",
+                                  { key: x.id, className: "flex items-center justify-between gap-3 text-sm text-[var(--ink)]" },
+                                  h("span", null, x.adminName || x.displayName, x.email ? h("span", { className: "text-[var(--ink-soft)]" }, " · " + x.email) : null),
+                                  h(Button, { type: "button", size: "sm", disabled: busy, onClick: () => savePartner(x.id) }, "Link as partner")
+                                )
+                              )
+                            ))
+                    )
+              ),
             isChild &&
               h(
                 "p",

@@ -593,7 +593,9 @@ GUWH.Pages = GUWH.Pages || {};
   // "My kids" on the attendance card (14 Oct 2026): one row per child saved
   // on the Profile, with a Coming / Not coming button each. Independent of
   // whether the parent is playing. With no children saved it is just a
-  // quiet pointer to the Profile.
+  // quiet pointer to the Profile. Since 28 Oct 2026 it's the whole family:
+  // a partner linked by an Administrator comes first, then the children
+  // under either of you.
   function FamilyBooking({ family, busy, onToggle }) {
     if (!family || family.length === 0) {
       return h(
@@ -605,7 +607,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { className: "mt-5 pt-5 border-t border-white/15" },
-      h("p", { className: "text-xs font-bold uppercase tracking-wide text-white/60 mb-2" }, "Your kids"),
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-white/60 mb-2" }, family.some((k) => k.isPartner) ? "Your family" : "Your kids"),
       h(
         "div",
         { className: "flex flex-col gap-2" },
@@ -622,7 +624,7 @@ GUWH.Pages = GUWH.Pages || {};
             ),
             k.inSession
               ? h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: busy, onClick: () => onToggle(k.id, false) }, "Can't make it")
-              : h(Button, { size: "sm", disabled: busy, onClick: () => onToggle(k.id, true) }, "Bring " + k.firstName)
+              : h(Button, { size: "sm", disabled: busy, onClick: () => onToggle(k.id, true) }, k.isPartner ? k.firstName + "'s coming" : "Bring " + k.firstName)
           )
         )
       ),
