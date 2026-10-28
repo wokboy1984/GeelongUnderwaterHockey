@@ -61,3 +61,8 @@ test('A round matches the printed sheet', () => {
   assert.equal(rows[2].notes, 'Ref / drills / coach: Sharks');
   assert.ok(rows.slice(1).every((r) => r.gameCount === 1));
 });
+
+test('round notes name only the ref / drills / coach team', () => {
+  const rows = roundRows([["Crays", "Sharks", "Dolphins"], ["Crays", "Dolphins", "Sharks"], ["Sharks", "Dolphins", "Crays"]]);
+  assert.deepEqual(rows.slice(2).map((r) => r.notes), ['Ref / drills / coach: Dolphins', 'Ref / drills / coach: Sharks', 'Ref / drills / coach: Crays']);
+});

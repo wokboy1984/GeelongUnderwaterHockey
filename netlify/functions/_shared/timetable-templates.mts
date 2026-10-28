@@ -44,6 +44,12 @@ export async function ensureTimetableTemplates(db: any): Promise<void> {
   await db.sql`alter table sessions add column if not exists timetable_template text`;
   const [{ n }] = await db.sql`select count(*)::int as n from timetable_templates`;
   if (n === 0) await seedRounds(db);
+  // The first version of the rounds had ". Juniors +/-" on Game 3's note
+  // (dropped 28 Oct 2026, Liam). Take it out of any rounds seeded with it.
+  await db.sql`
+    update timetable_templates set rows = replace(rows::text, '. Juniors +/-', '')::jsonb
+    where lower(name) in ('a round', 'b round', 'c round') and rows::text like '%. Juniors +/-%'
+  `;
   ready = true;
 }
 
@@ -72,7 +78,7 @@ export function roundRows(games: [string, string, string][]): TemplateRow[] {
     },
     ...games.map(([white, black, ref], i) => ({
       rowType: "game", label: "Game " + (i + 1), startMin: 44 + i * 19, durationMin: 18,
-      notes: "Ref / drills / coach: " + ref + (i === 2 ? ". Juniors +/-" : ""), gameCount: 1,
+      notes: "Ref / drills / coach: " + ref, gameCount: 1,
       games: one(white, black),
     })),
   ];
