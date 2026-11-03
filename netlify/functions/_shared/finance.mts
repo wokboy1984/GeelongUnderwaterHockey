@@ -15,6 +15,47 @@ export function cents(value: unknown): number {
  if (result <= 0) throw new Error('Payment must be greater than zero');
  return result;
 }
+// Fee category changes (3 Nov 2026, Liam: "how can admin change if someone
+// is waged or unwaged?"). Game fees aren't stored - they're worked out from
+// the roll every time - so simply changing finance_accounts.category would
+// re-price every game the person has ever played. Instead each change is a
+// row with the date it applies from: games before it keep the old rate,
+// games from it on use the new one. finance_accounts.category stays as the
+// category the account started with.
+let categoryChangesReady = false;
+export async function ensureCategoryChanges(db: any): Promise<void> {
+ if (categoryChangesReady) return;
+ await db.sql`create table if not exists finance_category_changes (
+  id serial primary key,
+  member_id text not null references finance_accounts(member_id) on delete cascade,
+  category text not null check (category in ('waged','unwaged')),
+  effective_from date not null,
+  created_by text,
+  created_at timestamptz not null default now()
+ )`;
+ await db.sql`create unique index if not exists finance_category_changes_member_date on finance_category_changes (member_id, effective_from)`;
+ categoryChangesReady = true;
+}
+
+// Today's date in Melbourne, as YYYY-MM-DD.
+export function melbourneDate(): string {
+ return new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Melbourne',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+}
+
+// The category in effect for a member on a date (null if no fee account).
+// With before = true, the one in effect the day before instead.
+export async function categoryOn(db: any, memberId: string, date: string, before = false): Promise<'waged' | 'unwaged' | null> {
+ await ensureCategoryChanges(db);
+ const [row] = await db.sql`
+  select coalesce(
+   (select c.category from finance_category_changes c
+    where c.member_id = fa.member_id and (case when ${before} then c.effective_from < ${date}::date else c.effective_from <= ${date}::date end)
+    order by c.effective_from desc limit 1),
+   fa.category) as category
+  from finance_accounts fa where fa.member_id = ${memberId}`;
+ return row ? row.category : null;
+}
+
 export function validDate(value: string) {
  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
 }
@@ -121,10 +162,14 @@ export function priceGames(rows: AttendedRow[]): GameFee[] {
 // just the ones that person pays for). The whole roll is priced either way,
 // because the cap depends on who else in the family came that night.
 export async function gameFeeEntries(db: any, payerId?: string): Promise<GameFee[]> {
+ await ensureCategoryChanges(db);
  const rows = await db.sql`
   select sa.member_id, coalesce(m.parent_id, sa.member_id) as bill_to, (m.parent_id is not null) as is_child,
    m.trial_free, m.first_name, m.date_of_birth, coalesce(p.family_id, p.id, m.family_id, m.id) as family_key,
-   to_char(sa.session_date, 'YYYY-MM-DD') as session_date, sa.marked_by, sa.kind, fa.category, fa.trial_eligible,
+   to_char(sa.session_date, 'YYYY-MM-DD') as session_date, sa.marked_by, sa.kind, fa.trial_eligible,
+   coalesce((select c.category from finance_category_changes c
+             where c.member_id = fa.member_id and c.effective_from <= sa.session_date
+             order by c.effective_from desc limit 1), fa.category) as category,
    row_number() over (partition by sa.member_id, sa.kind order by sa.session_date) as attendance_number
   from session_attendance sa
   join members m on m.id = sa.member_id

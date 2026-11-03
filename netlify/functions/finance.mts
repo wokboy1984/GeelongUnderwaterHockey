@@ -1,12 +1,12 @@
 import { getDatabase } from '@netlify/database';
 import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, ensureAttendanceKinds, adminName, hasPermission, logAudit, unauthorized, forbidden } from './_shared/roles.mts';
-import { FEES, byDate, cents, gameFeeEntries, validDate, totals } from './_shared/finance.mts';
+import { FEES, byDate, categoryOn, cents, ensureCategoryChanges, gameFeeEntries, melbourneDate, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
  if (!['GET','POST'].includes(req.method)) return json({ok:false,error:'Method not allowed'},405);
  const user = await getVerifiedUser(req); if (!user) return unauthorized();
  try {
-  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); await ensureAttendanceKinds(db); const caller = await ensureMember(db,user);
+  const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); await ensureAttendanceKinds(db); await ensureCategoryChanges(db); const caller = await ensureMember(db,user);
   const url = new URL(req.url);
   // Self-service summary for the member dashboard: any logged-in member can
   // see their OWN balance (never anyone else's, and never the full roster) —
@@ -24,7 +24,7 @@ export default async (req: Request) => {
    // already covers, so they can never double up with the games above.
    const manual = await db.sql`select kind,to_char(entry_date,'YYYY-MM-DD') as entry_date,amount_cents,note,created_at from finance_entries where member_id=${caller.id}`;
    const entries = [...games.map(({kind,entry_date,amount_cents,note,created_at}) => ({kind,entry_date,amount_cents,note,created_at})), ...manual].sort(byDate);
-   return json({ok:true,self:true,month,hasAccount:true,category:account.category,trialEligible:account.trial_eligible,
+   return json({ok:true,self:true,month,hasAccount:true,category:await categoryOn(db,caller.id,melbourneDate()),trialEligible:account.trial_eligible,
     ...totals(entries,month),entries});
   }
   if (!hasPermission(caller.roles,'manage_finances')) return forbidden();
@@ -37,6 +37,29 @@ export default async (req: Request) => {
     const rows = await db.sql`insert into finance_accounts(member_id,category,trial_eligible,trial_evidence)
      values(${b.memberId},${b.category},${b.trialEligible},${evidence}) on conflict(member_id) do nothing returning member_id`;
     if (!rows.length) return json({ok:false,error:'This player already has a finance account'},409);
+   } else if(b.action === 'change_category') {
+    // Waged <-> unwaged from a date on (3 Nov 2026); see ensureCategoryChanges.
+    // Choosing the category that was already in effect the day before just
+    // removes a change on that date. Audit-logged.
+    const from = String(b.from || '');
+    if (!['waged','unwaged'].includes(b.category) || !validDate(from)) return json({ok:false,error:'Choose a category and the date it applies from'},400);
+    const memberId = String(b.memberId || '');
+    const before = await categoryOn(db, memberId, from, true);
+    if (!before) return json({ok:false,error:'Set up the player fee category first'},400);
+    const [existing] = await db.sql`select id, category from finance_category_changes where member_id=${memberId} and effective_from=${from}::date`;
+    if (b.category === before) {
+     if (!existing) return json({ok:false,error:'They are already ' + (before === 'waged' ? 'waged' : 'unwaged') + ' on that date'},400);
+     await db.sql`delete from finance_category_changes where id=${existing.id}`;
+    } else {
+     await db.sql`insert into finance_category_changes(member_id,category,effective_from,created_by) values(${memberId},${b.category},${from}::date,${caller.id})
+      on conflict(member_id,effective_from) do update set category=excluded.category, created_by=excluded.created_by, created_at=now()`;
+    }
+    await logAudit(db,{actorId:caller.id,actorEmail:caller.email,action:'fee_category_changed',resourceType:'finance_accounts',resourceId:memberId,previousValue:{category:before,from},newValue:{category:b.category,from},note:`${caller.email} changed a member's fee category from ${before} to ${b.category} from ${from}`});
+   } else if(b.action === 'remove_category_change') {
+    const [change] = await db.sql`select id, member_id, category, to_char(effective_from,'YYYY-MM-DD') as effective_from from finance_category_changes where id=${Number(b.id) || 0}`;
+    if (!change) return json({ok:false,error:'That change has already been removed'},404);
+    await db.sql`delete from finance_category_changes where id=${change.id}`;
+    await logAudit(db,{actorId:caller.id,actorEmail:caller.email,action:'fee_category_change_removed',resourceType:'finance_accounts',resourceId:change.member_id,previousValue:{category:change.category,from:change.effective_from},note:`${caller.email} removed a fee category change (${change.category} from ${change.effective_from})`});
    } else if(b.action === 'member_trial') {
     // Tick or untick "first 3 sessions free" for any member with a fee account
     // (16 Oct 2026). Optional note/evidence; editable at any time and audit-logged.
@@ -71,7 +94,8 @@ export default async (req: Request) => {
      const [tracked] = await db.sql`select 1 from session_attendance where member_id=${b.memberId} and session_date=${date}::date and attended=true`;
      if(tracked) return json({ok:false,error:'Attendance for this date is already tracked and charged automatically — no manual entry needed.'},409);
     }
-    const amount = (b.kind === 'payment' || b.kind === 'custom') ? cents(b.amount) : FEES[account.category as keyof typeof FEES][b.kind as 'joining'|'annual'|'game'];
+    const category = await categoryOn(db, account.member_id, date);
+    const amount = (b.kind === 'payment' || b.kind === 'custom') ? cents(b.amount) : FEES[category as keyof typeof FEES][b.kind as 'joining'|'annual'|'game'];
     const result = await db.sql`select record_finance_entry(${b.id},${b.memberId},${b.kind},${date}::date,${amount},${note},${caller.id}) as id`;
     const inserted = result.filter((r: any) => r.id);
     if(!inserted.length) return json({ok:false,error:'Already recorded for this player and date.'},409);
@@ -118,7 +142,13 @@ export default async (req: Request) => {
   }
   const month = new URL(req.url).searchParams.get('month') || new Date().toISOString().slice(0,7);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ok:false,error:'Invalid month'},400);
-  const members = await db.sql`select m.id,m.nickname,m.first_name,m.last_name,a.category,a.trial_eligible,a.trial_evidence from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by lower(m.first_name),lower(m.last_name)`;
+  // category is the one in effect today; categoryChanges lists every change
+  // (past and upcoming) and startCategory what the account began as.
+  const today = melbourneDate();
+  const members = await db.sql`select m.id,m.nickname,m.first_name,m.last_name,a.category as start_category,a.trial_eligible,a.trial_evidence,
+   case when a.member_id is null then null else coalesce((select c.category from finance_category_changes c where c.member_id=a.member_id and c.effective_from<=${today}::date order by c.effective_from desc limit 1),a.category) end as category
+   from members m left join finance_accounts a on a.member_id=m.id where m.parent_id is null order by lower(m.first_name),lower(m.last_name)`;
+  const changes = await db.sql`select id,member_id,category,to_char(effective_from,'YYYY-MM-DD') as effective_from from finance_category_changes order by effective_from`;
   // Game fees are derived from actual check-ins. Unchecking attendance removes
   // the charge, and setting up an account later automatically includes history.
   const games = await gameFeeEntries(db);
@@ -145,7 +175,9 @@ export default async (req: Request) => {
    order by m.created_at,m.id`;
   // Finance is Treasurer/Administrator only, so names are full names with
   // the nickname in brackets, as in Administration (27 Oct 2026, Liam).
-  return json({ok:true,month,members:members.map((m:any)=>({...m,displayName:adminName(m.nickname,m.first_name,m.last_name),...totals(entries.filter((e:any)=>e.member_id===m.id),month)})),entries,
+  return json({ok:true,month,members:members.map((m:any)=>({...m,displayName:adminName(m.nickname,m.first_name,m.last_name),
+   categoryChanges:changes.filter((c:any)=>c.member_id===m.id).map((c:any)=>({id:c.id,category:c.category,from:c.effective_from})),
+   ...totals(entries.filter((e:any)=>e.member_id===m.id),month)})),entries,
    kids:kids.map((k:any)=>({id:k.id,parentId:k.parent_id,displayName:adminName(k.nickname,k.first_name,k.last_name),trialFree:k.trial_free,games:k.games})),
    unbilled:unbilled.map((u:any)=>({memberId:u.payer_id,displayName:adminName(u.nickname,u.first_name,u.last_name),games:u.games,childGames:u.child_games}))});
  } catch(error) {

@@ -156,12 +156,16 @@ GUWH.Pages = GUWH.Pages || {};
 
     // The roll's tick state starts from whatever's already saved for today,
     // every time a fresh `checkin` comes in (first load, and after Save/Close/Reopen).
+    // Anyone confirmed who hasn't been marked yet starts ticked (3 Nov 2026,
+    // Liam: "I'm coming" counts as attended unless the coordinator unticks
+    // a no-show). It's still only saved, and charged, on Save/Close Roll.
     React.useEffect(() => {
       if (!checkin) return;
       const next = {};
-      checkin.players.forEach((p) => { next[p.id] = p.attended; });
+      checkin.players.forEach((p) => { if (p.marked) next[p.id] = p.attended; });
       setRoll(next);
     }, [checkin]);
+    const ticked = (id) => (id in roll ? !!roll[id] : true);
 
     // The roll is per Wednesday (12 Oct 2026): the week switcher picks the
     // game night. A future night is view-only until the day; past nights
@@ -245,7 +249,7 @@ GUWH.Pages = GUWH.Pages || {};
       close ? setClosingRoll(true) : setSavingRoll(true);
       setError(null);
       try {
-        const entries = players.map((p) => ({ memberId: p.id, attended: !!roll[p.id] }));
+        const entries = players.map((p) => ({ memberId: p.id, attended: ticked(p.id) }));
         const res = await GUWH.Identity.authFetch("/api/coordinator/checkin", {
           method: "POST",
           body: JSON.stringify({ sessionDate: checkin.sessionDate, action: "save", entries, close: !!close }),
@@ -336,7 +340,9 @@ GUWH.Pages = GUWH.Pages || {};
           ? h(
               React.Fragment,
               null,
-              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Tick who actually showed up, then Save Roll. Marking someone attended charges their game fee — see Finance."),
+              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Everyone who said they're coming starts ticked. Untick anyone who didn't turn up, then Save Roll. Nothing is charged until the roll is saved — see Finance."),
+              !isFuture && !checkin.closed && players.some((p) => !(checkin.players.find((c) => c.id === p.id) || {}).marked) &&
+                h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-1" }, "Not saved yet."),
               isFuture && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
               isPast && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)] mb-3" }, "Past week — saving updates that night's roll and game fees."),
               !isFuture && !isPast && h("div", { className: "mb-3" }),
@@ -396,7 +402,7 @@ GUWH.Pages = GUWH.Pages || {};
                         { className: "flex items-center gap-1.5 text-xs font-semibold text-[var(--ink)]" },
                         h("input", {
                           type: "checkbox",
-                          checked: !!roll[p.id],
+                          checked: ticked(p.id),
                           disabled: checkin.closed || isFuture,
                           onChange: (e) => tick(p.id, e.target.checked),
                         }),
@@ -1675,7 +1681,11 @@ GUWH.Pages = GUWH.Pages || {};
   // player scored in it. Season/career totals are just SUM(goals) — see
   // game_goals in the DB and the same total surfaced on each member's own
   // Profile page.
-  function ScoreCard({ pg, rowLabel, single, onSave }) {
+  // Line-ups (3 Nov 2026): each side starts as that team's players from the
+  // Teams tab. "Add or move a player" puts anyone who was there that night
+  // on this side for this game only (e.g. swapping to even up a one-sided
+  // game); they're marked "swapped in", and Undo puts them back.
+  function ScoreCard({ pg, rowLabel, single, onSave, nightPlayers, onLineup, onScoreboard }) {
     const [blackScore, setBlackScore] = React.useState(pg.blackScore == null ? "" : String(pg.blackScore));
     const [whiteScore, setWhiteScore] = React.useState(pg.whiteScore == null ? "" : String(pg.whiteScore));
     const [goals, setGoals] = React.useState(() => {
@@ -1683,8 +1693,24 @@ GUWH.Pages = GUWH.Pages || {};
       (pg.black ? pg.black.players : []).concat(pg.white ? pg.white.players : []).forEach((p) => { g[p.id] = p.goals || 0; });
       return g;
     });
+    // After a line-up change, pick up anyone newly on the sheet without
+    // losing goals typed in but not saved yet.
+    React.useEffect(() => {
+      setGoals((g) => {
+        const next = Object.assign({}, g);
+        (pg.black ? pg.black.players : []).concat(pg.white ? pg.white.players : []).forEach((p) => { if (!(p.id in next)) next[p.id] = p.goals || 0; });
+        return next;
+      });
+    }, [pg]);
     const [saving, setSaving] = React.useState(false);
     const [saved, setSaved] = React.useState(false);
+    const [moving, setMoving] = React.useState(false);
+
+    async function lineup(action, memberId, teamId) {
+      setMoving(true);
+      await onLineup({ action, poolGameId: pg.id, memberId, teamId });
+      setMoving(false);
+    }
 
     async function save() {
       setSaving(true);
@@ -1704,13 +1730,32 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { key: p.id, className: "flex items-center justify-between gap-2" },
-            h("span", { className: "text-sm text-[var(--ink)]" }, GUWH.displayName(p)),
+            h(
+              "span",
+              { className: "text-sm text-[var(--ink)] flex items-center gap-2 flex-wrap" },
+              GUWH.displayName(p),
+              p.swapped && h(Pill, { tone: "accent", className: "!py-0 !px-1.5 !text-[10px]" }, "Swapped in"),
+              p.swapped && h("button", { type: "button", className: "text-[11px] text-[var(--ink-soft)] underline disabled:opacity-40", disabled: moving, onClick: () => lineup("lineup_remove", p.id) }, "Undo")
+            ),
             h("input", {
               type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center",
               value: goals[p.id] || 0,
               onChange: (e) => setGoals((g) => Object.assign({}, g, { [p.id]: Number(e.target.value) })),
             })
           )
+        ),
+        h(
+          "select",
+          {
+            className: inputCls + " !py-1 !text-xs mt-1",
+            value: "",
+            disabled: moving,
+            onChange: (e) => { if (e.target.value) lineup("lineup_add", e.target.value, team.id); },
+          },
+          h("option", { value: "" }, moving ? "Saving…" : "+ Add or move a player…"),
+          (nightPlayers || [])
+            .filter((n) => !team.players.some((p) => p.id === n.id))
+            .map((n) => h("option", { key: n.id, value: n.id }, GUWH.displayName(n) + (n.teams && n.teams.length ? " (" + n.teams.join(", ") + ")" : "")))
         )
       );
     }
@@ -1745,8 +1790,301 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "flex items-center gap-3" },
         h(Button, { size: "sm", onClick: save, disabled: saving }, saving ? "Saving…" : "Save score"),
+        onScoreboard && h(Button, { size: "sm", variant: "ghost", onClick: onScoreboard }, "Scoreboard"),
         saved && h("span", { className: "text-xs text-[var(--good-dark)]" }, "Saved.")
       )
+    );
+  }
+
+
+  // ------------------------------------------------------------ Scoreboard
+  // Full-screen live scoreboard (3 Nov 2026, Liam): a tablet at the pool,
+  // turned landscape and facing the players. White's score on the left in
+  // a white box, Black's on the right in a black box, and a big countdown
+  // to the end of the game from the timetable, with an alarm at zero so
+  // the scorekeeper knows time's up. The scorekeeper taps + / − and each
+  // change is saved as that game's score (goals per player are still
+  // entered on the score sheet afterwards).
+  //
+  // The timetable is the default, but games run late: "Start full game"
+  // restarts the clock from the game's full length, and −1 / +1 nudge it.
+  function gameClockMs(sessionDate, min) {
+    const [y, mo, d] = sessionDate.split("-").map(Number);
+    return new Date(y, mo - 1, d, 18, 0, 0).getTime() + min * 60000;
+  }
+  function fmtCountdown(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const m = Math.floor(total / 60), s = total % 60;
+    return m + ":" + String(s).padStart(2, "0");
+  }
+  // End-of-game buzzer: two long, harsh blasts (3 Nov 2026, Liam: "a
+  // buzzer sound - as loud as possible"). Square and sawtooth waves at a low
+  // pitch, slightly detuned, pushed to full scale through a compressor so it
+  // plays at the loudest the device allows. Loudness is then down to the
+  // device's own volume.
+  function playAlarm(ctx) {
+    if (!ctx) return;
+    try {
+      if (ctx.state === "suspended") ctx.resume();
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -10;
+      comp.knee.value = 0;
+      comp.ratio.value = 20;
+      comp.attack.value = 0.001;
+      comp.release.value = 0.05;
+      const master = ctx.createGain();
+      master.gain.value = 1;
+      comp.connect(master);
+      master.connect(ctx.destination);
+      const t = ctx.currentTime + 0.05;
+      [[0, 1.4], [1.7, 1.4]].forEach(([offset, length]) => {
+        const at = t + offset;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0.0001, at);
+        env.gain.exponentialRampToValueAtTime(1, at + 0.01);
+        env.gain.setValueAtTime(1, at + length - 0.03);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        env.connect(comp);
+        [["square", 220], ["sawtooth", 223], ["square", 110]].forEach(([type, freq]) => {
+          const osc = ctx.createOscillator();
+          osc.type = type;
+          osc.frequency.value = freq;
+          osc.connect(env);
+          osc.start(at);
+          osc.stop(at + length + 0.02);
+        });
+      });
+    } catch (e) {}
+  }
+
+  // Live (3 Nov 2026): every device with this open polls the game's score
+  // every few seconds, and + / − are applied on the server as "one more" or
+  // "one fewer", so a coordinator's phone and the pool-side tablet show the
+  // same score. With "Ask who scored" on, + asks which player scored (or
+  // "No scorer") and credits them a goal at the same time.
+  const LIVE_POLL_MS = 4000;
+  function readPref(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : v === "1"; } catch (e) { return fallback; } }
+  function writePref(key, on) { try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} }
+
+  function Scoreboard({ games, startIndex, sessionDate, onClose }) {
+    const [idx, setIdx] = React.useState(startIndex || 0);
+    const g = games[idx];
+    const pg = g.pg;
+    const [live, setLive] = React.useState({ whiteScore: pg.whiteScore || 0, blackScore: pg.blackScore || 0, goals: {} });
+    const [now, setNow] = React.useState(Date.now());
+    const [manualEnd, setManualEnd] = React.useState(null); // ms, when "Start full game" or ± was used
+    const [alarmOn, setAlarmOn] = React.useState(false);
+    const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
+    const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
+    const [picker, setPicker] = React.useState(null); // { side, delta } while choosing who scored
+    const [problem, setProblem] = React.useState(null);
+    const audio = React.useRef(null);
+    const rootRef = React.useRef(null);
+    const prevLeft = React.useRef(null);
+    const pending = React.useRef(0); // goal requests in flight; polling waits for them
+
+    // Full screen, landscape, screen kept awake, sound unlocked (opening
+    // this is a tap, which is what browsers need before they'll play audio).
+    React.useEffect(() => {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audio.current = new AC();
+      let lock = null;
+      const el = rootRef.current;
+      try { if (el && el.requestFullscreen) el.requestFullscreen().then(() => { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {}
+      try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => { lock = l; }).catch(() => {}); } catch (e) {}
+      const tick = setInterval(() => setNow(Date.now()), 250);
+      return () => {
+        clearInterval(tick);
+        try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+        try { if (lock) lock.release(); } catch (e) {}
+        try { if (audio.current) audio.current.close(); } catch (e) {}
+      };
+    }, []);
+
+    // Poll this game's score so other devices' changes show up here.
+    React.useEffect(() => {
+      let stopped = false;
+      async function poll() {
+        if (stopped || pending.current > 0 || document.visibilityState === "hidden") return;
+        try {
+          const r = await GUWH.Identity.authFetch("/api/coordinator/scores?live=" + pg.id);
+          const d = await r.json();
+          if (!stopped && d.ok && pending.current === 0) { setLive(d.live); setProblem(null); }
+        } catch (e) {
+          if (!stopped) setProblem("Can't reach the server - scores may be out of date.");
+        }
+      }
+      poll();
+      const timer = setInterval(poll, LIVE_POLL_MS);
+      return () => { stopped = true; clearInterval(timer); };
+    }, [pg.id]);
+
+    // A different game: its timetable clock, alarm reset.
+    React.useEffect(() => {
+      setLive({ whiteScore: pg.whiteScore || 0, blackScore: pg.blackScore || 0, goals: {} });
+      setManualEnd(null);
+      setAlarmOn(false);
+      setPicker(null);
+      prevLeft.current = null;
+      // eslint-disable-next-line
+    }, [idx]);
+
+    const hasTimes = g.startMin != null && g.durationMin != null;
+    const lengthMs = (g.durationMin || 0) * 60000;
+    const start = hasTimes ? gameClockMs(sessionDate, g.startMin) : null;
+    const end = manualEnd != null ? manualEnd : hasTimes ? start + lengthMs : null;
+    const notStarted = manualEnd == null && start != null && now < start;
+    const left = end == null ? null : end - now;
+    const finished = left != null && left <= 0;
+    // More than an hour away (e.g. opened the day before): show the game's
+    // length and when it starts, not a countdown of hundreds of minutes.
+    const farAway = notStarted && start - now > 60 * 60000;
+
+    // Alarm once, when the clock reaches zero while this screen is open.
+    React.useEffect(() => {
+      if (left == null) return;
+      if (prevLeft.current != null && prevLeft.current > 0 && left <= 0) {
+        setAlarmOn(true);
+        playAlarm(audio.current);
+      }
+      prevLeft.current = left;
+    }, [left]);
+
+    async function sendGoal(side, delta, memberId) {
+      setPicker(null);
+      // Show it straight away; the server's answer then replaces it.
+      setLive((l) => {
+        const next = { whiteScore: l.whiteScore || 0, blackScore: l.blackScore || 0, goals: Object.assign({}, l.goals) };
+        if (side === "white") next.whiteScore = Math.max(0, next.whiteScore + delta);
+        else next.blackScore = Math.max(0, next.blackScore + delta);
+        if (memberId) next.goals[memberId] = Math.max(0, (next.goals[memberId] || 0) + delta);
+        return next;
+      });
+      pending.current += 1;
+      try {
+        const r = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate, action: "goal", poolGameId: pg.id, side, delta, memberId: memberId || null }),
+        });
+        const d = await r.json();
+        if (d.ok) { setProblem(null); if (pending.current === 1) setLive(d.live); }
+        else setProblem(d.error || "That goal didn't save.");
+      } catch (e) {
+        setProblem("That goal didn't save - check the connection.");
+      } finally {
+        pending.current -= 1;
+      }
+    }
+    function changeScore(side, delta) {
+      const team = pg[side];
+      const players = team ? team.players : [];
+      const choices = delta > 0 ? players : players.filter((p) => (live.goals || {})[p.id] > 0);
+      if (askScorer && choices.length) setPicker({ side, delta });
+      else sendGoal(side, delta, null);
+    }
+    function nudge(min) {
+      setAlarmOn(false);
+      setManualEnd((end != null && !notStarted ? end : Date.now() + lengthMs) + min * 60000);
+      prevLeft.current = null;
+    }
+    function startFull() {
+      setAlarmOn(false);
+      setManualEnd(Date.now() + (lengthMs || 18 * 60000));
+      prevLeft.current = null;
+    }
+    function go(step) { setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step))); }
+    function toggle(key, value, set) { set(value); writePref(key, value); }
+
+    const small = { background: "rgba(255,255,255,0.12)", color: "#fff", border: "none", borderRadius: 10, padding: "0.5em 0.9em", fontSize: "max(13px, 2.1vh)", fontWeight: 700, cursor: "pointer" };
+    const big = (dark) => ({ width: "11vh", height: "11vh", minWidth: 56, minHeight: 56, borderRadius: "50%", border: dark ? "3px solid #fff" : "3px solid #000", background: "transparent", color: dark ? "#fff" : "#000", fontSize: "7vh", fontWeight: 800, lineHeight: 1, cursor: "pointer" });
+    function scorers(team) {
+      const goals = live.goals || {};
+      return (team ? team.players : []).filter((p) => goals[p.id] > 0).map((p) => GUWH.displayName(p) + (goals[p.id] > 1 ? " " + goals[p.id] : "")).join(" · ");
+    }
+    function side(which) {
+      const dark = which === "black";
+      const team = pg[which];
+      const score = which === "white" ? live.whiteScore || 0 : live.blackScore || 0;
+      const who = scorers(team);
+      return h(
+        "div",
+        { key: which, style: { flex: 1, background: dark ? "#000" : "#fff", color: dark ? "#fff" : "#000", border: "4px solid #fff", borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "2vh 2vw", minWidth: 0 } },
+        h("div", { style: { flexShrink: 0, fontSize: "min(6vh, 5vw)", fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" } }, team ? team.name : dark ? "Black" : "White"),
+        h("div", { style: { fontSize: "min(30vh, 28vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums", minHeight: 0 } }, score),
+        h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
+        h(
+          "div",
+          { style: { display: "flex", gap: "4vw", flexShrink: 0 } },
+          h("button", { type: "button", "aria-label": "Take a goal off " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, -1) }, "−"),
+          h("button", { type: "button", "aria-label": "Goal to " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, 1) }, "+")
+        )
+      );
+    }
+
+    // Who scored? A big tap target per player, plus "No scorer".
+    function pickerPanel() {
+      if (!picker) return null;
+      const team = pg[picker.side];
+      const goals = live.goals || {};
+      const players = (team ? team.players : []).filter((p) => picker.delta > 0 || goals[p.id] > 0);
+      const btn = { background: "#fff", color: "#000", border: "none", borderRadius: 14, padding: "1.2em 1em", fontSize: "max(16px, 2.8vh)", fontWeight: 800, cursor: "pointer", textAlign: "center" };
+      return h(
+        "div",
+        { style: { position: "absolute", inset: 0, background: "rgba(10,15,22,0.92)", display: "flex", flexDirection: "column", padding: "3vh 3vw", gap: "2vh", zIndex: 2 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } },
+          h("div", { style: { fontSize: "max(18px, 4vh)", fontWeight: 800 } }, (picker.delta > 0 ? "Who scored for " : "Take a goal off which player? ") + (picker.delta > 0 ? (team ? team.name : picker.side) + "?" : "")),
+          h("button", { type: "button", style: small, onClick: () => setPicker(null) }, "Cancel")
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 40vw), 1fr))", gap: "1.5vh", overflowY: "auto" } },
+          players.map((p) => h("button", { key: p.id, type: "button", style: btn, onClick: () => sendGoal(picker.side, picker.delta, p.id) }, GUWH.displayName(p) + (goals[p.id] ? "  (" + goals[p.id] + ")" : ""))),
+          h("button", { type: "button", style: Object.assign({}, btn, { background: "rgba(255,255,255,0.18)", color: "#fff" }), onClick: () => sendGoal(picker.side, picker.delta, null) }, picker.delta > 0 ? "No scorer" : "Just the score")
+        )
+      );
+    }
+
+    const order = swapped ? ["black", "white"] : ["white", "black"];
+    return h(
+      "div",
+      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
+        h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+          h("button", { type: "button", style: small, disabled: idx === 0, onClick: () => go(-1) }, "‹"),
+          h("span", { style: { fontSize: "max(14px, 2.6vh)", fontWeight: 700, opacity: 0.85 } }, g.label + (games.length > 1 ? "  (" + (idx + 1) + " of " + games.length + ")" : "")),
+          h("button", { type: "button", style: small, disabled: idx === games.length - 1, onClick: () => go(1) }, "›")
+        ),
+        h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+          h("button", { type: "button", style: small, onClick: () => nudge(-1) }, "−1 min"),
+          h("button", { type: "button", style: small, onClick: () => nudge(1) }, "+1 min"),
+          h("button", { type: "button", style: small, onClick: startFull }, "Start full game"),
+          h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
+          h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
+          h("button", { type: "button", style: small, onClick: () => playAlarm(audio.current) }, "Test buzzer"),
+          h("button", { type: "button", style: small, onClick: onClose }, "Exit")
+        )
+      ),
+      problem && h("div", { style: { textAlign: "center", color: "#ffb4ad", fontWeight: 700, fontSize: "max(13px, 2vh)" } }, problem),
+      h(
+        "div",
+        { style: { textAlign: "center", lineHeight: 1, cursor: alarmOn ? "pointer" : "default" }, onClick: () => setAlarmOn(false) },
+        notStarted && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.7, marginBottom: "0.5vh" } }, farAway ? "Starts " + new Date(start).toLocaleString("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "Starts in"),
+        h(
+          "div",
+          { style: { fontSize: "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
+          left == null ? "--:--" : farAway ? fmtCountdown(lengthMs) : fmtCountdown(notStarted ? start - now : left)
+        ),
+        finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
+        h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } }")
+      ),
+      h(
+        "div",
+        { style: { flex: 1, display: "flex", gap: "2vw", minHeight: 0 } },
+        order.map(side)
+      ),
+      pickerPanel()
     );
   }
 
@@ -1757,6 +2095,8 @@ GUWH.Pages = GUWH.Pages || {};
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
+    const [board, setBoard] = React.useState(null); // index into allPoolGames while the Scoreboard is open
+    const [cardsVersion, setCardsVersion] = React.useState(0); // remounts the score sheets after the Scoreboard
 
     function load(date) {
       setLoading(true);
@@ -1779,15 +2119,46 @@ GUWH.Pages = GUWH.Pages || {};
       else setError(d.error || "Something went wrong");
     }
 
+    async function changeLineup(change) {
+      setError(null);
+      const res = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+        method: "POST",
+        body: JSON.stringify(Object.assign({ sessionDate: data.sessionDate }, change)),
+      });
+      const d = await res.json();
+      if (d.ok) setData(d);
+      else setError(d.error || "Something went wrong");
+    }
+
     if (!data) return loading ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…") : error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
     const allPoolGames = [];
-    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, single: row.poolGames.length === 1 && pg.pool === "Pool A" })));
+    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, single: row.poolGames.length === 1 && pg.pool === "Pool A", startMin: row.startMin, durationMin: row.durationMin })));
+    const boardGames = allPoolGames.map((x) => ({ pg: x.pg, startMin: x.startMin, durationMin: x.durationMin, label: x.single ? x.rowLabel : x.rowLabel + " · " + x.pg.pool }));
+    // Open on the game being played now (or the next one), else the first.
+    function openBoard(i) {
+      if (i == null) {
+        const nowMs = Date.now();
+        i = boardGames.findIndex((b) => b.startMin != null && b.durationMin != null && gameClockMs(data.sessionDate, b.startMin + b.durationMin) > nowMs);
+        if (i < 0) i = 0;
+      }
+      setBoard(i);
+    }
+    if (board != null && boardGames.length) {
+      return h(Scoreboard, { games: boardGames, startIndex: Math.min(board, boardGames.length - 1), sessionDate: data.sessionDate, onClose: () => { setBoard(null); load(data.sessionDate).then(() => setCardsVersion((v) => v + 1)); coordChanged(); } });
+    }
 
     return h(
       "div",
       { className: "flex flex-col gap-8" },
       h("div", { className: "max-w-md" }, h(GUWH.UI.WeekSwitcher, { date: data.sessionDate, weeks: data.weeks, upcoming: data.upcoming, onChange: load })),
+      allPoolGames.length > 0 &&
+        h(
+          "div",
+          { className: "flex flex-wrap items-center gap-3" },
+          h(Button, { variant: "dark", onClick: () => openBoard(null) }, "Open scoreboard"),
+          h("p", { className: "text-xs text-[var(--ink-soft)] max-w-md" }, "Full-screen live scores and countdown for a tablet facing the pool. Turn it landscape. Tap + and pick who scored; it saves as you go, and any phone with the scoreboard open shows the same score.")
+        ),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
       loading
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
@@ -1796,7 +2167,7 @@ GUWH.Pages = GUWH.Pages || {};
         : h(
             "div",
             { className: "flex flex-col gap-4" },
-            allPoolGames.map(({ pg, rowLabel, single }) => h(ScoreCard, { key: pg.id, pg, rowLabel, single, onSave: saveScore }))
+            allPoolGames.map(({ pg, rowLabel, single }, i) => h(ScoreCard, { key: pg.id + ":" + cardsVersion, pg, rowLabel, single, onSave: saveScore, nightPlayers: data.nightPlayers, onLineup: changeLineup, onScoreboard: () => openBoard(i) }))
           ),
       h(
         "div",

@@ -28,6 +28,7 @@ import { getDatabase } from "@netlify/database";
 import { ensureDevelopmentTeams, ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, shortName, unauthorized } from "./_shared/roles.mts";
 import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
+import { ensureLineupChanges } from "./_shared/lineups.mts";
 
 function shapePlayer(r: any) {
   // Member-facing: only the short name ever leaves the server (16 Oct 2026).
@@ -46,6 +47,7 @@ export default async (req: Request, context: Context) => {
     await ensureMember(db, user); // any registered member can view
 
     await ensureNicknameColumn(db);
+    await ensureLineupChanges(db);
     await ensureGameCountColumn(db);
     await ensureDevelopmentTeams(db);
     const upcoming = nextSessionDateISO();
@@ -114,7 +116,8 @@ export default async (req: Request, context: Context) => {
     // Goal scorers per pool game, with which side they played on.
     const goalRows = poolGameIds.length
       ? await db.sql`
-          select gg.pool_game_id, gg.goals, m.id, m.nickname, m.first_name, m.last_name, ta.team_id
+          select gg.pool_game_id, gg.goals, m.id, m.nickname, m.first_name, m.last_name,
+            coalesce(glc.team_id, ta.team_id) as team_id
           from game_goals gg
           join members m on m.id = gg.member_id
           join timetable_pool_games pg on pg.id = gg.pool_game_id
@@ -123,6 +126,8 @@ export default async (req: Request, context: Context) => {
           -- every goal twice (27 Oct 2026).
           left join team_assignments ta on ta.member_id = gg.member_id and ta.session_id = ${session.id}
             and ta.team_id in (pg.black_team_id, pg.white_team_id)
+          -- Moved or added for this one game (3 Nov 2026): that side wins.
+          left join game_lineup_changes glc on glc.pool_game_id = gg.pool_game_id and glc.member_id = gg.member_id
           where gg.pool_game_id = any(${poolGameIds}) and gg.goals > 0
           order by gg.goals desc, m.first_name asc
         `
