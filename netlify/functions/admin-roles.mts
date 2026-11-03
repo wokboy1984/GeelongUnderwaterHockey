@@ -8,6 +8,8 @@
 // POST   /api/admin/roles  { action: "grade", memberId, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
 // POST   /api/admin/roles  { action: "set_non_player", memberId, nonPlayer }
+// POST   /api/admin/roles  { action: "set_dob", memberId, dateOfBirth | null }
+//        -> correct or clear a date of birth (3 Nov 2026)
 //        -> never plays: books in as volunteering, never charged (3 Nov 2026)
 // POST   /api/admin/roles  { action: "family_add", memberId, otherId }
 // POST   /api/admin/roles  { action: "family_remove", memberId, viewId? }
@@ -301,6 +303,32 @@ export default async (req: Request, context: Context) => {
         resourceType: "member", resourceId: target.id,
         previousValue: { nickname: target.nickname || null }, newValue: { nickname },
         note: `${caller.email} changed ${target.email}'s nickname from "${target.nickname || ""}" to "${nickname || ""}"`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
+    // Date of birth (3 Nov 2026, Liam: a member's DOB made her 7). An
+    // Administrator can correct it or clear it when it isn't known. With
+    // none, an adult is treated as an adult and a child under a parent as
+    // a junior (see the family cap in _shared/finance.mts).
+    if (req.method === "POST" && body.action === "set_dob") {
+      const id = String(body.memberId || "").trim();
+      const raw = body.dateOfBirth == null ? "" : String(body.dateOfBirth).trim();
+      const today = new Date().toISOString().slice(0, 10);
+      if (raw && (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(Date.parse(raw)) || raw > today || raw < "1900-01-01")) {
+        return new Response(JSON.stringify({ ok: false, error: "That date of birth doesn't look right" }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const dob = raw || null;
+      const [target] = await db.sql`select id, first_name, last_name, to_char(date_of_birth, 'YYYY-MM-DD') as dob from members where id = ${id}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      await db.sql`update members set date_of_birth = ${dob}::date where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "date_of_birth_changed",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { dateOfBirth: target.dob }, newValue: { dateOfBirth: dob },
+        note: `${caller.email} ${dob ? "changed" : "cleared"} ${target.first_name} ${target.last_name}'s date of birth`,
       });
       return await memberDetail(db, target.id);
     }
