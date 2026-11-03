@@ -77,6 +77,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [deleting, setDeleting] = React.useState("");
     const [error, setError] = React.useState("");
     const [notice, setNotice] = React.useState("");
+    const [catForm, setCatForm] = React.useState({ category: "", from: "" }); // "Change category" for the selected player
     const [form, setForm] = React.useState({
       category: "unwaged",
       trialEligible: false,
@@ -292,6 +293,36 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Waged <-> unwaged from a date on (3 Nov 2026). Earlier games keep the
+    // old rate; the server stores each change with its date.
+    function nextGameISO() {
+      const d = GUWH.nextWednesday();
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+    function catLabel(c) { return c === "waged" ? "Waged" : "Unwaged / junior"; }
+    async function changeCategory(member, category, from) {
+      if (from < today && !window.confirm("Games " + member.displayName + " has played since " + from + " will be re-charged as " + catLabel(category) + ". Continue?")) return;
+      await financeAction({ action: "change_category", memberId: member.id, category, from }, catLabel(category) + " from " + from + ".");
+    }
+    async function removeCategoryChange(change) {
+      if (!window.confirm("Remove the change to " + catLabel(change.category) + " from " + change.from + "?")) return;
+      await financeAction({ action: "remove_category_change", id: change.id }, "Change removed.");
+    }
+    async function financeAction(payload, done) {
+      setError("");
+      setNotice("");
+      try {
+        const response = await GUWH.Identity.authFetch("/api/finance", { method: "POST", body: JSON.stringify(payload) });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Could not save");
+        setNotice(done);
+        setCatForm({ category: "", from: "" });
+        await load();
+      } catch (err) {
+        setError(err.message || String(err));
+      }
+    }
+
     async function setMemberTrial(member, free) {
       setError("");
       setNotice("");
@@ -439,7 +470,7 @@ GUWH.Pages = GUWH.Pages || {};
               h("p", { className: "mt-1 mb-5 text-sm text-[var(--ink-soft)]" }, "Select a member to configure fees, record a payment, or review their history."),
               h(FormField, { label: "Player" }, h(
                 "select",
-                { className: inputCls, value: selectedId, onChange: (event) => { setSelectedId(event.target.value); requestId.current = null; setNotice(""); } },
+                { className: inputCls, value: selectedId, onChange: (event) => { setSelectedId(event.target.value); requestId.current = null; setNotice(""); setCatForm({ category: "", from: "" }); } },
                 h("option", { value: "" }, "Select a player"),
                 data.members.map((member) => h("option", { key: member.id, value: member.id },
                   (member.displayName || GUWH.displayName({ nickname: member.nickname, firstName: member.first_name, lastName: member.last_name })) + (member.category ? "" : " — setup required")
@@ -485,6 +516,41 @@ GUWH.Pages = GUWH.Pages || {};
                   selected.trial_eligible && h(Pill, { tone: "good" }, "Three trial sessions free"),
                   h("span", { className: "ml-auto font-display text-xl font-bold" }, "Balance " + money(selected.closing))
                 ),
+                (() => {
+                  const other = selected.category === "waged" ? "unwaged" : "waged";
+                  const cat = catForm.category || other;
+                  const from = catForm.from || nextGameISO();
+                  const changes = selected.categoryChanges || [];
+                  return h(
+                    "div",
+                    { className: "mt-4 rounded-xl bg-[var(--sand)] p-4" },
+                    h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Change fee category"),
+                    h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5 mb-3" }, "Games from the date you pick are charged at the new rate. Earlier games keep the old rate."),
+                    h(
+                      "form",
+                      { className: "flex flex-wrap items-end gap-2", onSubmit: (event) => { event.preventDefault(); changeCategory(selected, cat, from); } },
+                      h("select", { className: inputCls + " !w-auto", value: cat, onChange: (event) => setCatForm(Object.assign({}, catForm, { category: event.target.value })) },
+                        h("option", { value: "unwaged" }, "Unwaged / junior — $10 per game"),
+                        h("option", { value: "waged" }, "Waged senior — $20 per game")
+                      ),
+                      h("label", { className: "text-xs text-[var(--ink-soft)] flex items-center gap-2" }, "from",
+                        h("input", { type: "date", className: inputCls + " !w-auto", value: from, onChange: (event) => setCatForm(Object.assign({}, catForm, { from: event.target.value })) })
+                      ),
+                      h(Button, { type: "submit", size: "sm", disabled: !from }, "Change")
+                    ),
+                    changes.length > 0 && h(
+                      "ul",
+                      { className: "mt-3 flex flex-col gap-1 text-sm" },
+                      h("li", { className: "text-[var(--ink-soft)]" }, "Started as " + catLabel(selected.start_category)),
+                      changes.map((c) => h(
+                        "li",
+                        { key: c.id, className: "flex items-center gap-2" },
+                        catLabel(c.category) + " from " + c.from + (c.from > today ? " (upcoming)" : ""),
+                        h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline", onClick: () => removeCategoryChange(c) }, "Remove")
+                      ))
+                    )
+                  );
+                })(),
                 h("label", { className: "mt-3 flex items-center gap-2 text-sm font-semibold" },
                   h("input", { type: "checkbox", checked: !!selected.trial_eligible, onChange: (event) => setMemberTrial(selected, event.target.checked) }),
                   "First 3 sessions free (Try Underwater Hockey)"

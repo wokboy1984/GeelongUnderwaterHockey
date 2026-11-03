@@ -28,7 +28,7 @@ import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { inviteMember } from "./_shared/identity-admin.mts";
 import { SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
-import { byDate, gameFeeEntries, totals } from "./_shared/finance.mts";
+import { byDate, categoryOn, gameFeeEntries, melbourneDate, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
 
@@ -155,6 +155,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
   let finance: any = null;
   if (!m.parent_id) {
     const [account] = await db.sql`select category, trial_eligible, trial_evidence from finance_accounts where member_id = ${m.id}`;
+    if (account) account.category = await categoryOn(db, m.id, melbourneDate());
     const month = new Date().toISOString().slice(0, 7);
     // Same game fees as the Finance page (shared, with the family cap).
     const entries = account
