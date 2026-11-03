@@ -138,6 +138,17 @@ export async function ensureNonPlayerColumn(db: any): Promise<void> {
   nonPlayerReady = true;
 }
 
+// How a member usually comes (3 Nov 2026, committee request): player,
+// swim (lane swim only) or volunteer, picked on Profile. It's only the
+// default when they book in; they can still pick something else that week.
+// Null means playing, as before this existed.
+let usualKindReady = false;
+export async function ensureUsualKindColumn(db: any): Promise<void> {
+  if (usualKindReady) return;
+  await db.sql`alter table members add column if not exists usual_kind text`;
+  usualKindReady = true;
+}
+
 // Which family a member is in (28 Oct 2026): their family_id, or for a child
 // under a parent, the parent's; anyone not in a family is a family of one
 // (their own id).

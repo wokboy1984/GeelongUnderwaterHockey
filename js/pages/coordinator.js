@@ -686,8 +686,14 @@ GUWH.Pages = GUWH.Pages || {};
 
     // Someone who said they weren't coming turned up anyway (27 Oct 2026,
     // Liam): book them in and, unless "Unassigned" was picked, place them.
+    // Lane swim / Volunteering (3 Nov 2026): book them in for that, no team.
     function bookInAnyway(player, value) {
       if (!value) return;
+      if (value === "swim" || value === "volunteer") {
+        if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session as " + (value === "swim" ? "a lane swimmer" : "a volunteer") + "?")) return;
+        call({ action: "book_in", memberEmail: player.email, kind: value });
+        return;
+      }
       const team = value === "unassigned" ? null : board.teams.find((t) => String(t.id) === value);
       const where = team ? " and put them in " + team.name : "";
       if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session" + where + "?")) return;
@@ -871,7 +877,7 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mt-6" },
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Not attending (" + board.notAttending.length + ")"),
-          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "These players said they're not coming. If one turns up anyway, pick a team next to their name to book them in and place them."),
+          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "These players said they're not coming. If one turns up anyway, pick a team next to their name to book them in and place them, or Lane swim or Volunteering if they're not playing."),
           h(
             "div",
             { className: "flex flex-col gap-2" },
@@ -894,7 +900,9 @@ GUWH.Pages = GUWH.Pages || {};
                     },
                     h("option", { value: "" }, "Turned up? Move to…"),
                     board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
-                    h("option", { value: "unassigned" }, "Unassigned")
+                    h("option", { value: "unassigned" }, "Unassigned"),
+                    h("option", { value: "swim" }, "Lane swim (no team)"),
+                    h("option", { value: "volunteer" }, "Volunteering (no team)")
                   )
                 ),
               });

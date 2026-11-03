@@ -3,7 +3,7 @@
 // sessions that have already happened), so it can't drift out of sync.
 //
 // GET  /api/profile -> { ok, member }
-// POST /api/profile { nickname, dateOfBirth, emergencyName, emergencyPhone, position, grade, phone } -> { ok, member }
+// POST /api/profile { nickname, dateOfBirth, emergencyName, emergencyPhone, position, grade, phone, usualKind? } -> { ok, member }
 //
 // Email is deliberately NOT editable here — it's the Netlify Identity login
 // itself, changed via the widget's own update() call from the frontend
@@ -11,7 +11,8 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureMember, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, shortName, unauthorized } from "./_shared/roles.mts";
+import { isAttendanceKind } from "./_shared/attendance.mts";
+import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureUsualKindColumn, ensureMember, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, shortName, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -38,7 +39,7 @@ function dobToInputString(dob: string | Date | null | undefined): string | null 
 async function shapeProfile(db: any, memberId: string) {
   const [row] = await db.sql`
     select id, email, first_name, last_name, nickname, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new,
-           onboarding_seen, onboarding_hidden_at
+           usual_kind, onboarding_seen, onboarding_hidden_at
     from members where id = ${memberId}
   `;
   const [{ count }] = await db.sql`
@@ -76,6 +77,8 @@ async function shapeProfile(db: any, memberId: string) {
     emergencyPhone: row.emergency_phone,
     phone: row.phone,
     position: row.position || "Unknown",
+    // player | swim | volunteer: the default when they book in.
+    usualKind: row.usual_kind || "player",
     grade: row.grade,
     photoVersion: row.photo_version || 0,
     gamesPlayed: count,
@@ -96,6 +99,7 @@ export default async (req: Request, context: Context) => {
     await ensureNicknameColumn(db);
     await ensureOnboardingColumns(db);
     await ensureFamilyColumns(db);
+    await ensureUsualKindColumn(db);
 
     // Resolve who this login is, rather than upserting by Identity id here
     // (21 Oct 2026). A member added by the coordinator before they ever
@@ -183,6 +187,15 @@ export default async (req: Request, context: Context) => {
       }
       const grade = rawGrade || null;
 
+      // Optional, so an older tab that doesn't send it leaves it alone.
+      const usualKind = body.usualKind == null ? undefined : String(body.usualKind);
+      if (usualKind !== undefined && !isAttendanceKind(usualKind)) {
+        return new Response(JSON.stringify({ ok: false, error: "Not a valid choice for how you usually come" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       await db.sql`
         update members set
           first_name = ${firstName},
@@ -196,6 +209,9 @@ export default async (req: Request, context: Context) => {
           grade = ${grade}
         where id = ${memberId}
       `;
+      if (usualKind !== undefined) {
+        await db.sql`update members set usual_kind = ${usualKind === "player" ? null : usualKind} where id = ${memberId}`;
+      }
       // Children on this profile share the parent's emergency contact and
       // phone ("My kids", 14 Oct 2026), so keep them in step.
       await db.sql`

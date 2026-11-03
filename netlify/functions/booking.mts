@@ -27,7 +27,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureFamilyColumns, ensureNonPlayerColumn, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureNonPlayerColumn, ensureUsualKindColumn, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
 import { nextSessionDateISO, toAttendanceKind } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
@@ -70,6 +70,7 @@ export default async (req: Request, context: Context) => {
     await ensureFamilyColumns(db);
     await ensureAttendanceKinds(db);
     await ensureNonPlayerColumn(db);
+    await ensureUsualKindColumn(db);
 
     // Make sure this member and this week's session both exist.
     const [session] = await db.sql`
@@ -103,17 +104,22 @@ export default async (req: Request, context: Context) => {
           });
         }
         targetId = who.id;
-        // The family list has its own "What for?" per person (3 Nov 2026,
-        // Liam: his wife volunteers rather than plays). With no kind sent
-        // ("X's coming"), keep what they're down as this week, else what
-        // they came as last time, so a partner who volunteers stays one.
-        if (body.kind == null) {
-          const [prev] = await db.sql`
-            select b.kind from bookings b join sessions s on s.id = b.session_id
-            where b.member_id = ${targetId}
-            order by (b.session_id = ${sessionId}) desc, s.session_date desc limit 1`;
-          if (prev) kind = toAttendanceKind(prev.kind);
-        }
+      }
+
+      // With no kind sent ("I'm coming", "X's coming"), keep what they're
+      // down as this week, else how they usually come (picked on Profile,
+      // 3 Nov 2026), else - for family - what they came as last time, so a
+      // partner who volunteers stays one (3 Nov 2026, Liam).
+      if (body.kind == null) {
+        const [thisWeek] = await db.sql`select kind from bookings where session_id = ${sessionId} and member_id = ${targetId} and status = 'in'`;
+        const [usual] = await db.sql`select usual_kind from members where id = ${targetId}`;
+        const [last] = targetId !== memberId
+          ? await db.sql`
+              select b.kind from bookings b join sessions s on s.id = b.session_id
+              where b.member_id = ${targetId} and b.status = 'in'
+              order by s.session_date desc limit 1`
+          : [];
+        kind = toAttendanceKind((thisWeek && thisWeek.kind) || (usual && usual.usual_kind) || (last && last.kind));
       }
 
       // A non-player (3 Nov 2026) is never down as playing: booking them in
@@ -147,6 +153,7 @@ export default async (req: Request, context: Context) => {
     const [mine] = await db.sql`
       select status, kind from bookings where session_id = ${sessionId} and member_id = ${memberId}
     `;
+    const [myUsual] = await db.sql`select usual_kind from members where id = ${memberId}`;
     const confirmedRows = await db.sql`
       select m.id, m.nickname, m.first_name, m.last_name, m.photo_version
       from bookings b join members m on m.id = b.member_id
@@ -194,6 +201,8 @@ export default async (req: Request, context: Context) => {
         myKind: mine ? mine.kind : null,
         // Never plays (3 Nov 2026): the Dashboard doesn't offer "Playing".
         myNonPlayer: nonPlayers.has(memberId),
+        // How they usually come, from Profile: the default when booking in.
+        myUsualKind: myUsual ? myUsual.usual_kind || "player" : "player",
         confirmedCount: count,
         confirmed,
         family,

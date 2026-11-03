@@ -699,7 +699,9 @@ GUWH.Pages = GUWH.Pages || {};
       setLoading(true);
       setError(null);
       try {
-        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: wantsIn, kind: kind || "player" }) });
+        // No kind: the server uses this week's choice, else how they
+        // usually come (Profile), else playing.
+        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify(Object.assign({ in: wantsIn }, kind ? { kind } : {})) });
         const data = await res.json();
         if (data.ok) setStatus(data);
         else setError(data.error || "Something went wrong");
@@ -814,7 +816,7 @@ GUWH.Pages = GUWH.Pages || {};
                       disabled: loading,
                       // Keeps whatever they're already down as, so pressing
                       // this again doesn't quietly turn a swim into a game.
-                      onClick: () => setIn(true, status.myKind || (status.myNonPlayer ? "volunteer" : "player")),
+                      onClick: () => setIn(true),
                     }),
                     h(AnswerButton, {
                       label: "I'm Not Coming",
@@ -840,7 +842,7 @@ GUWH.Pages = GUWH.Pages || {};
                             key: k.value,
                             label: k.label,
                             hint: k.hint,
-                            active: (status.myKind || (status.myNonPlayer ? "volunteer" : "player")) === k.value,
+                            active: (status.myKind || (status.myNonPlayer ? "volunteer" : status.myUsualKind || "player")) === k.value,
                             disabled: loading,
                             onClick: () => setIn(true, k.value),
                           })

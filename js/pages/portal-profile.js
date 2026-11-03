@@ -390,6 +390,7 @@ GUWH.Pages = GUWH.Pages || {};
               emergencyPhone: d.member.emergencyPhone || "",
               phone: d.member.phone || "",
               position: d.member.position || "Unknown",
+              usualKind: d.member.usualKind || "player",
               grade: d.member.grade || "",
             });
           } else setError(d.error || "Something went wrong");
@@ -517,6 +518,19 @@ GUWH.Pages = GUWH.Pages || {};
           "p",
           { className: "text-xs text-[var(--ink-soft)] -mt-3" },
           "Pick your own grade to start — a Game Coordinator or Administrator may adjust it once they've seen you play."
+        ),
+        // How they usually come (3 Nov 2026, committee request): the
+        // default when they book in from the Dashboard.
+        h(
+          FormField,
+          { label: "I usually come to", hint: "What you're booked in as when you say you're coming. You can still pick something else on the Dashboard each week." },
+          h(
+            "select",
+            { className: inputCls + " sm:max-w-xs", value: form.usualKind, onChange: (e) => set("usualKind", e.target.value) },
+            h("option", { value: "player" }, "Play"),
+            h("option", { value: "swim" }, "Lane swim only"),
+            h("option", { value: "volunteer" }, "Volunteer")
+          )
         ),
 
         h("hr", { className: "border-black/5" }),
