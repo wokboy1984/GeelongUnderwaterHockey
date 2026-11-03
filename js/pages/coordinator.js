@@ -1884,6 +1884,10 @@ GUWH.Pages = GUWH.Pages || {};
     const [alarmOn, setAlarmOn] = React.useState(false);
     const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
+    // Scoreboard only (3 Nov 2026, Liam): for the device the players see.
+    // Just the clock and each team's score, no buttons; scores come from
+    // whichever device the scorekeeper is using. Remembered per device.
+    const [displayOnly, setDisplayOnly] = React.useState(() => readPref("guwh.scoreboard.displayOnly", false));
     const [picker, setPicker] = React.useState(null); // { side, delta } while choosing who scored
     const [problem, setProblem] = React.useState(null);
     const audio = React.useRef(null);
@@ -2023,8 +2027,8 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "guwh-score-area", style: { flex: 1, minHeight: 0, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" } },
           h("div", { className: "guwh-score", style: { fontSize: "min(24vh, 26vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" } }, score)
         ),
-        h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
-        h(
+        !displayOnly && h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
+        !displayOnly && h(
           "div",
           { style: { display: "flex", gap: "4vw", flexShrink: 0 } },
           h("button", { type: "button", "aria-label": "Take a goal off " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, -1) }, "−"),
@@ -2060,7 +2064,9 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
-      h(
+      // Scoreboard only: a faint corner button is the only way back.
+      displayOnly && h("button", { type: "button", "aria-label": "Show the scoreboard controls", style: Object.assign({}, small, { position: "absolute", top: "1.5vh", right: "1.5vw", zIndex: 1, opacity: 0.35 }), onClick: () => toggle("guwh.scoreboard.displayOnly", false, setDisplayOnly) }, "Controls"),
+      !displayOnly && h(
         "div",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
         h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -2074,18 +2080,18 @@ GUWH.Pages = GUWH.Pages || {};
           h("button", { type: "button", style: small, onClick: startFull }, "Start full game"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
-          h("button", { type: "button", style: small, onClick: () => playAlarm(audio.current) }, "Test buzzer"),
+          h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.displayOnly", true, setDisplayOnly) }, "Scoreboard only"),
           h("button", { type: "button", style: small, onClick: onClose }, "Exit")
         )
       ),
-      problem && h("div", { style: { textAlign: "center", color: "#ffb4ad", fontWeight: 700, fontSize: "max(13px, 2vh)" } }, problem),
+      problem && !displayOnly && h("div", { style: { textAlign: "center", color: "#ffb4ad", fontWeight: 700, fontSize: "max(13px, 2vh)" } }, problem),
       h(
         "div",
         { style: { textAlign: "center", lineHeight: 1, cursor: alarmOn ? "pointer" : "default" }, onClick: () => setAlarmOn(false) },
         notStarted && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.7, marginBottom: "0.5vh" } }, farAway ? "Starts " + new Date(start).toLocaleString("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "Starts in"),
         h(
           "div",
-          { style: { fontSize: "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
+          { style: { fontSize: displayOnly ? "26vh" : "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
           left == null ? "--:--" : farAway ? fmtCountdown(lengthMs) : fmtCountdown(notStarted ? start - now : left)
         ),
         finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
@@ -2096,7 +2102,20 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { style: { flex: 1, display: "flex", gap: "2vw", minHeight: 0 } },
-        order.map(side)
+        side(order[0]),
+        // Buzzer (3 Nov 2026, Liam): big, red and in the middle so the deck
+        // ref can hit it for a foul. Plays on this device only.
+        !displayOnly && h(
+          "button",
+          {
+            type: "button",
+            "aria-label": "Sound the buzzer",
+            style: { flexShrink: 0, width: "13vw", minWidth: 90, alignSelf: "center", height: "min(60%, 34vh)", minHeight: 90, borderRadius: 24, border: "4px solid #fff", background: "#d62828", color: "#fff", fontSize: "max(18px, min(4.5vh, 2.6vw))", fontWeight: 900, letterSpacing: "0.03em", cursor: "pointer", boxShadow: "0 0 0 6px rgba(214,40,40,0.35)", touchAction: "manipulation" },
+            onClick: () => playAlarm(audio.current),
+          },
+          "Buzzer"
+        ),
+        side(order[1])
       ),
       pickerPanel()
     );
