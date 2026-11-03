@@ -1878,11 +1878,6 @@ GUWH.Pages = GUWH.Pages || {};
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
     const [picker, setPicker] = React.useState(null); // { side, delta } while choosing who scored
     const [problem, setProblem] = React.useState(null);
-    // Netlify's "Powered by Netlify" badge sits bottom-right over everything
-    // (see styles.css). In true full screen it's hidden, but when a device
-    // won't go full screen (some iPads) it covered Black's + button (4 Nov
-    // 2026, Liam), so then the scoreboard keeps a strip clear for it.
-    const [isFull, setIsFull] = React.useState(false);
     const audio = React.useRef(null);
     const rootRef = React.useRef(null);
     const prevLeft = React.useRef(null);
@@ -1898,11 +1893,8 @@ GUWH.Pages = GUWH.Pages || {};
       try { if (el && el.requestFullscreen) el.requestFullscreen().then(() => { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {}
       try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => { lock = l; }).catch(() => {}); } catch (e) {}
       const tick = setInterval(() => setNow(Date.now()), 250);
-      const onFull = () => setIsFull(!!document.fullscreenElement);
-      document.addEventListener("fullscreenchange", onFull);
       return () => {
         clearInterval(tick);
-        document.removeEventListener("fullscreenchange", onFull);
         try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
         try { if (lock) lock.release(); } catch (e) {}
         try { if (audio.current) audio.current.close(); } catch (e) {}
@@ -2059,7 +2051,7 @@ GUWH.Pages = GUWH.Pages || {};
     const order = swapped ? ["black", "white"] : ["white", "black"];
     return h(
       "div",
-      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: isFull ? "2vh 2vw" : "2vh 2vw 80px", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
+      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
       h(
         "div",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
