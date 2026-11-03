@@ -15,9 +15,11 @@
 // is for the development game. A player can be in one development team and
 // one main team at once; assigning to a team only replaces their team of
 // the same kind.
-// POST /api/coordinator/teams { action: "book_in", memberEmail, teamId? }
+// POST /api/coordinator/teams { action: "book_in", memberEmail, teamId?, kind? }
 //      -> books in someone who said they weren't coming (they turned up
-//         anyway), and puts them in that team if one is given
+//         anyway), and puts them in that team if one is given. kind
+//         'swim' or 'volunteer' (3 Nov 2026) books them in for that instead,
+//         with no team
 // POST /api/coordinator/teams { action: "publish", published }
 //
 // Requires 'game_coordinator' or 'administrator'.
@@ -25,7 +27,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureAttendanceKinds, ensureDevelopmentTeams, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
-import { nextSessionDateISO } from "./_shared/attendance.mts";
+import { ATTENDANCE_KIND_LABELS, nextSessionDateISO, toAttendanceKind, type AttendanceKind } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
 
@@ -158,19 +160,19 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
   };
 }
 
-// Changes a "not coming" reply to "in" as a player, the same booking the
-// roll call's "add player" makes, so they count everywhere a booked-in
-// player does (roll call, fees, the dashboard).
-async function bookIn(db: any, sessionId: number, target: { id: string; email: string }, caller: { id: string; email: string }, sessionDate: string) {
+// Changes a "not coming" reply to "in" - as a player unless told
+// otherwise - the same booking the roll call's "add player" makes, so they
+// count everywhere a booked-in player does (roll call, fees, the dashboard).
+async function bookIn(db: any, sessionId: number, target: { id: string; email: string }, caller: { id: string; email: string }, sessionDate: string, kind: AttendanceKind = "player") {
   await db.sql`
     insert into bookings (session_id, member_id, status, kind)
-    values (${sessionId}, ${target.id}, 'in', 'player')
-    on conflict (session_id, member_id) do update set status = 'in', kind = 'player'
+    values (${sessionId}, ${target.id}, 'in', ${kind})
+    on conflict (session_id, member_id) do update set status = 'in', kind = ${kind}
   `;
   await logAudit(db, {
     actorId: caller.id, actorEmail: caller.email, action: "booking_changed",
     resourceType: "booking", resourceId: target.id,
-    newValue: { sessionDate, status: "in" }, note: `${caller.email} booked in ${target.email} from Teams (said they weren't coming)`,
+    newValue: { sessionDate, status: "in", kind }, note: `${caller.email} booked in ${target.email} from Teams for ${ATTENDANCE_KIND_LABELS[kind].toLowerCase()} (said they weren't coming)`,
   });
 }
 
@@ -243,8 +245,9 @@ export default async (req: Request, context: Context) => {
             note: `${caller.email} deleted a team`,
           });
         }
-      } else if (action === "book_in" && !body.teamId) {
-        // Booked in but not placed yet: they land in Unassigned.
+      } else if (action === "book_in" && (!body.teamId || toAttendanceKind(body.kind) !== "player")) {
+        // Booked in but not placed yet: they land in Unassigned. Lane swim
+        // or volunteering never goes in a team.
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;
         if (!target) {
           return new Response(JSON.stringify({ ok: false, error: "No member found with that email" }), {
@@ -252,7 +255,7 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
-        await bookIn(db, sessionId, target, caller, sessionDate);
+        await bookIn(db, sessionId, target, caller, sessionDate, toAttendanceKind(body.kind));
       } else if (action === "assign" || action === "book_in") {
         const teamId = Number(body.teamId);
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;

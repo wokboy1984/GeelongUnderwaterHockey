@@ -6,7 +6,10 @@
 // POST /api/coordinator/scores { sessionDate, poolGameId, blackScore, whiteScore, goals: { memberId: goals, ... } }
 // POST /api/coordinator/scores { sessionDate, action: "lineup_add", poolGameId, memberId, teamId }
 // POST /api/coordinator/scores { sessionDate, action: "lineup_remove", poolGameId, memberId }
-// GET  /api/coordinator/scores?live=<poolGameId>  -> { ok, live: { whiteScore, blackScore, goals } }
+// GET  /api/coordinator/scores?live=<poolGameId>  -> { ok, live: { whiteScore, blackScore, goals, clockEnd, serverNow } }
+// POST /api/coordinator/scores { sessionDate, action: "clock", poolGameId, endAt: ms | null }
+//      -> shared Scoreboard clock (3 Nov 2026): when this game now ends, or
+//         null to go back to the timetable's times
 // POST /api/coordinator/scores { sessionDate, action: "goal", poolGameId, side, memberId?, delta }
 //      -> live scoring from the Scoreboard (3 Nov 2026): one goal on or off,
 //         optionally credited to a player, applied atomically so a phone and
@@ -28,7 +31,7 @@ import { getDatabase } from "@netlify/database";
 import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { POOLS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
-import { ensureLineupChanges } from "./_shared/lineups.mts";
+import { ensureGameClocks, ensureLineupChanges } from "./_shared/lineups.mts";
 
 function shapePlayer(r: any) {
   return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name) };
@@ -56,7 +59,14 @@ async function liveState(db: any, poolGameId: number) {
   const rows = await db.sql`select member_id, goals from game_goals where pool_game_id = ${poolGameId} and goals > 0`;
   const goals: Record<string, number> = {};
   rows.forEach((r: any) => { goals[r.member_id] = r.goals; });
-  return { whiteScore: pg.white_score, blackScore: pg.black_score, goals };
+  // clockEnd: null means the timetable's times. serverNow lets each device
+  // allow for its own clock being a little out.
+  const [clock] = await db.sql`select ends_at from game_clocks where pool_game_id = ${poolGameId}`;
+  return {
+    whiteScore: pg.white_score, blackScore: pg.black_score, goals,
+    clockEnd: clock ? new Date(clock.ends_at).getTime() : null,
+    serverNow: Date.now(),
+  };
 }
 
 async function buildResponse(db: any, sessionId: number | null, sessionDate: string, upcoming: string) {
@@ -199,6 +209,7 @@ export default async (req: Request, context: Context) => {
   const db = getDatabase();
   await ensureNicknameColumn(db);
   await ensureLineupChanges(db);
+  await ensureGameClocks(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "record_scores")) {
     return forbidden("Only Game Coordinators and Administrators can record scores");
@@ -256,6 +267,24 @@ export default async (req: Request, context: Context) => {
       if (!pg) {
         return new Response(JSON.stringify({ ok: false, error: "That game isn't part of this week's session" }), {
           status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      // Shared clock (3 Nov 2026): see ensureGameClocks.
+      if (body.action === "clock") {
+        const endAt = body.endAt == null ? null : Number(body.endAt);
+        if (endAt != null && (!Number.isFinite(endAt) || Math.abs(endAt - Date.now()) > 24 * 3600000)) {
+          return new Response(JSON.stringify({ ok: false, error: "That game time doesn't look right" }), { status: 400, headers: { "content-type": "application/json" } });
+        }
+        if (endAt == null) {
+          await db.sql`delete from game_clocks where pool_game_id = ${poolGameId}`;
+        } else {
+          await db.sql`
+            insert into game_clocks (pool_game_id, ends_at, updated_by) values (${poolGameId}, to_timestamp(${endAt / 1000}), ${caller.id})
+            on conflict (pool_game_id) do update set ends_at = excluded.ends_at, updated_by = excluded.updated_by, updated_at = now()`;
+        }
+        return new Response(JSON.stringify({ ok: true, live: await liveState(db, poolGameId) }), {
           headers: { "content-type": "application/json" },
         });
       }

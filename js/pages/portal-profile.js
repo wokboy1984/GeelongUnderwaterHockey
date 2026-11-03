@@ -25,6 +25,41 @@ GUWH.Pages = GUWH.Pages || {};
     });
   }
 
+  // Shrink a photo before it's uploaded (3 Nov 2026). A phone photo is often
+  // 3-6MB, which used to fail with "SyntaxError: Unexpected end of JSON
+  // input": sent as text it's a third bigger again, over Netlify's 6MB
+  // request limit, so Netlify refused it before our 2MB check could reply.
+  // Profile photos only ever show small, so 800px on the long side is
+  // plenty, and the result is a JPEG of a couple of hundred KB. If the
+  // browser can't read the file (e.g. HEIC outside Safari), it's sent as is
+  // and the server's type and size checks give the message.
+  const PHOTO_MAX_PX = 800;
+  function shrinkPhoto(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, PHOTO_MAX_PX / Math.max(img.naturalWidth, img.naturalHeight));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff"; // transparent PNGs get a white background
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        } catch (e) {
+          resolve(fileToDataUrl(file));
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(fileToDataUrl(file)); };
+      img.src = url;
+    });
+  }
+
   function PhotoUploader({ member, onChange }) {
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState(null);
@@ -37,9 +72,10 @@ GUWH.Pages = GUWH.Pages || {};
       setError(null);
       setBusy(true);
       try {
-        const dataUrl = await fileToDataUrl(file);
+        const dataUrl = await shrinkPhoto(file);
         const res = await GUWH.Identity.authFetch("/api/profile-photo", { method: "POST", body: JSON.stringify({ dataUrl }) });
-        const d = await res.json();
+        // Netlify's own "too large" reply isn't JSON: say something useful.
+        const d = await res.json().catch(() => ({ ok: false, error: res.status === 413 ? "That photo is too large. Try a smaller one (2MB max)." : "Couldn't upload that photo. Try a smaller one, or a JPEG or PNG." }));
         if (d.ok) onChange(d.photoVersion);
         else setError(d.error || "Couldn't upload that photo");
       } catch (e) {
@@ -81,8 +117,8 @@ GUWH.Pages = GUWH.Pages || {};
           h(Button, { type: "button", variant: "secondary", size: "sm", className: "!py-1 !px-3 !text-xs", disabled: busy, onClick: () => inputRef.current && inputRef.current.click() }, member.photoVersion ? "Change photo" : "Add photo"),
           member.photoVersion > 0 && h(Button, { type: "button", variant: "ghost", size: "sm", className: "!py-1 !px-2 !text-xs", disabled: busy, onClick: onRemove }, "Remove")
         ),
-        h("input", { ref: inputRef, type: "file", accept: "image/jpeg,image/png,image/webp", className: "hidden", onChange: onPick }),
-        h("p", { className: "text-[11px] text-[var(--ink-soft)]" }, "JPEG, PNG or WEBP, 2MB max. Visible to other logged-in members only."),
+        h("input", { ref: inputRef, type: "file", accept: "image/*", className: "hidden", onChange: onPick }),
+        h("p", { className: "text-[11px] text-[var(--ink-soft)]" }, "A JPEG, PNG or WEBP photo. Big photos straight from your phone are fine: they're shrunk automatically before upload. Visible to other logged-in members only."),
         error && h("p", { className: "text-xs text-[var(--bad)]" }, error)
       )
     );
@@ -390,6 +426,7 @@ GUWH.Pages = GUWH.Pages || {};
               emergencyPhone: d.member.emergencyPhone || "",
               phone: d.member.phone || "",
               position: d.member.position || "Unknown",
+              usualKind: d.member.usualKind || "player",
               grade: d.member.grade || "",
             });
           } else setError(d.error || "Something went wrong");
@@ -517,6 +554,19 @@ GUWH.Pages = GUWH.Pages || {};
           "p",
           { className: "text-xs text-[var(--ink-soft)] -mt-3" },
           "Pick your own grade to start — a Game Coordinator or Administrator may adjust it once they've seen you play."
+        ),
+        // How they usually come (3 Nov 2026, committee request): the
+        // default when they book in from the Dashboard.
+        h(
+          FormField,
+          { label: "I usually come to", hint: "What you're booked in as when you say you're coming. You can still pick something else on the Dashboard each week." },
+          h(
+            "select",
+            { className: inputCls + " sm:max-w-xs", value: form.usualKind, onChange: (e) => set("usualKind", e.target.value) },
+            h("option", { value: "player" }, "Play"),
+            h("option", { value: "swim" }, "Lane swim only"),
+            h("option", { value: "volunteer" }, "Volunteer")
+          )
         ),
 
         h("hr", { className: "border-black/5" }),

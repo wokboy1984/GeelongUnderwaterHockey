@@ -686,8 +686,14 @@ GUWH.Pages = GUWH.Pages || {};
 
     // Someone who said they weren't coming turned up anyway (27 Oct 2026,
     // Liam): book them in and, unless "Unassigned" was picked, place them.
+    // Lane swim / Volunteering (3 Nov 2026): book them in for that, no team.
     function bookInAnyway(player, value) {
       if (!value) return;
+      if (value === "swim" || value === "volunteer") {
+        if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session as " + (value === "swim" ? "a lane swimmer" : "a volunteer") + "?")) return;
+        call({ action: "book_in", memberEmail: player.email, kind: value });
+        return;
+      }
       const team = value === "unassigned" ? null : board.teams.find((t) => String(t.id) === value);
       const where = team ? " and put them in " + team.name : "";
       if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session" + where + "?")) return;
@@ -871,7 +877,7 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mt-6" },
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Not attending (" + board.notAttending.length + ")"),
-          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "These players said they're not coming. If one turns up anyway, pick a team next to their name to book them in and place them."),
+          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "These players said they're not coming. If one turns up anyway, pick a team next to their name to book them in and place them, or Lane swim or Volunteering if they're not playing."),
           h(
             "div",
             { className: "flex flex-col gap-2" },
@@ -894,7 +900,9 @@ GUWH.Pages = GUWH.Pages || {};
                     },
                     h("option", { value: "" }, "Turned up? Move to…"),
                     board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
-                    h("option", { value: "unassigned" }, "Unassigned")
+                    h("option", { value: "unassigned" }, "Unassigned"),
+                    h("option", { value: "swim" }, "Lane swim (no team)"),
+                    h("option", { value: "volunteer" }, "Volunteering (no team)")
                   )
                 ),
               });
@@ -1871,11 +1879,23 @@ GUWH.Pages = GUWH.Pages || {};
     const g = games[idx];
     const pg = g.pg;
     const [live, setLive] = React.useState({ whiteScore: pg.whiteScore || 0, blackScore: pg.blackScore || 0, goals: {} });
+    // How far this device's clock is from the server's, so every device
+    // counts down to the same moment.
+    const skew = React.useRef(0);
     const [now, setNow] = React.useState(Date.now());
-    const [manualEnd, setManualEnd] = React.useState(null); // ms, when "Start full game" or ± was used
+    // ms, when "Start full game" or ± was used. Shared (3 Nov 2026): saved
+    // on the server and picked up by every device showing this game.
+    const [manualEnd, setManualEnd] = React.useState(null);
+    const clockPending = React.useRef(0);
+    const manualEndRef = React.useRef(null);
+    manualEndRef.current = manualEnd;
     const [alarmOn, setAlarmOn] = React.useState(false);
     const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
+    // Scoreboard only (3 Nov 2026, Liam): for the device the players see.
+    // Just the clock and each team's score, no buttons; scores come from
+    // whichever device the scorekeeper is using. Remembered per device.
+    const [displayOnly, setDisplayOnly] = React.useState(() => readPref("guwh.scoreboard.displayOnly", false));
     const [picker, setPicker] = React.useState(null); // { side, delta } while choosing who scored
     const [problem, setProblem] = React.useState(null);
     const audio = React.useRef(null);
@@ -1892,7 +1912,7 @@ GUWH.Pages = GUWH.Pages || {};
       const el = rootRef.current;
       try { if (el && el.requestFullscreen) el.requestFullscreen().then(() => { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {}
       try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => { lock = l; }).catch(() => {}); } catch (e) {}
-      const tick = setInterval(() => setNow(Date.now()), 250);
+      const tick = setInterval(() => setNow(Date.now() + skew.current), 250);
       return () => {
         clearInterval(tick);
         try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
@@ -1910,6 +1930,7 @@ GUWH.Pages = GUWH.Pages || {};
           const r = await GUWH.Identity.authFetch("/api/coordinator/scores?live=" + pg.id);
           const d = await r.json();
           if (!stopped && d.ok && pending.current === 0) { setLive(d.live); setProblem(null); }
+          if (!stopped && d.ok) takeClock(d.live);
         } catch (e) {
           if (!stopped) setProblem("Can't reach the server - scores may be out of date.");
         }
@@ -1982,15 +2003,41 @@ GUWH.Pages = GUWH.Pages || {};
       if (askScorer && choices.length) setPicker({ side, delta });
       else sendGoal(side, delta, null);
     }
-    function nudge(min) {
+    // The clock from the server: another device may have started the game
+    // early or changed its time. Ignored while this device's own change is
+    // still on its way.
+    function takeClock(l) {
+      if (!l || clockPending.current > 0) return;
+      if (l.serverNow) skew.current = l.serverNow - Date.now();
+      const next = l.clockEnd == null ? null : l.clockEnd;
+      if (next === manualEndRef.current) return;
       setAlarmOn(false);
-      setManualEnd((end != null && !notStarted ? end : Date.now() + lengthMs) + min * 60000);
       prevLeft.current = null;
+      setManualEnd(next);
+    }
+    async function setClock(endAt) {
+      setAlarmOn(false);
+      setManualEnd(endAt);
+      prevLeft.current = null;
+      clockPending.current += 1;
+      try {
+        const r = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate, action: "clock", poolGameId: pg.id, endAt }),
+        });
+        const d = await r.json();
+        if (!d.ok) setProblem(d.error || "The clock change didn't save - other screens won't show it.");
+      } catch (e) {
+        setProblem("The clock change didn't save - other screens won't show it.");
+      } finally {
+        clockPending.current -= 1;
+      }
+    }
+    function nudge(min) {
+      setClock((end != null && !notStarted ? end : now + lengthMs) + min * 60000);
     }
     function startFull() {
-      setAlarmOn(false);
-      setManualEnd(Date.now() + (lengthMs || 18 * 60000));
-      prevLeft.current = null;
+      setClock(now + (lengthMs || 18 * 60000));
     }
     function go(step) { setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step))); }
     function toggle(key, value, set) { set(value); writePref(key, value); }
@@ -2010,9 +2057,13 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { key: which, style: { flex: 1, background: dark ? "#000" : "#fff", color: dark ? "#fff" : "#000", border: "4px solid #fff", borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "2vh 2vw", minWidth: 0 } },
         h("div", { style: { flexShrink: 0, fontSize: "min(6vh, 5vw)", fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" } }, team ? team.name : dark ? "Black" : "White"),
-        h("div", { style: { fontSize: "min(30vh, 28vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums", minHeight: 0 } }, score),
-        h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
         h(
+          "div",
+          { className: "guwh-score-area", style: { flex: 1, minHeight: 0, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" } },
+          h("div", { className: "guwh-score", style: { fontSize: "min(24vh, 26vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" } }, score)
+        ),
+        !displayOnly && h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
+        !displayOnly && h(
           "div",
           { style: { display: "flex", gap: "4vw", flexShrink: 0 } },
           h("button", { type: "button", "aria-label": "Take a goal off " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, -1) }, "−"),
@@ -2048,7 +2099,9 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
-      h(
+      // Scoreboard only: a faint corner button is the only way back.
+      displayOnly && h("button", { type: "button", "aria-label": "Show the scoreboard controls", style: Object.assign({}, small, { position: "absolute", top: "1.5vh", right: "1.5vw", zIndex: 1, opacity: 0.35 }), onClick: () => toggle("guwh.scoreboard.displayOnly", false, setDisplayOnly) }, "Controls"),
+      !displayOnly && h(
         "div",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
         h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -2060,29 +2113,45 @@ GUWH.Pages = GUWH.Pages || {};
           h("button", { type: "button", style: small, onClick: () => nudge(-1) }, "−1 min"),
           h("button", { type: "button", style: small, onClick: () => nudge(1) }, "+1 min"),
           h("button", { type: "button", style: small, onClick: startFull }, "Start full game"),
+          manualEnd != null && hasTimes && h("button", { type: "button", style: small, onClick: () => setClock(null) }, "Back to timetable"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
-          h("button", { type: "button", style: small, onClick: () => playAlarm(audio.current) }, "Test buzzer"),
+          h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.displayOnly", true, setDisplayOnly) }, "Scoreboard only"),
           h("button", { type: "button", style: small, onClick: onClose }, "Exit")
         )
       ),
-      problem && h("div", { style: { textAlign: "center", color: "#ffb4ad", fontWeight: 700, fontSize: "max(13px, 2vh)" } }, problem),
+      problem && !displayOnly && h("div", { style: { textAlign: "center", color: "#ffb4ad", fontWeight: 700, fontSize: "max(13px, 2vh)" } }, problem),
       h(
         "div",
         { style: { textAlign: "center", lineHeight: 1, cursor: alarmOn ? "pointer" : "default" }, onClick: () => setAlarmOn(false) },
         notStarted && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.7, marginBottom: "0.5vh" } }, farAway ? "Starts " + new Date(start).toLocaleString("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "Starts in"),
         h(
           "div",
-          { style: { fontSize: "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
+          { style: { fontSize: displayOnly ? "26vh" : "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
           left == null ? "--:--" : farAway ? fmtCountdown(lengthMs) : fmtCountdown(notStarted ? start - now : left)
         ),
         finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
-        h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } }")
+        // The score fills its box's free height (container units), so it can
+        // never run into the team name or the + / − buttons.
+        h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } } @supports (font-size: 1cqh) { .guwh-score-area { container-type: size; } .guwh-score { font-size: min(95cqh, 60cqw) !important; } }")
       ),
       h(
         "div",
         { style: { flex: 1, display: "flex", gap: "2vw", minHeight: 0 } },
-        order.map(side)
+        side(order[0]),
+        // Buzzer (3 Nov 2026, Liam): big, red and in the middle so the deck
+        // ref can hit it for a foul. Plays on this device only.
+        !displayOnly && h(
+          "button",
+          {
+            type: "button",
+            "aria-label": "Sound the buzzer",
+            style: { flexShrink: 0, width: "13vw", minWidth: 90, alignSelf: "center", height: "min(60%, 34vh)", minHeight: 90, borderRadius: 24, border: "4px solid #fff", background: "#d62828", color: "#fff", fontSize: "max(18px, min(4.5vh, 2.6vw))", fontWeight: 900, letterSpacing: "0.03em", cursor: "pointer", boxShadow: "0 0 0 6px rgba(214,40,40,0.35)", touchAction: "manipulation" },
+            onClick: () => playAlarm(audio.current),
+          },
+          "Buzzer"
+        ),
+        side(order[1])
       ),
       pickerPanel()
     );

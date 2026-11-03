@@ -27,7 +27,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureFamilyColumns, ensureNonPlayerColumn, ensureUsualKindColumn, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
 import { nextSessionDateISO, toAttendanceKind } from "./_shared/attendance.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
@@ -69,6 +69,8 @@ export default async (req: Request, context: Context) => {
     await ensureNicknameColumn(db);
     await ensureFamilyColumns(db);
     await ensureAttendanceKinds(db);
+    await ensureNonPlayerColumn(db);
+    await ensureUsualKindColumn(db);
 
     // Make sure this member and this week's session both exist.
     const [session] = await db.sql`
@@ -102,18 +104,28 @@ export default async (req: Request, context: Context) => {
           });
         }
         targetId = who.id;
-        // The family list has its own "What for?" per person (3 Nov 2026,
-        // Liam: his wife volunteers rather than plays). With no kind sent
-        // ("X's coming"), keep what they're down as this week, else what
-        // they came as last time, so a partner who volunteers stays one.
-        if (body.kind == null) {
-          const [prev] = await db.sql`
-            select b.kind from bookings b join sessions s on s.id = b.session_id
-            where b.member_id = ${targetId}
-            order by (b.session_id = ${sessionId}) desc, s.session_date desc limit 1`;
-          if (prev) kind = toAttendanceKind(prev.kind);
-        }
       }
+
+      // With no kind sent ("I'm coming", "X's coming"), keep what they're
+      // down as this week, else how they usually come (picked on Profile,
+      // 3 Nov 2026), else - for family - what they came as last time, so a
+      // partner who volunteers stays one (3 Nov 2026, Liam).
+      if (body.kind == null) {
+        const [thisWeek] = await db.sql`select kind from bookings where session_id = ${sessionId} and member_id = ${targetId} and status = 'in'`;
+        const [usual] = await db.sql`select usual_kind from members where id = ${targetId}`;
+        const [last] = targetId !== memberId
+          ? await db.sql`
+              select b.kind from bookings b join sessions s on s.id = b.session_id
+              where b.member_id = ${targetId} and b.status = 'in'
+              order by s.session_date desc limit 1`
+          : [];
+        kind = toAttendanceKind((thisWeek && thisWeek.kind) || (usual && usual.usual_kind) || (last && last.kind));
+      }
+
+      // A non-player (3 Nov 2026) is never down as playing: booking them in
+      // is volunteering, so they stay out of teams and aren't charged.
+      const [target] = await db.sql`select non_player from members where id = ${targetId}`;
+      if (target && target.non_player && kind === "player") kind = "volunteer";
 
       // The client route already gates the whole portal behind the waiver
       // (see app.js's WAIVER_EXEMPT_PATHS check), but this is the one
@@ -141,6 +153,7 @@ export default async (req: Request, context: Context) => {
     const [mine] = await db.sql`
       select status, kind from bookings where session_id = ${sessionId} and member_id = ${memberId}
     `;
+    const [myUsual] = await db.sql`select usual_kind from members where id = ${memberId}`;
     const confirmedRows = await db.sql`
       select m.id, m.nickname, m.first_name, m.last_name, m.photo_version
       from bookings b join members m on m.id = b.member_id
@@ -160,6 +173,9 @@ export default async (req: Request, context: Context) => {
     const bookedIn = famRows.length
       ? await db.sql`select member_id, kind from bookings where session_id = ${sessionId} and status = 'in' and member_id = any(${famRows.map((f: any) => f.id)})`
       : [];
+    const nonPlayers = new Set<string>(
+      (await db.sql`select id from members where non_player = true and id = any(${[memberId, ...famRows.map((f: any) => f.id)]})`).map((r: any) => r.id)
+    );
     const family = famRows.map((r: any) => ({
       id: r.id,
       name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim(),
@@ -169,6 +185,7 @@ export default async (req: Request, context: Context) => {
       inSession: bookedIn.some((b: any) => b.member_id === r.id),
       // What they're coming for: player | swim | volunteer (null if not in).
       kind: (bookedIn.find((b: any) => b.member_id === r.id) || {}).kind || null,
+      nonPlayer: nonPlayers.has(r.id),
     }));
 
     return new Response(
@@ -182,6 +199,10 @@ export default async (req: Request, context: Context) => {
         myStatus: mine ? mine.status : null,
         // What they said they're coming for: player | swim | volunteer.
         myKind: mine ? mine.kind : null,
+        // Never plays (3 Nov 2026): the Dashboard doesn't offer "Playing".
+        myNonPlayer: nonPlayers.has(memberId),
+        // How they usually come, from Profile: the default when booking in.
+        myUsualKind: myUsual ? myUsual.usual_kind || "player" : "player",
         confirmedCount: count,
         confirmed,
         family,

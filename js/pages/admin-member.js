@@ -114,6 +114,48 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Date of birth (3 Nov 2026): correct it, or clear it if unknown.
+    const [dobDraft, setDobDraft] = React.useState(null); // null = not editing
+    async function saveDob(value) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_dob", memberId: m.id, dateOfBirth: value || null }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+        setDobDraft(null);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // Non-player (3 Nov 2026): books in as volunteering, never charged.
+    async function saveNonPlayer(value) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_non_player", memberId: m.id, nonPlayer: value }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
     // Families (28 Oct 2026): put login accounts (partners, juniors with
     // their own login) in one family, for booking each other in and the
     // family fee cap. Children under a parent follow the parent.
@@ -259,7 +301,26 @@ GUWH.Pages = GUWH.Pages || {};
             "div",
             { className: "grid gap-4 grid-cols-2 sm:grid-cols-3" },
             h(Field, { label: "Age", value: typeof m.age === "number" ? String(m.age) : null }),
-            h(Field, { label: "Date of birth", value: m.dateOfBirth ? fmtDate(m.dateOfBirth) : null }),
+            h(
+              "div",
+              { className: "min-w-0" },
+              h("span", { className: "block text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-0.5" }, "Date of birth"),
+              dobDraft == null
+                ? h(
+                    "div",
+                    { className: "flex items-center gap-2 flex-wrap text-sm text-[var(--ink)]" },
+                    m.dateOfBirth ? fmtDate(m.dateOfBirth) : h("span", { className: "text-[var(--ink-soft)]" }, "Not known"),
+                    h("button", { type: "button", className: "text-xs text-[var(--accent-dark)] underline", disabled: busy, onClick: () => setDobDraft(m.dateOfBirth || "") }, "Change"),
+                    m.dateOfBirth && h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline", disabled: busy, onClick: () => { if (window.confirm("Clear " + m.firstName + "'s date of birth? Their age will show as not known.")) saveDob(null); } }, "Clear")
+                  )
+                : h(
+                    "div",
+                    { className: "flex items-center gap-2 flex-wrap" },
+                    h("input", { type: "date", className: inputCls + " !w-auto !py-1 text-sm", value: dobDraft, max: new Date().toISOString().slice(0, 10), onChange: (e) => setDobDraft(e.target.value) }),
+                    h(Button, { type: "button", size: "sm", disabled: busy || !dobDraft, onClick: () => saveDob(dobDraft) }, "Save"),
+                    h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline", onClick: () => setDobDraft(null) }, "Cancel")
+                  )
+            ),
             h(Field, { label: "Grade", value: m.grade }),
             // Editable here (27 Oct 2026, Liam); saves as soon as it's picked.
             h(
@@ -278,7 +339,18 @@ GUWH.Pages = GUWH.Pages || {};
             h(Field, { label: "Emergency phone", value: m.emergencyPhone }),
             h(Field, { label: "Waiver", value: m.waiverSigned ? "Signed" + (m.waiverNote ? " (" + m.waiverNote + ")" : "") : "Not signed" })
           ),
-          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position saves as soon as you pick it.")
+          h(
+            "label",
+            { className: "mt-4 flex items-start gap-2 text-sm text-[var(--ink)]" },
+            h("input", { type: "checkbox", className: "mt-1", checked: !!m.nonPlayer, disabled: busy, onChange: (e) => saveNonPlayer(e.target.checked) }),
+            h(
+              "span",
+              null,
+              h("span", { className: "font-semibold" }, "Non-player"),
+              h("span", { className: "block text-xs text-[var(--ink-soft)]" }, "Never plays. Saying they're coming books them in as volunteering, they're left out of teams, and they're never charged a game fee.")
+            )
+          ),
+          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position and Non-player save as soon as you change them; Date of birth when you press Save.")
         ),
 
         h(

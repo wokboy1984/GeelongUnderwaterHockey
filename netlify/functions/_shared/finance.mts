@@ -113,7 +113,7 @@ export type GameFee = {
 // without a database.
 export type AttendedRow = {
  member_id: string; bill_to: string; is_child: boolean; trial_free: boolean; first_name: string;
- date_of_birth: unknown; family_key: string;
+ date_of_birth: unknown; family_key: string; non_player?: boolean;
  session_date: string; marked_by: string | null; kind: string; category: string; trial_eligible: boolean;
  attendance_number: number | string;
 };
@@ -123,6 +123,7 @@ export function priceGames(rows: AttendedRow[]): GameFee[] {
   const n = Number(a.attendance_number);
   let amount: number, note: string;
   if (a.kind === 'volunteer') { amount = 0; note = 'Volunteering — no charge'; }
+  else if (a.non_player && a.kind === 'player') { amount = 0; note = 'Non-player — no charge'; }
   else if (a.kind === 'swim') { amount = 1000; note = 'Lane swim'; }
   else if (a.is_child) { const free = a.trial_free && n <= 3; amount = free ? 0 : 1000; note = a.first_name + ' (child) — ' + (free ? 'free session' : 'confirmed attendance'); }
   else if (a.trial_eligible && n <= 3) { amount = 0; note = 'Try Underwater Hockey — free session'; }
@@ -163,9 +164,10 @@ export function priceGames(rows: AttendedRow[]): GameFee[] {
 // because the cap depends on who else in the family came that night.
 export async function gameFeeEntries(db: any, payerId?: string): Promise<GameFee[]> {
  await ensureCategoryChanges(db);
+ await db.sql`alter table members add column if not exists non_player boolean not null default false`;
  const rows = await db.sql`
   select sa.member_id, coalesce(m.parent_id, sa.member_id) as bill_to, (m.parent_id is not null) as is_child,
-   m.trial_free, m.first_name, m.date_of_birth, coalesce(p.family_id, p.id, m.family_id, m.id) as family_key,
+   m.trial_free, m.first_name, m.date_of_birth, coalesce(p.family_id, p.id, m.family_id, m.id) as family_key, m.non_player,
    to_char(sa.session_date, 'YYYY-MM-DD') as session_date, sa.marked_by, sa.kind, fa.trial_eligible,
    coalesce((select c.category from finance_category_changes c
              where c.member_id = fa.member_id and c.effective_from <= sa.session_date
