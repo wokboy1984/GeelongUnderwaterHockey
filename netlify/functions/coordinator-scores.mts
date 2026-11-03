@@ -4,6 +4,9 @@
 //
 // GET  /api/coordinator/scores[?date=YYYY-MM-DD] -> { ok, sessionDate, upcoming, weeks, games, seasonLeaders }
 // POST /api/coordinator/scores { sessionDate, poolGameId, blackScore, whiteScore, goals: { memberId: goals, ... } }
+// POST /api/coordinator/scores { sessionDate, action: "lineup_add", poolGameId, memberId, teamId }
+// POST /api/coordinator/scores { sessionDate, action: "lineup_remove", poolGameId, memberId }
+//      -> move or add a player for one game only (3 Nov 2026, see _shared/lineups.mts)
 //
 // Week by week (2 Oct 2026): scores used to be tied to "the upcoming
 // Wednesday", which flips to next week at midnight Wednesday - so the
@@ -20,6 +23,7 @@ import { getDatabase } from "@netlify/database";
 import { ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { POOLS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
+import { ensureLineupChanges } from "./_shared/lineups.mts";
 
 function shapePlayer(r: any) {
   return { id: r.id, firstName: r.first_name, lastName: r.last_name, displayName: adminName(r.nickname, r.first_name, r.last_name) };
@@ -77,6 +81,21 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
   const goalRows = pgIds.length
     ? await db.sql`select pool_game_id, member_id, goals from game_goals where pool_game_id = any(${pgIds})`
     : [];
+  // Per-game line-up changes: pool game -> member -> team they played for.
+  const lineupRows = pgIds.length
+    ? await db.sql`
+        select glc.pool_game_id, glc.team_id, m.id, m.nickname, m.first_name, m.last_name
+        from game_lineup_changes glc join members m on m.id = glc.member_id
+        where glc.pool_game_id = any(${pgIds})
+      `
+    : [];
+  const lineupByPG: Record<number, Record<string, number>> = {};
+  const lineupPlayer: Record<string, any> = {};
+  lineupRows.forEach((r: any) => {
+    if (!lineupByPG[r.pool_game_id]) lineupByPG[r.pool_game_id] = {};
+    lineupByPG[r.pool_game_id][r.id] = r.team_id;
+    lineupPlayer[r.id] = shapePlayer(r);
+  });
   const goalsByPG: Record<number, Record<string, number>> = {};
   goalRows.forEach((r: any) => {
     if (!goalsByPG[r.pool_game_id]) goalsByPG[r.pool_game_id] = {};
@@ -88,13 +107,21 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
     pgsByRow[pg.row_id].push(pg);
   });
 
+  // A side's players for one game: the team's roster for the night, less
+  // anyone moved to the other side for this game, plus anyone moved or
+  // added to this side for this game (marked swapped).
   function teamSide(teamId: number | null, pgId: number | null) {
     if (teamId == null) return null;
     const goals = pgId != null ? goalsByPG[pgId] || {} : {};
+    const moves = pgId != null ? lineupByPG[pgId] || {} : {};
+    const roster = (rosterByTeam[teamId] || []).filter((p) => moves[p.id] == null || moves[p.id] === teamId);
+    const extra = Object.keys(moves)
+      .filter((id) => moves[id] === teamId && !roster.some((p) => p.id === id))
+      .map((id) => Object.assign({}, lineupPlayer[id], { swapped: true }));
     return {
       id: teamId,
       name: teamNames[teamId] || "Unknown team",
-      players: (rosterByTeam[teamId] || []).map((p) => Object.assign({}, p, { goals: goals[p.id] || 0 })),
+      players: roster.concat(extra).map((p) => Object.assign({}, p, { goals: goals[p.id] || 0 })),
     };
   }
 
@@ -133,7 +160,20 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
   `;
   const seasonLeaders = seasonRows.map((r: any) => ({ memberId: r.member_id, name: adminName(r.nickname, r.first_name, r.last_name), totalGoals: r.total_goals }));
 
-  return { ok: true, sessionDate, upcoming, weeks, games, seasonLeaders };
+  // Everyone who was there that night, for "Add or move a player": on a
+  // team, booked in to play, or ticked on the roll.
+  const nightRows = await db.sql`
+    select m.id, m.nickname, m.first_name, m.last_name from members m
+    where m.id in (select member_id from team_assignments where session_id = ${sessionId})
+       or m.id in (select member_id from bookings where session_id = ${sessionId} and status = 'in' and coalesce(kind, 'player') = 'player')
+       or m.id in (select member_id from session_attendance where session_date = ${sessionDate}::date and attended = true and coalesce(kind, 'player') = 'player')
+    order by lower(m.first_name), lower(m.last_name)
+  `;
+  const nightPlayers = nightRows.map((r: any) => Object.assign(shapePlayer(r), {
+    teams: Object.keys(rosterByTeam).filter((t) => rosterByTeam[Number(t)].some((p) => p.id === r.id)).map((t) => teamNames[Number(t)]).filter(Boolean),
+  }));
+
+  return { ok: true, sessionDate, upcoming, weeks, games, seasonLeaders, nightPlayers };
 }
 
 export default async (req: Request, context: Context) => {
@@ -142,6 +182,7 @@ export default async (req: Request, context: Context) => {
 
   const db = getDatabase();
   await ensureNicknameColumn(db);
+  await ensureLineupChanges(db);
   const caller = await ensureMember(db, user);
   if (!hasPermission(caller.roles, "record_scores")) {
     return forbidden("Only Game Coordinators and Administrators can record scores");
@@ -195,6 +236,48 @@ export default async (req: Request, context: Context) => {
         });
       }
 
+      // Move or add a player for this one game (3 Nov 2026).
+      if (body.action === "lineup_add" || body.action === "lineup_remove") {
+        const memberId = String(body.memberId || "");
+        const [member] = await db.sql`select id, first_name, last_name from members where id = ${memberId}`;
+        if (!member) {
+          return new Response(JSON.stringify({ ok: false, error: "Player not found" }), { status: 404, headers: { "content-type": "application/json" } });
+        }
+        const gameTeams = [pg.black_team_id, pg.white_team_id].filter((x) => x != null);
+        const rostered = await db.sql`select team_id from team_assignments where member_id = ${memberId} and team_id = any(${gameTeams})`;
+        const rosteredOn = rostered.map((r: any) => r.team_id);
+        if (body.action === "lineup_add") {
+          const teamId = Number(body.teamId);
+          if (!gameTeams.includes(teamId)) {
+            return new Response(JSON.stringify({ ok: false, error: "That team isn't playing in this game" }), { status: 400, headers: { "content-type": "application/json" } });
+          }
+          // Back on their own team: no change needed for this game.
+          if (rosteredOn.length === 1 && rosteredOn[0] === teamId) {
+            await db.sql`delete from game_lineup_changes where pool_game_id = ${poolGameId} and member_id = ${memberId}`;
+          } else {
+            await db.sql`
+              insert into game_lineup_changes (pool_game_id, member_id, team_id, created_by)
+              values (${poolGameId}, ${memberId}, ${teamId}, ${caller.id})
+              on conflict (pool_game_id, member_id) do update set team_id = excluded.team_id, created_by = excluded.created_by, created_at = now()
+            `;
+          }
+        } else {
+          await db.sql`delete from game_lineup_changes where pool_game_id = ${poolGameId} and member_id = ${memberId}`;
+          // Not on either team any more, so off this game's sheet: their
+          // goals in it go too, rather than lingering unseen in the totals.
+          if (rosteredOn.length === 0) await db.sql`delete from game_goals where pool_game_id = ${poolGameId} and member_id = ${memberId}`;
+        }
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: body.action === "lineup_add" ? "game_lineup_changed" : "game_lineup_change_removed",
+          resourceType: "timetable_pool_game", resourceId: String(poolGameId),
+          newValue: { sessionDate, memberId, teamId: body.action === "lineup_add" ? Number(body.teamId) : null },
+          note: `${caller.email} ${body.action === "lineup_add" ? "moved" : "undid the move of"} ${member.first_name} ${member.last_name} for one game on ${sessionDate}`,
+        });
+        return new Response(JSON.stringify(await buildResponse(db, sessionId, sessionDate, upcoming)), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       const blackScore = body.blackScore === null || body.blackScore === "" ? null : Number(body.blackScore);
       const whiteScore = body.whiteScore === null || body.whiteScore === "" ? null : Number(body.whiteScore);
       if ((blackScore != null && (!Number.isFinite(blackScore) || blackScore < 0)) || (whiteScore != null && (!Number.isFinite(whiteScore) || whiteScore < 0))) {
@@ -210,11 +293,14 @@ export default async (req: Request, context: Context) => {
         where id = ${poolGameId}
       `;
 
-      // Only players actually on one of this pool game's two teams can be
-      // credited with a goal — re-validated here, never trusted as-is.
+      // Only players actually on one of this pool game's two teams (or
+      // moved/added into this game) can be credited with a goal —
+      // re-validated here, never trusted as-is.
       const rosterRows = await db.sql`
         select member_id from team_assignments
         where team_id = any(${[pg.black_team_id, pg.white_team_id].filter((x) => x != null)})
+        union
+        select member_id from game_lineup_changes where pool_game_id = ${poolGameId}
       `;
       const rosterIds = new Set<string>(rosterRows.map((r: any) => r.member_id));
 

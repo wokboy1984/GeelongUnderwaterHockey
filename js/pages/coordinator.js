@@ -1681,7 +1681,11 @@ GUWH.Pages = GUWH.Pages || {};
   // player scored in it. Season/career totals are just SUM(goals) — see
   // game_goals in the DB and the same total surfaced on each member's own
   // Profile page.
-  function ScoreCard({ pg, rowLabel, single, onSave }) {
+  // Line-ups (3 Nov 2026): each side starts as that team's players from the
+  // Teams tab. "Add or move a player" puts anyone who was there that night
+  // on this side for this game only (e.g. swapping to even up a one-sided
+  // game); they're marked "swapped in", and Undo puts them back.
+  function ScoreCard({ pg, rowLabel, single, onSave, nightPlayers, onLineup }) {
     const [blackScore, setBlackScore] = React.useState(pg.blackScore == null ? "" : String(pg.blackScore));
     const [whiteScore, setWhiteScore] = React.useState(pg.whiteScore == null ? "" : String(pg.whiteScore));
     const [goals, setGoals] = React.useState(() => {
@@ -1689,8 +1693,24 @@ GUWH.Pages = GUWH.Pages || {};
       (pg.black ? pg.black.players : []).concat(pg.white ? pg.white.players : []).forEach((p) => { g[p.id] = p.goals || 0; });
       return g;
     });
+    // After a line-up change, pick up anyone newly on the sheet without
+    // losing goals typed in but not saved yet.
+    React.useEffect(() => {
+      setGoals((g) => {
+        const next = Object.assign({}, g);
+        (pg.black ? pg.black.players : []).concat(pg.white ? pg.white.players : []).forEach((p) => { if (!(p.id in next)) next[p.id] = p.goals || 0; });
+        return next;
+      });
+    }, [pg]);
     const [saving, setSaving] = React.useState(false);
     const [saved, setSaved] = React.useState(false);
+    const [moving, setMoving] = React.useState(false);
+
+    async function lineup(action, memberId, teamId) {
+      setMoving(true);
+      await onLineup({ action, poolGameId: pg.id, memberId, teamId });
+      setMoving(false);
+    }
 
     async function save() {
       setSaving(true);
@@ -1710,13 +1730,32 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { key: p.id, className: "flex items-center justify-between gap-2" },
-            h("span", { className: "text-sm text-[var(--ink)]" }, GUWH.displayName(p)),
+            h(
+              "span",
+              { className: "text-sm text-[var(--ink)] flex items-center gap-2 flex-wrap" },
+              GUWH.displayName(p),
+              p.swapped && h(Pill, { tone: "accent", className: "!py-0 !px-1.5 !text-[10px]" }, "Swapped in"),
+              p.swapped && h("button", { type: "button", className: "text-[11px] text-[var(--ink-soft)] underline disabled:opacity-40", disabled: moving, onClick: () => lineup("lineup_remove", p.id) }, "Undo")
+            ),
             h("input", {
               type: "number", min: 0, className: inputCls + " !w-16 !py-1 text-center",
               value: goals[p.id] || 0,
               onChange: (e) => setGoals((g) => Object.assign({}, g, { [p.id]: Number(e.target.value) })),
             })
           )
+        ),
+        h(
+          "select",
+          {
+            className: inputCls + " !py-1 !text-xs mt-1",
+            value: "",
+            disabled: moving,
+            onChange: (e) => { if (e.target.value) lineup("lineup_add", e.target.value, team.id); },
+          },
+          h("option", { value: "" }, moving ? "Saving…" : "+ Add or move a player…"),
+          (nightPlayers || [])
+            .filter((n) => !team.players.some((p) => p.id === n.id))
+            .map((n) => h("option", { key: n.id, value: n.id }, GUWH.displayName(n) + (n.teams && n.teams.length ? " (" + n.teams.join(", ") + ")" : "")))
         )
       );
     }
@@ -1785,6 +1824,17 @@ GUWH.Pages = GUWH.Pages || {};
       else setError(d.error || "Something went wrong");
     }
 
+    async function changeLineup(change) {
+      setError(null);
+      const res = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+        method: "POST",
+        body: JSON.stringify(Object.assign({ sessionDate: data.sessionDate }, change)),
+      });
+      const d = await res.json();
+      if (d.ok) setData(d);
+      else setError(d.error || "Something went wrong");
+    }
+
     if (!data) return loading ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…") : error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
     const allPoolGames = [];
@@ -1802,7 +1852,7 @@ GUWH.Pages = GUWH.Pages || {};
         : h(
             "div",
             { className: "flex flex-col gap-4" },
-            allPoolGames.map(({ pg, rowLabel, single }) => h(ScoreCard, { key: pg.id, pg, rowLabel, single, onSave: saveScore }))
+            allPoolGames.map(({ pg, rowLabel, single }) => h(ScoreCard, { key: pg.id, pg, rowLabel, single, onSave: saveScore, nightPlayers: data.nightPlayers, onLineup: changeLineup }))
           ),
       h(
         "div",
