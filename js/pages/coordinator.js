@@ -1878,6 +1878,11 @@ GUWH.Pages = GUWH.Pages || {};
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
     const [picker, setPicker] = React.useState(null); // { side, delta } while choosing who scored
     const [problem, setProblem] = React.useState(null);
+    // Netlify's "Powered by Netlify" badge sits bottom-right over everything
+    // (see styles.css). In true full screen it's hidden, but when a device
+    // won't go full screen (some iPads) it covered Black's + button (4 Nov
+    // 2026, Liam), so then the scoreboard keeps a strip clear for it.
+    const [isFull, setIsFull] = React.useState(false);
     const audio = React.useRef(null);
     const rootRef = React.useRef(null);
     const prevLeft = React.useRef(null);
@@ -1893,8 +1898,11 @@ GUWH.Pages = GUWH.Pages || {};
       try { if (el && el.requestFullscreen) el.requestFullscreen().then(() => { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {}
       try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => { lock = l; }).catch(() => {}); } catch (e) {}
       const tick = setInterval(() => setNow(Date.now()), 250);
+      const onFull = () => setIsFull(!!document.fullscreenElement);
+      document.addEventListener("fullscreenchange", onFull);
       return () => {
         clearInterval(tick);
+        document.removeEventListener("fullscreenchange", onFull);
         try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
         try { if (lock) lock.release(); } catch (e) {}
         try { if (audio.current) audio.current.close(); } catch (e) {}
@@ -2010,7 +2018,11 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { key: which, style: { flex: 1, background: dark ? "#000" : "#fff", color: dark ? "#fff" : "#000", border: "4px solid #fff", borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "2vh 2vw", minWidth: 0 } },
         h("div", { style: { flexShrink: 0, fontSize: "min(6vh, 5vw)", fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" } }, team ? team.name : dark ? "Black" : "White"),
-        h("div", { style: { fontSize: "min(30vh, 28vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums", minHeight: 0 } }, score),
+        h(
+          "div",
+          { className: "guwh-score-area", style: { flex: 1, minHeight: 0, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" } },
+          h("div", { className: "guwh-score", style: { fontSize: "min(24vh, 26vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" } }, score)
+        ),
         h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
         h(
           "div",
@@ -2047,7 +2059,7 @@ GUWH.Pages = GUWH.Pages || {};
     const order = swapped ? ["black", "white"] : ["white", "black"];
     return h(
       "div",
-      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
+      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: isFull ? "2vh 2vw" : "2vh 2vw 80px", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
       h(
         "div",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
@@ -2077,7 +2089,9 @@ GUWH.Pages = GUWH.Pages || {};
           left == null ? "--:--" : farAway ? fmtCountdown(lengthMs) : fmtCountdown(notStarted ? start - now : left)
         ),
         finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
-        h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } }")
+        // The score fills its box's free height (container units), so it can
+        // never run into the team name or the + / − buttons.
+        h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } } @supports (font-size: 1cqh) { .guwh-score-area { container-type: size; } .guwh-score { font-size: min(95cqh, 60cqw) !important; } }")
       ),
       h(
         "div",
