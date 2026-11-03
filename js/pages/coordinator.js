@@ -156,12 +156,16 @@ GUWH.Pages = GUWH.Pages || {};
 
     // The roll's tick state starts from whatever's already saved for today,
     // every time a fresh `checkin` comes in (first load, and after Save/Close/Reopen).
+    // Anyone confirmed who hasn't been marked yet starts ticked (3 Nov 2026,
+    // Liam: "I'm coming" counts as attended unless the coordinator unticks
+    // a no-show). It's still only saved, and charged, on Save/Close Roll.
     React.useEffect(() => {
       if (!checkin) return;
       const next = {};
-      checkin.players.forEach((p) => { next[p.id] = p.attended; });
+      checkin.players.forEach((p) => { if (p.marked) next[p.id] = p.attended; });
       setRoll(next);
     }, [checkin]);
+    const ticked = (id) => (id in roll ? !!roll[id] : true);
 
     // The roll is per Wednesday (12 Oct 2026): the week switcher picks the
     // game night. A future night is view-only until the day; past nights
@@ -245,7 +249,7 @@ GUWH.Pages = GUWH.Pages || {};
       close ? setClosingRoll(true) : setSavingRoll(true);
       setError(null);
       try {
-        const entries = players.map((p) => ({ memberId: p.id, attended: !!roll[p.id] }));
+        const entries = players.map((p) => ({ memberId: p.id, attended: ticked(p.id) }));
         const res = await GUWH.Identity.authFetch("/api/coordinator/checkin", {
           method: "POST",
           body: JSON.stringify({ sessionDate: checkin.sessionDate, action: "save", entries, close: !!close }),
@@ -336,7 +340,9 @@ GUWH.Pages = GUWH.Pages || {};
           ? h(
               React.Fragment,
               null,
-              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Tick who actually showed up, then Save Roll. Marking someone attended charges their game fee — see Finance."),
+              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Everyone who said they're coming starts ticked. Untick anyone who didn't turn up, then Save Roll. Nothing is charged until the roll is saved — see Finance."),
+              !isFuture && !checkin.closed && players.some((p) => !(checkin.players.find((c) => c.id === p.id) || {}).marked) &&
+                h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-1" }, "Not saved yet."),
               isFuture && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
               isPast && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)] mb-3" }, "Past week — saving updates that night's roll and game fees."),
               !isFuture && !isPast && h("div", { className: "mb-3" }),
@@ -396,7 +402,7 @@ GUWH.Pages = GUWH.Pages || {};
                         { className: "flex items-center gap-1.5 text-xs font-semibold text-[var(--ink)]" },
                         h("input", {
                           type: "checkbox",
-                          checked: !!roll[p.id],
+                          checked: ticked(p.id),
                           disabled: checkin.closed || isFuture,
                           onChange: (e) => tick(p.id, e.target.checked),
                         }),

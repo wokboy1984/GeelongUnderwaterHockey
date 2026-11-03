@@ -108,6 +108,7 @@ export default async(req:Request)=>{
   const players=await db.sql`select m.id,m.nickname,m.first_name as "firstName",m.last_name as "lastName",
    nullif(trim(coalesce(pp.first_name,'')||' '||coalesce(pp.last_name,'')),'') as "parentName",
    coalesce(a.attended,false) as attended,
+   (a.member_id is not null) as marked,
    exists(select 1 from bookings b join sessions s on s.id=b.session_id where b.member_id=m.id and b.status='in' and s.session_date=${sessionDate}::date) as booked
    from members m left join members pp on pp.id=m.parent_id left join session_attendance a on a.member_id=m.id and a.session_date=${sessionDate}::date
    where m.dependant_removed_at is null or a.attended is not null
