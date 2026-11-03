@@ -102,10 +102,15 @@ export default async (req: Request, context: Context) => {
           });
         }
         targetId = who.id;
-        // The family list has no "what for" picker: keep whatever they
-        // last booked as (a partner who volunteers stays a volunteer).
+        // The family list has its own "What for?" per person (3 Nov 2026,
+        // Liam: his wife volunteers rather than plays). With no kind sent
+        // ("X's coming"), keep what they're down as this week, else what
+        // they came as last time, so a partner who volunteers stays one.
         if (body.kind == null) {
-          const [prev] = await db.sql`select kind from bookings where session_id = ${sessionId} and member_id = ${targetId}`;
+          const [prev] = await db.sql`
+            select b.kind from bookings b join sessions s on s.id = b.session_id
+            where b.member_id = ${targetId}
+            order by (b.session_id = ${sessionId}) desc, s.session_date desc limit 1`;
           if (prev) kind = toAttendanceKind(prev.kind);
         }
       }
@@ -153,7 +158,7 @@ export default async (req: Request, context: Context) => {
     // children under anyone in it) and whether each is booked in.
     const famRows = (await familyMembers(db, await familyOf(db, memberId))).filter((f: any) => f.id !== memberId);
     const bookedIn = famRows.length
-      ? await db.sql`select member_id from bookings where session_id = ${sessionId} and status = 'in' and member_id = any(${famRows.map((f: any) => f.id)})`
+      ? await db.sql`select member_id, kind from bookings where session_id = ${sessionId} and status = 'in' and member_id = any(${famRows.map((f: any) => f.id)})`
       : [];
     const family = famRows.map((r: any) => ({
       id: r.id,
@@ -162,6 +167,8 @@ export default async (req: Request, context: Context) => {
       // Has their own login (not a child under a parent).
       isMember: !r.parent_id,
       inSession: bookedIn.some((b: any) => b.member_id === r.id),
+      // What they're coming for: player | swim | volunteer (null if not in).
+      kind: (bookedIn.find((b: any) => b.member_id === r.id) || {}).kind || null,
     }));
 
     return new Response(

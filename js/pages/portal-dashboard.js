@@ -595,7 +595,8 @@ GUWH.Pages = GUWH.Pages || {};
   // whether the parent is playing. With no children saved it is just a
   // quiet pointer to the Profile. Since 28 Oct 2026 it's the whole family:
   // everyone an Administrator has put in your family comes first, then the
-  // children under any of you.
+  // children under any of you. Each person who's coming has their own
+  // "What for?" (3 Nov 2026): a partner may volunteer while the rest play.
   function FamilyBooking({ family, busy, onToggle }) {
     if (!family || family.length === 0) {
       return h(
@@ -614,17 +615,36 @@ GUWH.Pages = GUWH.Pages || {};
         family.map((k) =>
           h(
             "div",
-            { key: k.id, className: "flex items-center justify-between gap-3 rounded-xl bg-white/10 px-4 py-2.5" },
+            { key: k.id, className: "rounded-xl bg-white/10 px-4 py-2.5" },
             h(
-              "span",
-              { className: "text-sm font-semibold flex items-center gap-2" },
-              k.inSession && h(Icon, { name: "check", size: 14 }),
-              k.name,
-              h("span", { className: "text-xs font-normal text-white/60" }, k.inSession ? "coming" : "not coming")
+              "div",
+              { className: "flex items-center justify-between gap-3" },
+              h(
+                "span",
+                { className: "text-sm font-semibold flex items-center gap-2" },
+                k.inSession && h(Icon, { name: "check", size: 14 }),
+                k.name,
+                h("span", { className: "text-xs font-normal text-white/60" }, k.inSession ? "coming" : "not coming")
+              ),
+              k.inSession
+                ? h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: busy, onClick: () => onToggle(k.id, false) }, "Can't make it")
+                : h(Button, { size: "sm", disabled: busy, onClick: () => onToggle(k.id, true) }, k.isMember ? k.firstName + "'s coming" : "Bring " + k.firstName)
             ),
-            k.inSession
-              ? h(Button, { variant: "secondary", size: "sm", className: "!bg-transparent !text-white !border-white/30", disabled: busy, onClick: () => onToggle(k.id, false) }, "Can't make it")
-              : h(Button, { size: "sm", disabled: busy, onClick: () => onToggle(k.id, true) }, k.isMember ? k.firstName + "'s coming" : "Bring " + k.firstName)
+            k.inSession &&
+              h(
+                "div",
+                { className: "mt-2 flex items-center gap-2 flex-wrap" },
+                ATTENDANCE_KINDS.map((t) =>
+                  h(KindButton, {
+                    key: t.value,
+                    label: t.label,
+                    hint: t.hint,
+                    active: (k.kind || "player") === t.value,
+                    disabled: busy,
+                    onClick: () => onToggle(k.id, true, t.value),
+                  })
+                )
+              )
           )
         )
       ),
@@ -690,11 +710,13 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
-    async function setKidIn(kidId, wantsIn) {
+    // kind is only sent from the family "What for?" buttons; without it the
+    // server keeps what that person is already down as.
+    async function setKidIn(kidId, wantsIn, kind) {
       setLoading(true);
       setError(null);
       try {
-        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify({ in: wantsIn, dependantId: kidId }) });
+        const res = await GUWH.Identity.authFetch("/api/booking", { method: "POST", body: JSON.stringify(Object.assign({ in: wantsIn, dependantId: kidId }, kind ? { kind } : {})) });
         const data = await res.json();
         if (data.ok) setStatus(data);
         else setError(data.error || "Something went wrong");
