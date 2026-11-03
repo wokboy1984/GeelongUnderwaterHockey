@@ -1685,7 +1685,7 @@ GUWH.Pages = GUWH.Pages || {};
   // Teams tab. "Add or move a player" puts anyone who was there that night
   // on this side for this game only (e.g. swapping to even up a one-sided
   // game); they're marked "swapped in", and Undo puts them back.
-  function ScoreCard({ pg, rowLabel, single, onSave, nightPlayers, onLineup }) {
+  function ScoreCard({ pg, rowLabel, single, onSave, nightPlayers, onLineup, onScoreboard }) {
     const [blackScore, setBlackScore] = React.useState(pg.blackScore == null ? "" : String(pg.blackScore));
     const [whiteScore, setWhiteScore] = React.useState(pg.whiteScore == null ? "" : String(pg.whiteScore));
     const [goals, setGoals] = React.useState(() => {
@@ -1790,7 +1790,197 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "flex items-center gap-3" },
         h(Button, { size: "sm", onClick: save, disabled: saving }, saving ? "Saving…" : "Save score"),
+        onScoreboard && h(Button, { size: "sm", variant: "ghost", onClick: onScoreboard }, "Scoreboard"),
         saved && h("span", { className: "text-xs text-[var(--good-dark)]" }, "Saved.")
+      )
+    );
+  }
+
+
+  // ------------------------------------------------------------ Scoreboard
+  // Full-screen live scoreboard (3 Nov 2026, Liam): a tablet at the pool,
+  // turned landscape and facing the players. White's score on the left in
+  // a white box, Black's on the right in a black box, and a big countdown
+  // to the end of the game from the timetable, with an alarm at zero so
+  // the scorekeeper knows time's up. The scorekeeper taps + / − and each
+  // change is saved as that game's score (goals per player are still
+  // entered on the score sheet afterwards).
+  //
+  // The timetable is the default, but games run late: "Start full game"
+  // restarts the clock from the game's full length, and −1 / +1 nudge it.
+  function gameClockMs(sessionDate, min) {
+    const [y, mo, d] = sessionDate.split("-").map(Number);
+    return new Date(y, mo - 1, d, 18, 0, 0).getTime() + min * 60000;
+  }
+  function fmtCountdown(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const m = Math.floor(total / 60), s = total % 60;
+    return m + ":" + String(s).padStart(2, "0");
+  }
+  function playAlarm(ctx) {
+    if (!ctx) return;
+    try {
+      if (ctx.state === "suspended") ctx.resume();
+      const t = ctx.currentTime + 0.05;
+      for (let i = 0; i < 5; i++) {
+        const osc = ctx.createOscillator(), gain = ctx.createGain(), at = t + i * 0.7;
+        osc.type = "square";
+        osc.frequency.value = i % 2 ? 660 : 880;
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.exponentialRampToValueAtTime(0.7, at + 0.02);
+        gain.gain.setValueAtTime(0.7, at + 0.5);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(at);
+        osc.stop(at + 0.6);
+      }
+    } catch (e) {}
+  }
+
+  function Scoreboard({ games, startIndex, sessionDate, onSaveScore, onClose }) {
+    const [idx, setIdx] = React.useState(startIndex || 0);
+    const g = games[idx];
+    const pg = g.pg;
+    const [white, setWhite] = React.useState(pg.whiteScore || 0);
+    const [black, setBlack] = React.useState(pg.blackScore || 0);
+    const [now, setNow] = React.useState(Date.now());
+    const [manualEnd, setManualEnd] = React.useState(null); // ms, when "Start full game" or ± was used
+    const [alarmOn, setAlarmOn] = React.useState(false);
+    const audio = React.useRef(null);
+    const rootRef = React.useRef(null);
+    const saveTimer = React.useRef(null);
+    const prevLeft = React.useRef(null);
+
+    // Full screen, landscape, screen kept awake, sound unlocked (opening
+    // this is a tap, which is what browsers need before they'll play audio).
+    React.useEffect(() => {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audio.current = new AC();
+      let lock = null;
+      const el = rootRef.current;
+      try { if (el && el.requestFullscreen) el.requestFullscreen().then(() => { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {}
+      try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => { lock = l; }).catch(() => {}); } catch (e) {}
+      const tick = setInterval(() => setNow(Date.now()), 250);
+      return () => {
+        clearInterval(tick);
+        try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+        try { if (lock) lock.release(); } catch (e) {}
+        try { if (audio.current) audio.current.close(); } catch (e) {}
+      };
+    }, []);
+
+    // A different game: its saved score, the timetable clock, alarm reset.
+    React.useEffect(() => {
+      setWhite(pg.whiteScore || 0);
+      setBlack(pg.blackScore || 0);
+      setManualEnd(null);
+      setAlarmOn(false);
+      prevLeft.current = null;
+      // eslint-disable-next-line
+    }, [idx]);
+
+    const hasTimes = g.startMin != null && g.durationMin != null;
+    const lengthMs = (g.durationMin || 0) * 60000;
+    const start = hasTimes ? gameClockMs(sessionDate, g.startMin) : null;
+    const end = manualEnd != null ? manualEnd : hasTimes ? start + lengthMs : null;
+    const notStarted = manualEnd == null && start != null && now < start;
+    const left = end == null ? null : end - now;
+    const finished = left != null && left <= 0;
+
+    // Alarm once, when the clock reaches zero while this screen is open.
+    React.useEffect(() => {
+      if (left == null) return;
+      if (prevLeft.current != null && prevLeft.current > 0 && left <= 0) {
+        setAlarmOn(true);
+        playAlarm(audio.current);
+      }
+      prevLeft.current = left;
+    }, [left]);
+
+    function changeScore(side, delta) {
+      const w = side === "white" ? Math.max(0, white + delta) : white;
+      const b = side === "black" ? Math.max(0, black + delta) : black;
+      setWhite(w);
+      setBlack(b);
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => onSaveScore(pg.id, b, w), 700);
+    }
+    function nudge(min) {
+      setAlarmOn(false);
+      setManualEnd((end != null ? end : Date.now()) + min * 60000);
+      prevLeft.current = null;
+    }
+    function startFull() {
+      setAlarmOn(false);
+      setManualEnd(Date.now() + (lengthMs || 18 * 60000));
+      prevLeft.current = null;
+    }
+    function go(step) {
+      clearTimeout(saveTimer.current);
+      if (saveTimer.current) onSaveScore(pg.id, black, white);
+      saveTimer.current = null;
+      setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step)));
+    }
+    function close() {
+      clearTimeout(saveTimer.current);
+      if (saveTimer.current) onSaveScore(pg.id, black, white);
+      onClose();
+    }
+
+    const small = { background: "rgba(255,255,255,0.12)", color: "#fff", border: "none", borderRadius: 10, padding: "0.5em 0.9em", fontSize: "max(14px, 2.2vh)", fontWeight: 700, cursor: "pointer" };
+    const big = (dark) => ({ width: "11vh", height: "11vh", minWidth: 56, minHeight: 56, borderRadius: "50%", border: dark ? "3px solid #fff" : "3px solid #000", background: "transparent", color: dark ? "#fff" : "#000", fontSize: "7vh", fontWeight: 800, lineHeight: 1, cursor: "pointer" });
+    function side(team, score, dark, which) {
+      return h(
+        "div",
+        { style: { flex: 1, background: dark ? "#000" : "#fff", color: dark ? "#fff" : "#000", border: dark ? "4px solid #fff" : "4px solid #fff", borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "2vh 2vw", minWidth: 0 } },
+        h("div", { style: { fontSize: "6vh", fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" } }, (team ? team.name : dark ? "Black" : "White")),
+        h("div", { style: { fontSize: "38vh", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" } }, score),
+        h(
+          "div",
+          { style: { display: "flex", gap: "4vw" } },
+          h("button", { type: "button", "aria-label": "Take a goal off " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, -1) }, "−"),
+          h("button", { type: "button", "aria-label": "Goal to " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, 1) }, "+")
+        )
+      );
+    }
+
+    return h(
+      "div",
+      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "2vh", userSelect: "none", fontFamily: "inherit" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" } },
+        h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+          h("button", { type: "button", style: small, disabled: idx === 0, onClick: () => go(-1) }, "‹"),
+          h("span", { style: { fontSize: "max(14px, 2.6vh)", fontWeight: 700, opacity: 0.85 } }, g.label + (games.length > 1 ? "  (" + (idx + 1) + " of " + games.length + ")" : "")),
+          h("button", { type: "button", style: small, disabled: idx === games.length - 1, onClick: () => go(1) }, "›")
+        ),
+        h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+          h("button", { type: "button", style: small, onClick: () => nudge(-1) }, "−1 min"),
+          h("button", { type: "button", style: small, onClick: () => nudge(1) }, "+1 min"),
+          h("button", { type: "button", style: small, onClick: startFull }, "Start full game"),
+          h("button", { type: "button", style: small, onClick: () => playAlarm(audio.current) }, "Test sound"),
+          h("button", { type: "button", style: small, onClick: close }, "Exit")
+        )
+      ),
+      h(
+        "div",
+        { style: { textAlign: "center", lineHeight: 1, cursor: alarmOn ? "pointer" : "default" }, onClick: () => setAlarmOn(false) },
+        notStarted && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.7, marginBottom: "0.5vh" } }, "Starts in"),
+        h(
+          "div",
+          { style: { fontSize: "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
+          left == null ? "--:--" : fmtCountdown(notStarted ? start - now : left)
+        ),
+        finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
+        h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } }")
+      ),
+      h(
+        "div",
+        { style: { flex: 1, display: "flex", gap: "2vw", minHeight: 0 } },
+        side(pg.white, white, false, "white"),
+        side(pg.black, black, true, "black")
       )
     );
   }
@@ -1802,6 +1992,8 @@ GUWH.Pages = GUWH.Pages || {};
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
+    const [board, setBoard] = React.useState(null); // index into allPoolGames while the Scoreboard is open
+    const [cardsVersion, setCardsVersion] = React.useState(0); // remounts the score sheets after the Scoreboard
 
     function load(date) {
       setLoading(true);
@@ -1838,12 +2030,41 @@ GUWH.Pages = GUWH.Pages || {};
     if (!data) return loading ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…") : error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
     const allPoolGames = [];
-    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, single: row.poolGames.length === 1 && pg.pool === "Pool A" })));
+    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, single: row.poolGames.length === 1 && pg.pool === "Pool A", startMin: row.startMin, durationMin: row.durationMin })));
+    const boardGames = allPoolGames.map((x) => ({ pg: x.pg, startMin: x.startMin, durationMin: x.durationMin, label: x.single ? x.rowLabel : x.rowLabel + " · " + x.pg.pool }));
+    // Open on the game being played now (or the next one), else the first.
+    function openBoard(i) {
+      if (i == null) {
+        const nowMs = Date.now();
+        i = boardGames.findIndex((b) => b.startMin != null && b.durationMin != null && gameClockMs(data.sessionDate, b.startMin + b.durationMin) > nowMs);
+        if (i < 0) i = 0;
+      }
+      setBoard(i);
+    }
+    async function saveBoardScore(poolGameId, blackScore, whiteScore) {
+      const res = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+        method: "POST",
+        body: JSON.stringify({ sessionDate: data.sessionDate, poolGameId, blackScore, whiteScore, goals: {} }),
+      });
+      const d = await res.json();
+      if (d.ok) setData(d);
+      else setError(d.error || "Something went wrong");
+    }
+    if (board != null && boardGames.length) {
+      return h(Scoreboard, { games: boardGames, startIndex: Math.min(board, boardGames.length - 1), sessionDate: data.sessionDate, onSaveScore: saveBoardScore, onClose: () => { setBoard(null); setCardsVersion((v) => v + 1); coordChanged(); } });
+    }
 
     return h(
       "div",
       { className: "flex flex-col gap-8" },
       h("div", { className: "max-w-md" }, h(GUWH.UI.WeekSwitcher, { date: data.sessionDate, weeks: data.weeks, upcoming: data.upcoming, onChange: load })),
+      allPoolGames.length > 0 &&
+        h(
+          "div",
+          { className: "flex flex-wrap items-center gap-3" },
+          h(Button, { variant: "dark", onClick: () => openBoard(null) }, "Open scoreboard"),
+          h("p", { className: "text-xs text-[var(--ink-soft)] max-w-md" }, "Full-screen live scores and countdown for a tablet facing the pool. Turn it landscape. Tap + / − to score; it saves as you go.")
+        ),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
       loading
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
@@ -1852,7 +2073,7 @@ GUWH.Pages = GUWH.Pages || {};
         : h(
             "div",
             { className: "flex flex-col gap-4" },
-            allPoolGames.map(({ pg, rowLabel, single }) => h(ScoreCard, { key: pg.id, pg, rowLabel, single, onSave: saveScore, nightPlayers: data.nightPlayers, onLineup: changeLineup }))
+            allPoolGames.map(({ pg, rowLabel, single }, i) => h(ScoreCard, { key: pg.id + ":" + cardsVersion, pg, rowLabel, single, onSave: saveScore, nightPlayers: data.nightPlayers, onLineup: changeLineup, onScoreboard: () => openBoard(i) }))
           ),
       h(
         "div",

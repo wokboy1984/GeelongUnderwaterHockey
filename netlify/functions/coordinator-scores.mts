@@ -65,7 +65,7 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
   });
 
   const rowRows = await db.sql`
-    select id, row_order, label, start_min
+    select id, row_order, label, start_min, duration_min
     from timetable_rows
     where session_id = ${sessionId} and row_type = 'game' and archived_at is null
     order by row_order asc, id asc
@@ -131,6 +131,7 @@ async function buildResponse(db: any, sessionId: number | null, sessionDate: str
       rowId: row.id,
       label: row.label,
       startMin: row.start_min,
+      durationMin: row.duration_min,
       poolGames: POOLS.map((pool) => {
         const pg = pgs.find((x: any) => x.pool === pool);
         return {
