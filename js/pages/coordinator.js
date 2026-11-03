@@ -1817,40 +1817,71 @@ GUWH.Pages = GUWH.Pages || {};
     const m = Math.floor(total / 60), s = total % 60;
     return m + ":" + String(s).padStart(2, "0");
   }
+  // End-of-game buzzer: two long, harsh blasts (3 Nov 2026, Liam: "a
+  // buzzer sound - as loud as possible"). Square and sawtooth waves at a low
+  // pitch, slightly detuned, pushed to full scale through a compressor so it
+  // plays at the loudest the device allows. Loudness is then down to the
+  // device's own volume.
   function playAlarm(ctx) {
     if (!ctx) return;
     try {
       if (ctx.state === "suspended") ctx.resume();
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -10;
+      comp.knee.value = 0;
+      comp.ratio.value = 20;
+      comp.attack.value = 0.001;
+      comp.release.value = 0.05;
+      const master = ctx.createGain();
+      master.gain.value = 1;
+      comp.connect(master);
+      master.connect(ctx.destination);
       const t = ctx.currentTime + 0.05;
-      for (let i = 0; i < 5; i++) {
-        const osc = ctx.createOscillator(), gain = ctx.createGain(), at = t + i * 0.7;
-        osc.type = "square";
-        osc.frequency.value = i % 2 ? 660 : 880;
-        gain.gain.setValueAtTime(0.0001, at);
-        gain.gain.exponentialRampToValueAtTime(0.7, at + 0.02);
-        gain.gain.setValueAtTime(0.7, at + 0.5);
-        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(at);
-        osc.stop(at + 0.6);
-      }
+      [[0, 1.4], [1.7, 1.4]].forEach(([offset, length]) => {
+        const at = t + offset;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0.0001, at);
+        env.gain.exponentialRampToValueAtTime(1, at + 0.01);
+        env.gain.setValueAtTime(1, at + length - 0.03);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        env.connect(comp);
+        [["square", 220], ["sawtooth", 223], ["square", 110]].forEach(([type, freq]) => {
+          const osc = ctx.createOscillator();
+          osc.type = type;
+          osc.frequency.value = freq;
+          osc.connect(env);
+          osc.start(at);
+          osc.stop(at + length + 0.02);
+        });
+      });
     } catch (e) {}
   }
 
-  function Scoreboard({ games, startIndex, sessionDate, onSaveScore, onClose }) {
+  // Live (3 Nov 2026): every device with this open polls the game's score
+  // every few seconds, and + / − are applied on the server as "one more" or
+  // "one fewer", so a coordinator's phone and the pool-side tablet show the
+  // same score. With "Ask who scored" on, + asks which player scored (or
+  // "No scorer") and credits them a goal at the same time.
+  const LIVE_POLL_MS = 4000;
+  function readPref(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : v === "1"; } catch (e) { return fallback; } }
+  function writePref(key, on) { try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} }
+
+  function Scoreboard({ games, startIndex, sessionDate, onClose }) {
     const [idx, setIdx] = React.useState(startIndex || 0);
     const g = games[idx];
     const pg = g.pg;
-    const [white, setWhite] = React.useState(pg.whiteScore || 0);
-    const [black, setBlack] = React.useState(pg.blackScore || 0);
+    const [live, setLive] = React.useState({ whiteScore: pg.whiteScore || 0, blackScore: pg.blackScore || 0, goals: {} });
     const [now, setNow] = React.useState(Date.now());
     const [manualEnd, setManualEnd] = React.useState(null); // ms, when "Start full game" or ± was used
     const [alarmOn, setAlarmOn] = React.useState(false);
+    const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
+    const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
+    const [picker, setPicker] = React.useState(null); // { side, delta } while choosing who scored
+    const [problem, setProblem] = React.useState(null);
     const audio = React.useRef(null);
     const rootRef = React.useRef(null);
-    const saveTimer = React.useRef(null);
     const prevLeft = React.useRef(null);
+    const pending = React.useRef(0); // goal requests in flight; polling waits for them
 
     // Full screen, landscape, screen kept awake, sound unlocked (opening
     // this is a tap, which is what browsers need before they'll play audio).
@@ -1870,12 +1901,30 @@ GUWH.Pages = GUWH.Pages || {};
       };
     }, []);
 
-    // A different game: its saved score, the timetable clock, alarm reset.
+    // Poll this game's score so other devices' changes show up here.
     React.useEffect(() => {
-      setWhite(pg.whiteScore || 0);
-      setBlack(pg.blackScore || 0);
+      let stopped = false;
+      async function poll() {
+        if (stopped || pending.current > 0 || document.visibilityState === "hidden") return;
+        try {
+          const r = await GUWH.Identity.authFetch("/api/coordinator/scores?live=" + pg.id);
+          const d = await r.json();
+          if (!stopped && d.ok && pending.current === 0) { setLive(d.live); setProblem(null); }
+        } catch (e) {
+          if (!stopped) setProblem("Can't reach the server - scores may be out of date.");
+        }
+      }
+      poll();
+      const timer = setInterval(poll, LIVE_POLL_MS);
+      return () => { stopped = true; clearInterval(timer); };
+    }, [pg.id]);
+
+    // A different game: its timetable clock, alarm reset.
+    React.useEffect(() => {
+      setLive({ whiteScore: pg.whiteScore || 0, blackScore: pg.blackScore || 0, goals: {} });
       setManualEnd(null);
       setAlarmOn(false);
+      setPicker(null);
       prevLeft.current = null;
       // eslint-disable-next-line
     }, [idx]);
@@ -1887,6 +1936,9 @@ GUWH.Pages = GUWH.Pages || {};
     const notStarted = manualEnd == null && start != null && now < start;
     const left = end == null ? null : end - now;
     const finished = left != null && left <= 0;
+    // More than an hour away (e.g. opened the day before): show the game's
+    // length and when it starts, not a countdown of hundreds of minutes.
+    const farAway = notStarted && start - now > 60 * 60000;
 
     // Alarm once, when the clock reaches zero while this screen is open.
     React.useEffect(() => {
@@ -1898,17 +1950,41 @@ GUWH.Pages = GUWH.Pages || {};
       prevLeft.current = left;
     }, [left]);
 
+    async function sendGoal(side, delta, memberId) {
+      setPicker(null);
+      // Show it straight away; the server's answer then replaces it.
+      setLive((l) => {
+        const next = { whiteScore: l.whiteScore || 0, blackScore: l.blackScore || 0, goals: Object.assign({}, l.goals) };
+        if (side === "white") next.whiteScore = Math.max(0, next.whiteScore + delta);
+        else next.blackScore = Math.max(0, next.blackScore + delta);
+        if (memberId) next.goals[memberId] = Math.max(0, (next.goals[memberId] || 0) + delta);
+        return next;
+      });
+      pending.current += 1;
+      try {
+        const r = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate, action: "goal", poolGameId: pg.id, side, delta, memberId: memberId || null }),
+        });
+        const d = await r.json();
+        if (d.ok) { setProblem(null); if (pending.current === 1) setLive(d.live); }
+        else setProblem(d.error || "That goal didn't save.");
+      } catch (e) {
+        setProblem("That goal didn't save - check the connection.");
+      } finally {
+        pending.current -= 1;
+      }
+    }
     function changeScore(side, delta) {
-      const w = side === "white" ? Math.max(0, white + delta) : white;
-      const b = side === "black" ? Math.max(0, black + delta) : black;
-      setWhite(w);
-      setBlack(b);
-      clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => onSaveScore(pg.id, b, w), 700);
+      const team = pg[side];
+      const players = team ? team.players : [];
+      const choices = delta > 0 ? players : players.filter((p) => (live.goals || {})[p.id] > 0);
+      if (askScorer && choices.length) setPicker({ side, delta });
+      else sendGoal(side, delta, null);
     }
     function nudge(min) {
       setAlarmOn(false);
-      setManualEnd((end != null ? end : Date.now()) + min * 60000);
+      setManualEnd((end != null && !notStarted ? end : Date.now() + lengthMs) + min * 60000);
       prevLeft.current = null;
     }
     function startFull() {
@@ -1916,41 +1992,65 @@ GUWH.Pages = GUWH.Pages || {};
       setManualEnd(Date.now() + (lengthMs || 18 * 60000));
       prevLeft.current = null;
     }
-    function go(step) {
-      clearTimeout(saveTimer.current);
-      if (saveTimer.current) onSaveScore(pg.id, black, white);
-      saveTimer.current = null;
-      setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step)));
-    }
-    function close() {
-      clearTimeout(saveTimer.current);
-      if (saveTimer.current) onSaveScore(pg.id, black, white);
-      onClose();
-    }
+    function go(step) { setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step))); }
+    function toggle(key, value, set) { set(value); writePref(key, value); }
 
-    const small = { background: "rgba(255,255,255,0.12)", color: "#fff", border: "none", borderRadius: 10, padding: "0.5em 0.9em", fontSize: "max(14px, 2.2vh)", fontWeight: 700, cursor: "pointer" };
+    const small = { background: "rgba(255,255,255,0.12)", color: "#fff", border: "none", borderRadius: 10, padding: "0.5em 0.9em", fontSize: "max(13px, 2.1vh)", fontWeight: 700, cursor: "pointer" };
     const big = (dark) => ({ width: "11vh", height: "11vh", minWidth: 56, minHeight: 56, borderRadius: "50%", border: dark ? "3px solid #fff" : "3px solid #000", background: "transparent", color: dark ? "#fff" : "#000", fontSize: "7vh", fontWeight: 800, lineHeight: 1, cursor: "pointer" });
-    function side(team, score, dark, which) {
+    function scorers(team) {
+      const goals = live.goals || {};
+      return (team ? team.players : []).filter((p) => goals[p.id] > 0).map((p) => GUWH.displayName(p) + (goals[p.id] > 1 ? " " + goals[p.id] : "")).join(" · ");
+    }
+    function side(which) {
+      const dark = which === "black";
+      const team = pg[which];
+      const score = which === "white" ? live.whiteScore || 0 : live.blackScore || 0;
+      const who = scorers(team);
       return h(
         "div",
-        { style: { flex: 1, background: dark ? "#000" : "#fff", color: dark ? "#fff" : "#000", border: dark ? "4px solid #fff" : "4px solid #fff", borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "2vh 2vw", minWidth: 0 } },
-        h("div", { style: { fontSize: "6vh", fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" } }, (team ? team.name : dark ? "Black" : "White")),
-        h("div", { style: { fontSize: "38vh", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" } }, score),
+        { key: which, style: { flex: 1, background: dark ? "#000" : "#fff", color: dark ? "#fff" : "#000", border: "4px solid #fff", borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "2vh 2vw", minWidth: 0 } },
+        h("div", { style: { flexShrink: 0, fontSize: "min(6vh, 5vw)", fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" } }, team ? team.name : dark ? "Black" : "White"),
+        h("div", { style: { fontSize: "min(30vh, 28vw)", fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums", minHeight: 0 } }, score),
+        h("div", { style: { flexShrink: 0, fontSize: "min(2.6vh, 2.4vw)", fontWeight: 600, opacity: 0.75, minHeight: "1.3em", textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, who),
         h(
           "div",
-          { style: { display: "flex", gap: "4vw" } },
+          { style: { display: "flex", gap: "4vw", flexShrink: 0 } },
           h("button", { type: "button", "aria-label": "Take a goal off " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, -1) }, "−"),
           h("button", { type: "button", "aria-label": "Goal to " + (dark ? "Black" : "White"), style: big(dark), onClick: () => changeScore(which, 1) }, "+")
         )
       );
     }
 
+    // Who scored? A big tap target per player, plus "No scorer".
+    function pickerPanel() {
+      if (!picker) return null;
+      const team = pg[picker.side];
+      const goals = live.goals || {};
+      const players = (team ? team.players : []).filter((p) => picker.delta > 0 || goals[p.id] > 0);
+      const btn = { background: "#fff", color: "#000", border: "none", borderRadius: 14, padding: "1.2em 1em", fontSize: "max(16px, 2.8vh)", fontWeight: 800, cursor: "pointer", textAlign: "center" };
+      return h(
+        "div",
+        { style: { position: "absolute", inset: 0, background: "rgba(10,15,22,0.92)", display: "flex", flexDirection: "column", padding: "3vh 3vw", gap: "2vh", zIndex: 2 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } },
+          h("div", { style: { fontSize: "max(18px, 4vh)", fontWeight: 800 } }, (picker.delta > 0 ? "Who scored for " : "Take a goal off which player? ") + (picker.delta > 0 ? (team ? team.name : picker.side) + "?" : "")),
+          h("button", { type: "button", style: small, onClick: () => setPicker(null) }, "Cancel")
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 40vw), 1fr))", gap: "1.5vh", overflowY: "auto" } },
+          players.map((p) => h("button", { key: p.id, type: "button", style: btn, onClick: () => sendGoal(picker.side, picker.delta, p.id) }, GUWH.displayName(p) + (goals[p.id] ? "  (" + goals[p.id] + ")" : ""))),
+          h("button", { type: "button", style: Object.assign({}, btn, { background: "rgba(255,255,255,0.18)", color: "#fff" }), onClick: () => sendGoal(picker.side, picker.delta, null) }, picker.delta > 0 ? "No scorer" : "Just the score")
+        )
+      );
+    }
+
+    const order = swapped ? ["black", "white"] : ["white", "black"];
     return h(
       "div",
-      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "2vh", userSelect: "none", fontFamily: "inherit" } },
+      { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
       h(
         "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" } },
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
         h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
           h("button", { type: "button", style: small, disabled: idx === 0, onClick: () => go(-1) }, "‹"),
           h("span", { style: { fontSize: "max(14px, 2.6vh)", fontWeight: 700, opacity: 0.85 } }, g.label + (games.length > 1 ? "  (" + (idx + 1) + " of " + games.length + ")" : "")),
@@ -1960,18 +2060,21 @@ GUWH.Pages = GUWH.Pages || {};
           h("button", { type: "button", style: small, onClick: () => nudge(-1) }, "−1 min"),
           h("button", { type: "button", style: small, onClick: () => nudge(1) }, "+1 min"),
           h("button", { type: "button", style: small, onClick: startFull }, "Start full game"),
-          h("button", { type: "button", style: small, onClick: () => playAlarm(audio.current) }, "Test sound"),
-          h("button", { type: "button", style: small, onClick: close }, "Exit")
+          h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
+          h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
+          h("button", { type: "button", style: small, onClick: () => playAlarm(audio.current) }, "Test buzzer"),
+          h("button", { type: "button", style: small, onClick: onClose }, "Exit")
         )
       ),
+      problem && h("div", { style: { textAlign: "center", color: "#ffb4ad", fontWeight: 700, fontSize: "max(13px, 2vh)" } }, problem),
       h(
         "div",
         { style: { textAlign: "center", lineHeight: 1, cursor: alarmOn ? "pointer" : "default" }, onClick: () => setAlarmOn(false) },
-        notStarted && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.7, marginBottom: "0.5vh" } }, "Starts in"),
+        notStarted && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.7, marginBottom: "0.5vh" } }, farAway ? "Starts " + new Date(start).toLocaleString("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "Starts in"),
         h(
           "div",
           { style: { fontSize: "20vh", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: finished ? "#ff5a4e" : "#fff", animation: alarmOn ? "guwhFlash 0.8s steps(2) infinite" : "none" } },
-          left == null ? "--:--" : fmtCountdown(notStarted ? start - now : left)
+          left == null ? "--:--" : farAway ? fmtCountdown(lengthMs) : fmtCountdown(notStarted ? start - now : left)
         ),
         finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
         h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } }")
@@ -1979,9 +2082,9 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { style: { flex: 1, display: "flex", gap: "2vw", minHeight: 0 } },
-        side(pg.white, white, false, "white"),
-        side(pg.black, black, true, "black")
-      )
+        order.map(side)
+      ),
+      pickerPanel()
     );
   }
 
@@ -2041,17 +2144,8 @@ GUWH.Pages = GUWH.Pages || {};
       }
       setBoard(i);
     }
-    async function saveBoardScore(poolGameId, blackScore, whiteScore) {
-      const res = await GUWH.Identity.authFetch("/api/coordinator/scores", {
-        method: "POST",
-        body: JSON.stringify({ sessionDate: data.sessionDate, poolGameId, blackScore, whiteScore, goals: {} }),
-      });
-      const d = await res.json();
-      if (d.ok) setData(d);
-      else setError(d.error || "Something went wrong");
-    }
     if (board != null && boardGames.length) {
-      return h(Scoreboard, { games: boardGames, startIndex: Math.min(board, boardGames.length - 1), sessionDate: data.sessionDate, onSaveScore: saveBoardScore, onClose: () => { setBoard(null); setCardsVersion((v) => v + 1); coordChanged(); } });
+      return h(Scoreboard, { games: boardGames, startIndex: Math.min(board, boardGames.length - 1), sessionDate: data.sessionDate, onClose: () => { setBoard(null); load(data.sessionDate).then(() => setCardsVersion((v) => v + 1)); coordChanged(); } });
     }
 
     return h(
@@ -2063,7 +2157,7 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "flex flex-wrap items-center gap-3" },
           h(Button, { variant: "dark", onClick: () => openBoard(null) }, "Open scoreboard"),
-          h("p", { className: "text-xs text-[var(--ink-soft)] max-w-md" }, "Full-screen live scores and countdown for a tablet facing the pool. Turn it landscape. Tap + / − to score; it saves as you go.")
+          h("p", { className: "text-xs text-[var(--ink-soft)] max-w-md" }, "Full-screen live scores and countdown for a tablet facing the pool. Turn it landscape. Tap + and pick who scored; it saves as you go, and any phone with the scoreboard open shows the same score.")
         ),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
       loading

@@ -6,6 +6,11 @@
 // POST /api/coordinator/scores { sessionDate, poolGameId, blackScore, whiteScore, goals: { memberId: goals, ... } }
 // POST /api/coordinator/scores { sessionDate, action: "lineup_add", poolGameId, memberId, teamId }
 // POST /api/coordinator/scores { sessionDate, action: "lineup_remove", poolGameId, memberId }
+// GET  /api/coordinator/scores?live=<poolGameId>  -> { ok, live: { whiteScore, blackScore, goals } }
+// POST /api/coordinator/scores { sessionDate, action: "goal", poolGameId, side, memberId?, delta }
+//      -> live scoring from the Scoreboard (3 Nov 2026): one goal on or off,
+//         optionally credited to a player, applied atomically so a phone and
+//         the pool-side tablet can both score the same game.
 //      -> move or add a player for one game only (3 Nov 2026, see _shared/lineups.mts)
 //
 // Week by week (2 Oct 2026): scores used to be tied to "the upcoming
@@ -42,6 +47,16 @@ async function weeksWithGames(db: any, upcoming: string): Promise<string[]> {
   const weeks: string[] = rows.map((r: any) => r.d);
   if (!weeks.includes(upcoming)) weeks.unshift(upcoming);
   return weeks.sort().reverse();
+}
+
+// One game's score and goals, for the Scoreboard to poll.
+async function liveState(db: any, poolGameId: number) {
+  const [pg] = await db.sql`select white_score, black_score from timetable_pool_games where id = ${poolGameId}`;
+  if (!pg) return null;
+  const rows = await db.sql`select member_id, goals from game_goals where pool_game_id = ${poolGameId} and goals > 0`;
+  const goals: Record<string, number> = {};
+  rows.forEach((r: any) => { goals[r.member_id] = r.goals; });
+  return { whiteScore: pg.white_score, blackScore: pg.black_score, goals };
 }
 
 async function buildResponse(db: any, sessionId: number | null, sessionDate: string, upcoming: string) {
@@ -190,6 +205,14 @@ export default async (req: Request, context: Context) => {
   }
 
   try {
+    const liveId = req.method === "GET" ? Number(new URL(req.url).searchParams.get("live") || 0) : 0;
+    if (liveId) {
+      const live = await liveState(db, liveId);
+      return new Response(JSON.stringify(live ? { ok: true, live } : { ok: false, error: "Game not found" }), {
+        status: live ? 200 : 404,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
     const upcoming = nextSessionDateISO();
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const asked = req.method === "POST" ? body.sessionDate : new URL(req.url).searchParams.get("date");
@@ -233,6 +256,48 @@ export default async (req: Request, context: Context) => {
       if (!pg) {
         return new Response(JSON.stringify({ ok: false, error: "That game isn't part of this week's session" }), {
           status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      // Live scoring (3 Nov 2026): +1 or -1 on one side, optionally for a
+      // player. Done in the database (score = score + 1), not as "set the
+      // score to N", so two devices scoring at once never undo each other.
+      if (body.action === "goal") {
+        const side = body.side === "white" ? "white" : body.side === "black" ? "black" : null;
+        const delta = Number(body.delta) === -1 ? -1 : 1;
+        if (!side) {
+          return new Response(JSON.stringify({ ok: false, error: "Choose white or black" }), { status: 400, headers: { "content-type": "application/json" } });
+        }
+        const memberId = body.memberId ? String(body.memberId) : null;
+        if (memberId) {
+          const [onSheet] = await db.sql`
+            select 1 from team_assignments where member_id = ${memberId} and team_id = any(${[pg.black_team_id, pg.white_team_id].filter((x) => x != null)})
+            union
+            select 1 from game_lineup_changes where pool_game_id = ${poolGameId} and member_id = ${memberId}`;
+          if (!onSheet) {
+            return new Response(JSON.stringify({ ok: false, error: "That player isn't in this game" }), { status: 400, headers: { "content-type": "application/json" } });
+          }
+        }
+        if (side === "white") {
+          await db.sql`update timetable_pool_games set white_score = greatest(0, coalesce(white_score, 0) + ${delta}), black_score = coalesce(black_score, 0), scored_by = ${caller.id}, scored_at = now() where id = ${poolGameId}`;
+        } else {
+          await db.sql`update timetable_pool_games set black_score = greatest(0, coalesce(black_score, 0) + ${delta}), white_score = coalesce(white_score, 0), scored_by = ${caller.id}, scored_at = now() where id = ${poolGameId}`;
+        }
+        if (memberId && delta > 0) {
+          await db.sql`
+            insert into game_goals (pool_game_id, member_id, goals) values (${poolGameId}, ${memberId}, 1)
+            on conflict (pool_game_id, member_id) do update set goals = game_goals.goals + 1, updated_at = now()`;
+        } else if (memberId) {
+          await db.sql`update game_goals set goals = greatest(0, goals - 1), updated_at = now() where pool_game_id = ${poolGameId} and member_id = ${memberId}`;
+        }
+        await logAudit(db, {
+          actorId: caller.id, actorEmail: caller.email, action: delta > 0 ? "live_goal_added" : "live_goal_removed",
+          resourceType: "timetable_pool_game", resourceId: String(poolGameId),
+          newValue: { sessionDate, side, memberId, delta },
+          note: `${caller.email} ${delta > 0 ? "added a goal for" : "took a goal off"} ${side} on ${sessionDate}`,
+        });
+        return new Response(JSON.stringify({ ok: true, live: await liveState(db, poolGameId) }), {
           headers: { "content-type": "application/json" },
         });
       }
