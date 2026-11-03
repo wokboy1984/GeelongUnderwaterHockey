@@ -1879,8 +1879,16 @@ GUWH.Pages = GUWH.Pages || {};
     const g = games[idx];
     const pg = g.pg;
     const [live, setLive] = React.useState({ whiteScore: pg.whiteScore || 0, blackScore: pg.blackScore || 0, goals: {} });
+    // How far this device's clock is from the server's, so every device
+    // counts down to the same moment.
+    const skew = React.useRef(0);
     const [now, setNow] = React.useState(Date.now());
-    const [manualEnd, setManualEnd] = React.useState(null); // ms, when "Start full game" or ± was used
+    // ms, when "Start full game" or ± was used. Shared (3 Nov 2026): saved
+    // on the server and picked up by every device showing this game.
+    const [manualEnd, setManualEnd] = React.useState(null);
+    const clockPending = React.useRef(0);
+    const manualEndRef = React.useRef(null);
+    manualEndRef.current = manualEnd;
     const [alarmOn, setAlarmOn] = React.useState(false);
     const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
@@ -1904,7 +1912,7 @@ GUWH.Pages = GUWH.Pages || {};
       const el = rootRef.current;
       try { if (el && el.requestFullscreen) el.requestFullscreen().then(() => { try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {}
       try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => { lock = l; }).catch(() => {}); } catch (e) {}
-      const tick = setInterval(() => setNow(Date.now()), 250);
+      const tick = setInterval(() => setNow(Date.now() + skew.current), 250);
       return () => {
         clearInterval(tick);
         try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
@@ -1922,6 +1930,7 @@ GUWH.Pages = GUWH.Pages || {};
           const r = await GUWH.Identity.authFetch("/api/coordinator/scores?live=" + pg.id);
           const d = await r.json();
           if (!stopped && d.ok && pending.current === 0) { setLive(d.live); setProblem(null); }
+          if (!stopped && d.ok) takeClock(d.live);
         } catch (e) {
           if (!stopped) setProblem("Can't reach the server - scores may be out of date.");
         }
@@ -1994,15 +2003,41 @@ GUWH.Pages = GUWH.Pages || {};
       if (askScorer && choices.length) setPicker({ side, delta });
       else sendGoal(side, delta, null);
     }
-    function nudge(min) {
+    // The clock from the server: another device may have started the game
+    // early or changed its time. Ignored while this device's own change is
+    // still on its way.
+    function takeClock(l) {
+      if (!l || clockPending.current > 0) return;
+      if (l.serverNow) skew.current = l.serverNow - Date.now();
+      const next = l.clockEnd == null ? null : l.clockEnd;
+      if (next === manualEndRef.current) return;
       setAlarmOn(false);
-      setManualEnd((end != null && !notStarted ? end : Date.now() + lengthMs) + min * 60000);
       prevLeft.current = null;
+      setManualEnd(next);
+    }
+    async function setClock(endAt) {
+      setAlarmOn(false);
+      setManualEnd(endAt);
+      prevLeft.current = null;
+      clockPending.current += 1;
+      try {
+        const r = await GUWH.Identity.authFetch("/api/coordinator/scores", {
+          method: "POST",
+          body: JSON.stringify({ sessionDate, action: "clock", poolGameId: pg.id, endAt }),
+        });
+        const d = await r.json();
+        if (!d.ok) setProblem(d.error || "The clock change didn't save - other screens won't show it.");
+      } catch (e) {
+        setProblem("The clock change didn't save - other screens won't show it.");
+      } finally {
+        clockPending.current -= 1;
+      }
+    }
+    function nudge(min) {
+      setClock((end != null && !notStarted ? end : now + lengthMs) + min * 60000);
     }
     function startFull() {
-      setAlarmOn(false);
-      setManualEnd(Date.now() + (lengthMs || 18 * 60000));
-      prevLeft.current = null;
+      setClock(now + (lengthMs || 18 * 60000));
     }
     function go(step) { setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step))); }
     function toggle(key, value, set) { set(value); writePref(key, value); }
@@ -2078,6 +2113,7 @@ GUWH.Pages = GUWH.Pages || {};
           h("button", { type: "button", style: small, onClick: () => nudge(-1) }, "−1 min"),
           h("button", { type: "button", style: small, onClick: () => nudge(1) }, "+1 min"),
           h("button", { type: "button", style: small, onClick: startFull }, "Start full game"),
+          manualEnd != null && hasTimes && h("button", { type: "button", style: small, onClick: () => setClock(null) }, "Back to timetable"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.displayOnly", true, setDisplayOnly) }, "Scoreboard only"),
