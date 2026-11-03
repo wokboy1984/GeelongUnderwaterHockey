@@ -123,8 +123,20 @@ GUWH.Pages = GUWH.Pages || {};
       if (queryMemberApplied.current || !data) return;
       queryMemberApplied.current = true;
       const wanted = GUWH.Router.queryParam("member");
-      if (wanted && data.members.some((m) => m.id === wanted)) setSelectedId(wanted);
+      if (wanted && data.members.some((m) => m.id === wanted)) openAccount(wanted);
     }, [data]);
+
+    // Picking someone (a name in the table, or arriving from Administration)
+    // scrolls down to the Player account panel (3 Nov 2026, Liam): it sits
+    // under the full list, so clicking a name looked like it did nothing.
+    const accountRef = React.useRef(null);
+    function openAccount(id) {
+      setSelectedId(id);
+      requestId.current = null;
+      setNotice("");
+      setCatForm({ category: "", from: "" });
+      setTimeout(() => { try { accountRef.current && accountRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }, 50);
+    }
 
     const selected = data && data.members.find((member) => member.id === selectedId);
     const activeMembers = data ? data.members.filter((member) => member.category) : [];
@@ -392,7 +404,7 @@ GUWH.Pages = GUWH.Pages || {};
       return h(
         "tr",
         { key: member.id, className: "border-t border-black/5" },
-        h("td", { className: "p-3" }, h("button", { className: "font-semibold text-left hover:text-[var(--accent-dark)] underline underline-offset-2", onClick: () => setSelectedId(member.id) }, name)),
+        h("td", { className: "p-3" }, h("button", { className: "font-semibold text-left hover:text-[var(--accent-dark)] underline underline-offset-2", onClick: () => openAccount(member.id) }, name)),
         h("td", { className: "p-3" }, h(Pill, { tone: "dark", className: "!normal-case !tracking-normal" }, member.category === "waged" ? "Waged" : "Unwaged / junior")),
         h("td", { className: "p-3 text-right tabular-nums" }, money(member.opening)),
         h("td", { className: "p-3 text-right tabular-nums" }, money(member.charges)),
@@ -438,7 +450,7 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "mt-1 text-[var(--ink-soft)]" }, "These people have no fee account, so their games (including their children's) are missing from the totals. Select them below and create the account."),
         h("ul", { className: "mt-2 flex flex-col gap-1" },
           data.unbilled.map((u) => h("li", { key: u.memberId },
-            h("button", { type: "button", className: "font-semibold underline text-left", onClick: () => { setSelectedId(u.memberId); requestId.current = null; setNotice(""); } }, u.displayName),
+            h("button", { type: "button", className: "font-semibold underline text-left", onClick: () => openAccount(u.memberId) }, u.displayName),
             " - " + u.games + " game" + (u.games === 1 ? "" : "s") + (u.childGames ? " (" + u.childGames + " by their children)" : "")
           ))
         )
@@ -465,7 +477,7 @@ GUWH.Pages = GUWH.Pages || {};
             ),
             h(
               "section",
-              { className: "mt-8 rounded-2xl bg-white ring-1 ring-black/5 p-5 sm:p-6" },
+              { ref: accountRef, className: "mt-8 rounded-2xl bg-white ring-1 ring-black/5 p-5 sm:p-6 scroll-mt-44" },
               h("h2", { className: "font-display text-2xl font-bold text-[var(--ink)]" }, "Player account"),
               h("p", { className: "mt-1 mb-5 text-sm text-[var(--ink-soft)]" }, "Select a member to configure fees, record a payment, or review their history."),
               h(FormField, { label: "Player" }, h(
