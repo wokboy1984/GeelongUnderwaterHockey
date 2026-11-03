@@ -79,6 +79,11 @@ window.GUWH = window.GUWH || {};
     // on the Profile form. Safe for password-reset and invite links: the
     // widget only fires "login" after the new password is saved.
     window.netlifyIdentity.on("login", () => { window.netlifyIdentity.close(); memberSettled = false; refreshMember(); listeners.forEach((fn) => fn()); });
+    // A link that fails (used, expired or mistyped) also opens the widget
+    // with an error and no login, which left the same invisible layer over
+    // the page. Close it on error too, so the page underneath
+    // is usable and the login page shows its "link already used" note.
+    window.netlifyIdentity.on("error", () => window.netlifyIdentity.close());
     window.netlifyIdentity.on("logout", () => { cachedMember = null; memberSettled = true; listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.on("init", (user) => { initDone = true; if (user && !cachedMember) refreshMember(); listeners.forEach((fn) => fn()); });
     window.netlifyIdentity.init();

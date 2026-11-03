@@ -21,11 +21,11 @@ GUWH.Pages = GUWH.Pages || {};
     { key: "publish", label: "Publish", path: "/coordinator/publish" },
   ];
 
-  // Matches isLikelyEmail in coordinator-attendance.mts. Loose on purpose:
-  // the job is catching a typo or a name typed into the wrong box. The
-  // confirm field is the real defence against a wrong-but-valid address.
+  // Matches isLikelyEmail in netlify/functions/_shared/roles.mts. Loose on
+  // purpose: the job is catching a typo or a name typed into the wrong box.
+  // The confirm field is the real defence against a wrong-but-valid address.
   function isLikelyEmail(value) {
-    return /^[^s@]+@[^s@.]+.[^s@]+$/.test(value);
+    return /^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(value);
   }
 
   function CoordinatorTabs({ active }) {
