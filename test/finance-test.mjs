@@ -97,6 +97,12 @@ import { priceGames } from '../netlify/functions/_shared/finance.mts';
     assert.equal(total(fees), 6000);
     assert.equal(of(fees, 'k').amount_cents, 0);
   });
+  test('a non-player down as playing by mistake is not charged, and is not a charged adult', () => {
+    const fees = priceGames([adult('allison', 'F', { non_player: true }), adult('liam', 'F'), kid('lucas', 'liam', 'F'), kid('hannah', 'liam', 'F')]);
+    assert.equal(of(fees, 'allison').amount_cents, 0);
+    assert.equal(of(fees, 'allison').note, 'Non-player — no charge');
+    assert.equal(total(fees), 3000);
+  });
   test('an 18-year-old child counts as an adult, not a junior', () => {
     const fees = priceGames([adult('p'), kid('a', 'p', null, { date_of_birth: '2008-01-01' }), kid('b', 'p'), kid('c', 'p')]);
     assert.equal(total(fees), 4000);

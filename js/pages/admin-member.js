@@ -114,6 +114,26 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Non-player (3 Nov 2026): books in as volunteering, never charged.
+    async function saveNonPlayer(value) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_non_player", memberId: m.id, nonPlayer: value }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
     // Families (28 Oct 2026): put login accounts (partners, juniors with
     // their own login) in one family, for booking each other in and the
     // family fee cap. Children under a parent follow the parent.
@@ -278,7 +298,18 @@ GUWH.Pages = GUWH.Pages || {};
             h(Field, { label: "Emergency phone", value: m.emergencyPhone }),
             h(Field, { label: "Waiver", value: m.waiverSigned ? "Signed" + (m.waiverNote ? " (" + m.waiverNote + ")" : "") : "Not signed" })
           ),
-          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position saves as soon as you pick it.")
+          h(
+            "label",
+            { className: "mt-4 flex items-start gap-2 text-sm text-[var(--ink)]" },
+            h("input", { type: "checkbox", className: "mt-1", checked: !!m.nonPlayer, disabled: busy, onChange: (e) => saveNonPlayer(e.target.checked) }),
+            h(
+              "span",
+              null,
+              h("span", { className: "font-semibold" }, "Non-player"),
+              h("span", { className: "block text-xs text-[var(--ink-soft)]" }, "Never plays. Saying they're coming books them in as volunteering, they're left out of teams, and they're never charged a game fee.")
+            )
+          ),
+          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position and Non-player save as soon as you change them.")
         ),
 
         h(

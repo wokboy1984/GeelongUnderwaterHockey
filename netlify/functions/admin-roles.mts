@@ -7,6 +7,8 @@
 // DELETE /api/admin/roles  { memberEmail, role, note } -> revoke
 // POST   /api/admin/roles  { action: "grade", memberId, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
+// POST   /api/admin/roles  { action: "set_non_player", memberId, nonPlayer }
+//        -> never plays: books in as volunteering, never charged (3 Nov 2026)
 // POST   /api/admin/roles  { action: "family_add", memberId, otherId }
 // POST   /api/admin/roles  { action: "family_remove", memberId, viewId? }
 //        -> put login accounts in one family, or take one out (28 Oct 2026)
@@ -27,7 +29,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { inviteMember } from "./_shared/identity-admin.mts";
-import { SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureNonPlayerColumn, SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { byDate, categoryOn, gameFeeEntries, melbourneDate, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
@@ -120,7 +122,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
   const [m] = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
            m.emergency_name, m.emergency_phone, m.waiver_accepted_at, m.waiver_signed_name, m.created_at,
-           m.parent_id, m.dependant_removed_at,
+           m.parent_id, m.dependant_removed_at, m.non_player,
            array_remove(array_agg(mr.role), null) as roles
     from members m left join member_roles mr on mr.member_id = m.id
     where m.id = ${id}
@@ -211,6 +213,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
       waiverNote: m.waiver_signed_name || null,
       joined: m.created_at,
       removedChild: !!m.dependant_removed_at,
+      nonPlayer: !!m.non_player,
       parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" "), adminName: adminName(parent.nickname, parent.first_name, parent.last_name) } : null,
       family: family.map((f: any) => ({ id: f.id, adminName: adminName(f.nickname, f.first_name, f.last_name), isChild: !!f.parent_id, age: ageFromDOB(f.date_of_birth) })),
       kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), adminName: adminName(k.nickname, k.first_name, k.last_name), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
@@ -230,6 +233,7 @@ export default async (req: Request, context: Context) => {
   const db = getDatabase();
   await ensureNicknameColumn(db);
   await ensureFamilyColumns(db);
+  await ensureNonPlayerColumn(db);
   const caller = await ensureMember(db, user);
   if (!hasRole(caller.roles, "administrator")) {
     return forbidden("Only Administrators can manage roles");
@@ -297,6 +301,29 @@ export default async (req: Request, context: Context) => {
         resourceType: "member", resourceId: target.id,
         previousValue: { nickname: target.nickname || null }, newValue: { nickname },
         note: `${caller.email} changed ${target.email}'s nickname from "${target.nickname || ""}" to "${nickname || ""}"`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
+    // Non-player (3 Nov 2026, Liam): see ensureNonPlayerColumn.
+    if (req.method === "POST" && body.action === "set_non_player") {
+      const id = String(body.memberId || "").trim();
+      const nonPlayer = body.nonPlayer === true;
+      const [target] = await db.sql`select id, email, first_name, last_name, non_player from members where id = ${id}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      await db.sql`update members set non_player = ${nonPlayer} where id = ${target.id}`;
+      // Already booked in to play this week? Make that volunteering too.
+      if (nonPlayer) {
+        await db.sql`update bookings set kind = 'volunteer' where member_id = ${target.id} and kind = 'player'
+          and session_id in (select id from sessions where session_date >= current_date)`;
+      }
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "non_player_changed",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { nonPlayer: !!target.non_player }, newValue: { nonPlayer },
+        note: `${caller.email} ${nonPlayer ? "marked" : "unmarked"} ${target.first_name} ${target.last_name} as a non-player`,
       });
       return await memberDetail(db, target.id);
     }

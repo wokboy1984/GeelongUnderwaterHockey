@@ -126,6 +126,18 @@ export async function ensureFamilyColumns(db: any): Promise<void> {
   familyColumnsReady = true;
 }
 
+// Non-players (3 Nov 2026, Liam): members who never play, e.g. a partner
+// who only comes to help. An Administrator ticks it on their member page.
+// Booking them in records them as volunteering, so they're kept out of
+// teams, and game fees treat any game they're down for as free - in case
+// someone ticks them as playing by mistake.
+let nonPlayerReady = false;
+export async function ensureNonPlayerColumn(db: any): Promise<void> {
+  if (nonPlayerReady) return;
+  await db.sql`alter table members add column if not exists non_player boolean not null default false`;
+  nonPlayerReady = true;
+}
+
 // Which family a member is in (28 Oct 2026): their family_id, or for a child
 // under a parent, the parent's; anyone not in a family is a family of one
 // (their own id).
