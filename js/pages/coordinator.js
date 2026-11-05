@@ -117,7 +117,10 @@ GUWH.Pages = GUWH.Pages || {};
     const [addResults, setAddResults] = React.useState([]);
     // Add a player (21 Oct 2026): name and email, typed twice. A typo here
     // creates an account nobody can reach and emails a stranger.
-    const [addPlayer, setAddPlayer] = React.useState({ firstName: "", lastName: "", email: "", confirmEmail: "" });
+    // A whole family (5 Nov 2026): children are added under them, no email.
+    const emptyAdd = () => ({ firstName: "", lastName: "", email: "", confirmEmail: "", kind: "player", children: [] });
+    const [addPlayer, setAddPlayer] = React.useState(emptyAdd);
+    const [addingTrial, setAddingTrial] = React.useState(null); // trial signup id being added
     const [addNotice, setAddNotice] = React.useState(null);
     const [roll, setRoll] = React.useState({}); // memberId -> ticked, pending edits not yet saved
     const [savingRoll, setSavingRoll] = React.useState(false);
@@ -205,26 +208,57 @@ GUWH.Pages = GUWH.Pages || {};
       if (!f || !l) { setError("Enter both a first and last name."); return; }
       if (!isLikelyEmail(e1)) { setError("That email address doesn't look right."); return; }
       if (e1 !== e2) { setError("The two email addresses don't match. Check for a typo — this one gets an invitation."); return; }
+      const children = addPlayer.children.filter((c) => c.firstName.trim());
+      if (addPlayer.kind === "none" && !children.length) { setError("Add the children they're bringing, or choose what they're here for."); return; }
+      const ok = await postNewPlayer({ firstName: f, lastName: l, email: e1, kind: addPlayer.kind, children });
+      if (ok) setAddPlayer(emptyAdd());
+    }
+
+    // Shared by the form above and "Add to tonight" on a free-trial signup.
+    async function postNewPlayer(fields) {
+      setError(null);
+      setAddNotice(null);
       try {
         const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", {
           method: "POST",
-          body: JSON.stringify({ sessionDate, firstName: f, lastName: l, email: e1 }),
+          body: JSON.stringify(Object.assign({ sessionDate }, fields)),
         });
         const data = await res.json();
-        if (!data.ok) { setError(data.error || "Something went wrong"); return; }
+        if (!data.ok) { setError(data.error || "Something went wrong"); return false; }
         setSessionDate(data.sessionDate);
         setPlayers(data.players);
-        setAddPlayer({ firstName: "", lastName: "", email: "", confirmEmail: "" });
+        const f = fields.firstName;
+        const kids = data.childrenAdded ? " and " + data.childrenAdded + " child" + (data.childrenAdded === 1 ? "" : "ren") : "";
         setAddNotice(
           data.recognised
-            ? f + " is already a member — booked them in for this week."
+            ? f + " is already a member — booked " + (kids ? "them" + kids : "them") + " in for this week."
             : data.invited
-            ? f + " added, and an invitation is on its way to " + e1 + "."
-            : f + " added to the roll, but the invitation couldn't be sent" + (data.inviteProblem ? ": " + data.inviteProblem : ".")
+            ? f + kids + " added, and an invitation is on its way to " + fields.email + "."
+            : f + kids + " added to the roll, but the invitation couldn't be sent" + (data.inviteProblem ? ": " + data.inviteProblem : ".")
         );
+        return true;
       } catch (e) {
         setError(String(e));
+        return false;
       }
+    }
+
+    // Free-trial signup -> real members, booked in, in one tap.
+    async function addTrialToTonight(t) {
+      setAddingTrial(t.id);
+      const ok = await postNewPlayer({
+        firstName: t.firstName,
+        lastName: t.lastName,
+        email: t.email,
+        kind: t.parentPlaying ? "player" : "none",
+        children: (t.children || []).map((c) => ({ firstName: c.firstName })),
+        trialSignupId: t.id,
+      });
+      setAddingTrial(null);
+      if (ok) setTrialSignups((list) => list.map((x) => (x.id === t.id ? Object.assign({}, x, { added: true }) : x)));
+    }
+    function setChild(i, key, value) {
+      setAddPlayer((v) => Object.assign({}, v, { children: v.children.map((c, j) => (j === i ? Object.assign({}, c, { [key]: value }) : c)) }));
     }
 
     function onSearchChange(value) {
@@ -319,18 +353,57 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "form",
         { onSubmit: addGuestPlayer, className: "mt-3 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex flex-col gap-3" },
-        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Add a player"),
-        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-2" }, "Books them in for this week and emails them an invitation to set up their account. The email is typed twice because a mistake here invites a stranger."),
+        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Add a player or family"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-2" }, "Books them in for this week and emails them an invitation to set up their account. The email is typed twice because a mistake here invites a stranger. Bringing children? Add them below: they go on this person's account, no email needed."),
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-3" },
           h(FormField, { label: "First name" }, h("input", { className: inputCls, value: addPlayer.firstName, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { firstName: e.target.value })) })),
           h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: addPlayer.lastName, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { lastName: e.target.value })) })),
           h(FormField, { label: "Email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.email, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { email: e.target.value })) })),
-          h(FormField, { label: "Confirm email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.confirmEmail, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { confirmEmail: e.target.value })) }))
+          h(FormField, { label: "Confirm email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.confirmEmail, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { confirmEmail: e.target.value })) })),
+          h(
+            FormField,
+            { label: "Here for" },
+            h(
+              "select",
+              { className: inputCls, value: addPlayer.kind, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { kind: e.target.value })) },
+              h("option", { value: "player" }, "Playing"),
+              h("option", { value: "swim" }, "Lane swim"),
+              h("option", { value: "volunteer" }, "Volunteering"),
+              addPlayer.children.length > 0 && h("option", { value: "none" }, "Just bringing the kids")
+            )
+          )
+        ),
+        // Children (5 Nov 2026): one row each.
+        addPlayer.children.map((c, i) =>
+          h(
+            "div",
+            { key: i, className: "rounded-xl bg-[var(--sand)] p-3 grid sm:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end" },
+            h(FormField, { label: "Child's first name" }, h("input", { className: inputCls, value: c.firstName, onChange: (e) => setChild(i, "firstName", e.target.value) })),
+            h(FormField, { label: "Last name", hint: "If not " + (addPlayer.lastName || "the parent's") }, h("input", { className: inputCls, value: c.lastName, placeholder: addPlayer.lastName, onChange: (e) => setChild(i, "lastName", e.target.value) })),
+            h(FormField, { label: "Date of birth", hint: "If known" }, h("input", { type: "date", className: inputCls, value: c.dateOfBirth, onChange: (e) => setChild(i, "dateOfBirth", e.target.value) })),
+            h(
+              "div",
+              { className: "flex items-center gap-2" },
+              h(
+                "select",
+                { className: inputCls + " !w-auto", "aria-label": "Here for", value: c.kind, onChange: (e) => setChild(i, "kind", e.target.value) },
+                h("option", { value: "player" }, "Playing"),
+                h("option", { value: "swim" }, "Lane swim"),
+                h("option", { value: "volunteer" }, "Volunteering")
+              ),
+              h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline", onClick: () => setAddPlayer((v) => Object.assign({}, v, { children: v.children.filter((_, j) => j !== i), kind: v.kind === "none" && v.children.length === 1 ? "player" : v.kind })) }, "Remove")
+            )
+          )
+        ),
+        h(
+          "div",
+          null,
+          h("button", { type: "button", className: "text-sm font-semibold text-[var(--accent-dark)] underline", onClick: () => setAddPlayer((v) => Object.assign({}, v, { children: v.children.concat({ firstName: "", lastName: "", dateOfBirth: "", kind: "player" }) })) }, "+ Add a child")
         ),
         addNotice && h("p", { className: "text-sm text-[var(--good-dark)]", role: "status" }, addNotice),
-        h("div", null, h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), "Add Player"))
+        h("div", null, h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), addPlayer.children.length ? "Add family" : "Add Player"))
       ),
 
       // ---- Confirmed list — tick who showed up, then Save Roll / Close Roll ----
@@ -460,9 +533,20 @@ GUWH.Pages = GUWH.Pages || {};
                   t.invitedBy && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)]" }, t.invitedBy + "'s mate"),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Fins/shoe " + (t.finSize || "?") + " · " + (t.handed || "Right") + "-handed" + (t.heardFrom ? " · heard via " + t.heardFrom : "")),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, (t.phone ? t.phone + " · " : "") + t.email),
-                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone)
+                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone),
+                  (t.children || []).length > 0 &&
+                    h("p", { className: "text-xs font-semibold text-[var(--ink)] mt-1" },
+                      (t.parentPlaying ? "Bringing " : "Not playing, bringing ") +
+                      t.children.map((c) => c.firstName + " (" + c.age + (c.finSize ? ", fins " + c.finSize : "") + ")").join(", "))
                 ),
-                h(Pill, { tone: "accent" }, "Free trial")
+                h(
+                  "div",
+                  { className: "flex flex-col items-end gap-2 shrink-0" },
+                  h(Pill, { tone: "accent" }, "Free trial"),
+                  t.added
+                    ? h("span", { className: "text-xs font-semibold text-[var(--good-dark)] flex items-center gap-1" }, h(Icon, { name: "check", size: 12 }), "Added")
+                    : h(Button, { size: "sm", disabled: addingTrial === t.id, onClick: () => addTrialToTonight(t) }, addingTrial === t.id ? "Adding…" : (t.children || []).length ? "Add family to tonight" : "Add to tonight")
+                )
               )
             )
           ),

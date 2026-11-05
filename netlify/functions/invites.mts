@@ -7,7 +7,8 @@
 // GET   /api/invites?scope=all    -> club-wide, registered guests from the last 10 days only,
 //                                     with inviterName — for the coordinator's "New Players Today".
 //                                     Requires 'manage_others_attendance' (game_coordinator/administrator).
-// POST  /api/invites   { guestName, guestEmail } -> same shape + invite (the new one, with its token)
+// POST  /api/invites   { guestName, guestEmail, children? } -> same shape + invite (the new one, with its token)
+//                       children (5 Nov 2026): first names of kids they're bringing
 // PATCH /api/invites   { id, status: "registered" } -> same shape, one invite updated
 //
 // All require a logged-in Netlify Identity user (JWT in the Authorization
@@ -111,9 +112,11 @@ export default async (req: Request, context: Context) => {
           headers: { "content-type": "application/json" },
         });
       }
+      const children = (Array.isArray(body.children) ? body.children : [])
+        .map((c: unknown) => String(c || "").trim().slice(0, 60)).filter(Boolean).slice(0, 8);
       [created] = await db.sql`
-        insert into invites (inviter_id, guest_name, guest_email, token)
-        values (${memberId}, ${guestName}, ${guestEmail}, ${newToken()})
+        insert into invites (inviter_id, guest_name, guest_email, token, children)
+        values (${memberId}, ${guestName}, ${guestEmail}, ${newToken()}, ${JSON.stringify(children)}::jsonb)
         returning id, guest_name, guest_email, status, token, booked_for, created_at
       `;
     }

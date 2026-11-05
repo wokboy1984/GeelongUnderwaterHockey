@@ -19,6 +19,9 @@ export async function ensureInviteColumns(db: any): Promise<void> {
   await db.sql`create unique index if not exists invites_token_key on invites (token)`;
   await db.sql`alter table invites add column if not exists trial_signup_id integer`;
   await db.sql`alter table invites add column if not exists booked_for date`;
+  // Family sign-up (5 Nov 2026): first names of kids the mate is bringing,
+  // typed by the member; they fill in the mate's free-trial form.
+  await db.sql`alter table invites add column if not exists children jsonb`;
   await db.sql`alter table members add column if not exists invite_code text`;
   await db.sql`create unique index if not exists members_invite_code_key on members (invite_code)`;
   ready = true;
@@ -53,16 +56,16 @@ export async function backfillTokens(db: any, memberId: string): Promise<void> {
   for (const r of rows) await db.sql`update invites set token = ${newToken()} where id = ${r.id} and token is null`;
 }
 
-export type ResolvedRef = { inviteId: number | null; inviterId: string; inviterName: string; guestName: string | null };
+export type ResolvedRef = { inviteId: number | null; inviterId: string; inviterName: string; guestName: string | null; children?: string[] };
 
 export async function resolveRef(db: any, ref: string): Promise<ResolvedRef | null> {
   if (!ref) return null;
   const [inv] = await db.sql`
-    select i.id, i.guest_name, m.id as member_id, m.nickname, m.first_name, m.last_name
+    select i.id, i.guest_name, i.children, m.id as member_id, m.nickname, m.first_name, m.last_name
     from invites i join members m on m.id = i.inviter_id
     where i.token = ${ref}
   `;
-  if (inv) return { inviteId: inv.id, inviterId: inv.member_id, inviterName: memberDisplayName(inv), guestName: inv.guest_name };
+  if (inv) return { inviteId: inv.id, inviterId: inv.member_id, inviterName: memberDisplayName(inv), guestName: inv.guest_name, children: Array.isArray(inv.children) ? inv.children : [] };
   const [m] = await db.sql`select id, nickname, first_name, last_name from members where invite_code = ${ref}`;
   if (m) return { inviteId: null, inviterId: m.id, inviterName: memberDisplayName(m), guestName: null };
   return null;
