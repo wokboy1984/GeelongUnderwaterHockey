@@ -689,7 +689,7 @@ GUWH.Pages = GUWH.Pages || {};
     // already in a team, is lane swimming or volunteering instead. Changes
     // their booking and takes them out of any team for the night.
     function notPlaying(player, kind) {
-      if (!window.confirm("Change " + GUWH.displayName(player) + " to " + (kind === "swim" ? "lane swim" : "volunteering") + " for this session? They'll come out of any team.")) return;
+      if (!window.confirm("Change " + GUWH.displayName(player) + " to " + (kind === "swim" ? "lane swim" : "volunteering") + "? They'll come out of any team, and future weeks will book them in the same way until it's changed (on their Profile, or by putting them back in a team here).")) return;
       call({ action: "book_in", memberEmail: player.email, kind });
     }
     const notPlayingOptions = () => [
@@ -699,11 +699,21 @@ GUWH.Pages = GUWH.Pages || {};
 
     // Someone who said they weren't coming turned up anyway (27 Oct 2026,
     // Liam): book them in and, unless "Unassigned" was picked, place them.
+    // From the Lane swim & volunteering box: playing after all, or the other
+    // of the two.
+    function playAfterAll(player, value) {
+      if (!value) return;
+      if (value === "swim" || value === "volunteer") return notPlaying(player, value);
+      const team = value === "unassigned" ? null : board.teams.find((t) => String(t.id) === value);
+      if (!window.confirm(GUWH.displayName(player) + " is playing" + (team ? " for " + team.name : "") + "? Future weeks will book them in to play again.")) return;
+      call({ action: "book_in", memberEmail: player.email, teamId: team ? team.id : null });
+    }
+
     // Lane swim / Volunteering (3 Nov 2026): book them in for that, no team.
     function bookInAnyway(player, value) {
       if (!value) return;
       if (value === "swim" || value === "volunteer") {
-        if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session as " + (value === "swim" ? "a lane swimmer" : "a volunteer") + "?")) return;
+        if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session as " + (value === "swim" ? "a lane swimmer" : "a volunteer") + "? Future weeks will book them in the same way until it's changed (on their Profile, or by putting them back in a team here).")) return;
         call({ action: "book_in", memberEmail: player.email, kind: value });
         return;
       }
@@ -883,6 +893,45 @@ GUWH.Pages = GUWH.Pages || {};
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Development teams"),
           h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "For the development game. Each player here also keeps their main team for the later games."),
           h("div", { className: "grid sm:grid-cols-2 gap-5" }, devTeams.map(teamCard))
+        ),
+
+      // Lane swim & volunteering (5 Nov 2026): so they can be put back in
+      // a team if they're playing after all. Doing so makes playing their
+      // default again.
+      (board.notPlaying || []).length > 0 &&
+        h(
+          "div",
+          { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mt-6" },
+          h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Lane swim & volunteering (" + board.notPlaying.length + ")"),
+          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Booked in but not playing. Playing after all? Pick a team next to their name. Future weeks will book them in to play again."),
+          h(
+            "div",
+            { className: "flex flex-col gap-2" },
+            board.notPlaying.map((p) =>
+              h(PlayerRow, {
+                key: p.id,
+                player: p,
+                action: h(
+                  "div",
+                  { className: "flex items-center gap-2 flex-wrap justify-end" },
+                  h("span", { className: "text-[10px] font-semibold text-[var(--ink-soft)]" }, p.kind === "swim" ? "Lane swim" : "Volunteering"),
+                  h(
+                    "select",
+                    {
+                      className: inputCls + " !w-auto !py-1 text-xs",
+                      value: "",
+                      "aria-label": "Move " + GUWH.displayName(p) + " to a team",
+                      onChange: (e) => playAfterAll(p, e.target.value),
+                    },
+                    h("option", { value: "" }, "Playing? Move to…"),
+                    board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
+                    h("option", { value: "unassigned" }, "Unassigned"),
+                    p.kind === "swim" ? h("option", { value: "volunteer" }, "Volunteering (no team)") : h("option", { value: "swim" }, "Lane swim (no team)")
+                  )
+                ),
+              })
+            )
+          )
         ),
 
       // Said they're not coming. Kept at the bottom, out of the way, but

@@ -2,7 +2,7 @@
 // teams for the night, assigns confirmed players to them, and publishes.
 // Real data, backed by game_teams + team_assignments.
 //
-// GET  /api/coordinator/teams -> { ok, sessionDate, published, confirmed, teams, unassigned, notAttending }
+// GET  /api/coordinator/teams -> { ok, sessionDate, published, confirmed, teams, unassigned, notAttending, notPlaying }
 // POST /api/coordinator/teams { action: "create_team", name, isDevelopment? }
 // POST /api/coordinator/teams { action: "rename_team", teamId, name }
 // POST /api/coordinator/teams { action: "delete_team", teamId }
@@ -27,7 +27,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { ensureAttendanceKinds, ensureDevelopmentTeams, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { ensureAttendanceKinds, ensureDevelopmentTeams, ensureUsualKindColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { ATTENDANCE_KIND_LABELS, nextSessionDateISO, toAttendanceKind, type AttendanceKind } from "./_shared/attendance.mts";
 import { autoPlaceReturningPlayers, copyForwardWeek } from "./_shared/carry-forward.mts";
 import { validateTimetable, type RowSnap, type PoolGameSnap, type TeamInfo } from "./_shared/timetable.mts";
@@ -150,26 +150,44 @@ async function fullBoard(db: any, sessionId: number, published: boolean, session
     return { ...shapePlayer(r), teamId: (mt && (mt.main || mt.dev)) || null };
   });
 
+  // Booked in for lane swim or volunteering (5 Nov 2026), so the
+  // coordinator can see them and put one back in a team to play.
+  const otherRows = await db.sql`
+    select m.id, m.email, m.nickname, m.first_name, m.last_name, m.is_new, m.grade, m.position, b.kind
+    from bookings b join members m on m.id = b.member_id
+    where b.session_id = ${sessionId} and b.status = 'in' and b.kind <> 'player'
+    order by lower(m.first_name), lower(m.last_name)
+  `;
+  const notPlaying = otherRows.map((r: any) => ({ ...shapePlayer(r), kind: r.kind }));
+
   // Carried forward from last week (12 Oct 2026) - for the Teams tab notice.
   const [carry] = await db.sql`select timetable_copied_from::text as copied_from from sessions where id = ${sessionId}`;
   const autoRows = await db.sql`select member_id from team_autoplaced where session_id = ${sessionId} and placed_team_id is not null`;
 
   return {
-    ok: true, sessionDate, published, confirmed, teams, unassigned, notAttending, memberTeams,
+    ok: true, sessionDate, published, confirmed, teams, unassigned, notAttending, notPlaying, memberTeams,
     copiedFrom: carry ? carry.copied_from : null,
     autoPlacedIds: autoRows.map((r: any) => r.member_id),
   };
 }
 
-// Changes a "not coming" reply to "in" - as a player unless told
-// otherwise - the same booking the roll call's "add player" makes, so they
-// count everywhere a booked-in player does (roll call, fees, the dashboard).
+// Books someone in - as a player unless told otherwise - the same booking
+// the roll call's "add player" makes, so they count everywhere a booked-in
+// player does (roll call, fees, the dashboard). Used for "not coming" replies
+// who turn up, and for changing between playing, lane swim and volunteering.
 async function bookIn(db: any, sessionId: number, target: { id: string; email: string }, caller: { id: string; email: string }, sessionDate: string, kind: AttendanceKind = "player") {
   await db.sql`
     insert into bookings (session_id, member_id, status, kind)
     values (${sessionId}, ${target.id}, 'in', ${kind})
     on conflict (session_id, member_id) do update set status = 'in', kind = ${kind}
   `;
+  // What the coordinator picks becomes how they usually come (Profile's "I
+  // usually come to", 5 Nov 2026, Liam): a lane swimmer stays one in future
+  // weeks until it's changed, and booking them back in to play makes
+  // playing their default again. Children have no Profile, so this is the
+  // only place theirs changes.
+  await ensureUsualKindColumn(db);
+  await db.sql`update members set usual_kind = ${kind === "player" ? null : kind} where id = ${target.id}`;
   await logAudit(db, {
     actorId: caller.id, actorEmail: caller.email, action: "booking_changed",
     resourceType: "booking", resourceId: target.id,
