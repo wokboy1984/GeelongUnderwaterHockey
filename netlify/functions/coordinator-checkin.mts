@@ -1,6 +1,6 @@
 import {getDatabase} from '@netlify/database';
 import {ensureAttendanceKinds,ensureFamilyColumns,ensureNicknameColumn,getVerifiedUser,ensureMember,hasPermission,logAudit,adminName,unauthorized,forbidden} from './_shared/roles.mts';
-import {clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
+import {AUTO_CLOSE_FROM,autoCloseAt,autoCloseAttendance,clubToday,defaultRollDateISO,nextSessionDateISO,requestedSessionDate} from './_shared/attendance.mts';
 const json=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 
 // Defensive, idempotent — belt-and-braces alongside the real migration
@@ -20,11 +20,12 @@ async function ensureCloseoutTable(db:any){
 }
 
 async function closeoutFor(db:any,sessionDate:string){
- const [row]=await db.sql`select c.session_date,c.closed_at,m.first_name,m.last_name
-  from session_attendance_closeouts c join members m on m.id=c.closed_by
+ const [row]=await db.sql`select c.session_date,c.closed_at,c.closed_by,m.first_name,m.last_name
+  from session_attendance_closeouts c left join members m on m.id=c.closed_by
   where c.session_date=${sessionDate}::date`;
  if(!row)return null;
- return {closedAt:row.closed_at,closedByName:(row.first_name+' '+row.last_name).trim()};
+ // No closed_by: closed automatically at 8pm (5 Nov 2026).
+ return {closedAt:row.closed_at,closedByName:row.closed_by?(row.first_name+' '+row.last_name).trim():null,auto:!row.closed_by};
 }
 
 export default async(req:Request)=>{
@@ -36,6 +37,8 @@ export default async(req:Request)=>{
   await ensureCloseoutTable(db);
   await ensureFamilyColumns(db);
   await ensureAttendanceKinds(db);
+  // 8pm automatic close (5 Nov 2026): catch up any night that's due.
+  await autoCloseAttendance(db);
   // The roll belongs to a game night (12 Oct 2026, Cheongy) - it used to
   // record against *today*, so a roll ticked the morning after (and the
   // game fees it charges) landed on the wrong date. ?date= / sessionDate
@@ -115,7 +118,12 @@ export default async(req:Request)=>{
    order by m.first_name,m.last_name,m.id`;
   players.forEach((p:any)=>{p.displayName=adminName(p.nickname,p.firstName,p.lastName);delete p.nickname;});
   const closeout=await closeoutFor(db,sessionDate);
-  return json({ok:true,sessionDate,today,upcoming:nextSessionDateISO(),players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null});
+  // How this night's roll works: 'auto' nights record themselves at 8pm
+  // (autoRan once that's happened, after which it can be reopened and
+  // edited by hand); older nights keep the tick-and-save roll.
+  const [ran]=await db.sql`select 1 from attendance_autoclose_runs where session_date=${sessionDate}::date`;
+  const autoClose=sessionDate>=AUTO_CLOSE_FROM?{at:autoCloseAt(sessionDate).toISOString(),ran:!!ran}:null;
+  return json({ok:true,sessionDate,today,upcoming:nextSessionDateISO(),players,closed:!!closeout,closedAt:closeout?closeout.closedAt:null,closedByName:closeout?closeout.closedByName:null,closedAuto:!!(closeout&&closeout.auto),autoClose});
  }catch(error){console.error('Attendance request failed',error);return json({ok:false,error:'Could not load or save attendance. Please try again.'},500);}
 };
 export const config={path:'/api/coordinator/checkin'};

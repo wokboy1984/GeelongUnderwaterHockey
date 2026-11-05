@@ -172,6 +172,12 @@ GUWH.Pages = GUWH.Pages || {};
     // can still be corrected (see coordinator-checkin.mts).
     const isFuture = !!(checkin && checkin.today && checkin.sessionDate > checkin.today);
     const isPast = !!(checkin && checkin.today && checkin.sessionDate < checkin.today);
+    // Automatic attendance (5 Nov 2026): from 11 Nov the night records
+    // itself at 8pm from who's booked in, so there's nothing to tick until
+    // then. Once it has, the night can be reopened and edited by hand.
+    const auto = checkin && checkin.autoClose;
+    const autoPending = !!(auto && !auto.ran);
+    const editable = !!(checkin && !checkin.closed && !isFuture && !autoPending);
     const weeks = checkin && checkin.upcoming
       ? Array.from({ length: 13 }, (_, i) => addDaysISO(checkin.upcoming, -7 * i))
       : [];
@@ -340,17 +346,21 @@ GUWH.Pages = GUWH.Pages || {};
           ? h(
               React.Fragment,
               null,
-              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Everyone who said they're coming starts ticked. Untick anyone who didn't turn up, then Save Roll. Nothing is charged until the roll is saved — see Finance."),
-              !isFuture && !checkin.closed && players.some((p) => !(checkin.players.find((c) => c.id === p.id) || {}).marked) &&
+              autoPending
+                ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Nothing to tick: attendance records itself at 8pm on the night. Everyone listed here is counted as coming for what they booked, and charged for it. Someone didn't turn up? Press Cancel next to their name before 8pm.")
+                : auto && !checkin.closed
+                ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Reopened. Tick or untick anyone, then Save Roll, and Close Roll when you're done. Saving changes that night's game fees.")
+                : !auto && h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Everyone who said they're coming starts ticked. Untick anyone who didn't turn up, then Save Roll. Nothing is charged until the roll is saved — see Finance."),
+              editable && players.some((p) => !(checkin.players.find((c) => c.id === p.id) || {}).marked) &&
                 h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-1" }, "Not saved yet."),
-              isFuture && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
+              isFuture && !auto && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
               isPast && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)] mb-3" }, "Past week — saving updates that night's roll and game fees."),
               !isFuture && !isPast && h("div", { className: "mb-3" }),
               checkin.closed &&
                 h(
                   "div",
                   { className: "flex items-center gap-2 mb-3" },
-                  h(Pill, { tone: "good" }, h(Icon, { name: "check", size: 12 }), "Closed out by " + checkin.closedByName),
+                  h(Pill, { tone: "good" }, h(Icon, { name: "check", size: 12 }), checkin.closedAuto ? "Closed automatically at 8pm" : "Closed out by " + checkin.closedByName),
                   h(Button, { size: "sm", variant: "ghost", onClick: reopenRoll }, "Reopen")
                 )
             )
@@ -396,7 +406,7 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "div",
                     { className: "flex items-center gap-3" },
-                    checkin &&
+                    checkin && !autoPending &&
                       h(
                         "label",
                         { className: "flex items-center gap-1.5 text-xs font-semibold text-[var(--ink)]" },
@@ -413,9 +423,7 @@ GUWH.Pages = GUWH.Pages || {};
                 )
               )
             ),
-        checkin &&
-          !checkin.closed &&
-          !isFuture &&
+        editable &&
           h(
             "div",
             { className: "mt-4 flex flex-wrap gap-3" },
