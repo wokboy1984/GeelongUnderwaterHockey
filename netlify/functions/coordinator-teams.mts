@@ -19,7 +19,8 @@
 //      -> books in someone who said they weren't coming (they turned up
 //         anyway), and puts them in that team if one is given. kind
 //         'swim' or 'volunteer' (3 Nov 2026) books them in for that instead,
-//         with no team
+//         with no team. Also used on someone already booked in or placed
+//         (5 Nov 2026): it changes them to that and out of any team
 // POST /api/coordinator/teams { action: "publish", published }
 //
 // Requires 'game_coordinator' or 'administrator'.
@@ -172,7 +173,7 @@ async function bookIn(db: any, sessionId: number, target: { id: string; email: s
   await logAudit(db, {
     actorId: caller.id, actorEmail: caller.email, action: "booking_changed",
     resourceType: "booking", resourceId: target.id,
-    newValue: { sessionDate, status: "in", kind }, note: `${caller.email} booked in ${target.email} from Teams for ${ATTENDANCE_KIND_LABELS[kind].toLowerCase()} (said they weren't coming)`,
+    newValue: { sessionDate, status: "in", kind }, note: `${caller.email} booked in ${target.email} from Teams for ${ATTENDANCE_KIND_LABELS[kind].toLowerCase()}`,
   });
 }
 
@@ -255,7 +256,10 @@ export default async (req: Request, context: Context) => {
             headers: { "content-type": "application/json" },
           });
         }
-        await bookIn(db, sessionId, target, caller, sessionDate, toAttendanceKind(body.kind));
+        const kind = toAttendanceKind(body.kind);
+        await bookIn(db, sessionId, target, caller, sessionDate, kind);
+        // Lane swim or volunteering (5 Nov 2026): out of any team tonight.
+        if (kind !== "player") await db.sql`delete from team_assignments where session_id = ${sessionId} and member_id = ${target.id}`;
       } else if (action === "assign" || action === "book_in") {
         const teamId = Number(body.teamId);
         const [target] = await db.sql`select id, email from members where email = ${String(body.memberEmail || "").trim()}`;

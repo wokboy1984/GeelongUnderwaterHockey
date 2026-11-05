@@ -681,8 +681,21 @@ GUWH.Pages = GUWH.Pages || {};
       const firstMain = board.teams.find((t) => !t.isDevelopment);
       const teamId = assignTo[player.id] || (firstMain && firstMain.id);
       if (!teamId) return;
+      if (teamId === "swim" || teamId === "volunteer") return notPlaying(player, teamId);
       call({ action: "assign", memberEmail: player.email, teamId: Number(teamId) });
     }
+
+    // Not playing after all (5 Nov 2026, Liam): someone added at the pool, or
+    // already in a team, is lane swimming or volunteering instead. Changes
+    // their booking and takes them out of any team for the night.
+    function notPlaying(player, kind) {
+      if (!window.confirm("Change " + GUWH.displayName(player) + " to " + (kind === "swim" ? "lane swim" : "volunteering") + " for this session? They'll come out of any team.")) return;
+      call({ action: "book_in", memberEmail: player.email, kind });
+    }
+    const notPlayingOptions = () => [
+      h("option", { key: "swim", value: "swim" }, "Lane swim (no team)"),
+      h("option", { key: "volunteer", value: "volunteer" }, "Volunteering (no team)"),
+    ];
 
     // Someone who said they weren't coming turned up anyway (27 Oct 2026,
     // Liam): book them in and, unless "Unassigned" was picked, place them.
@@ -730,10 +743,11 @@ GUWH.Pages = GUWH.Pages || {};
           className: inputCls + " !w-auto !py-1 text-xs",
           value: String(team.id),
           "aria-label": "Move " + GUWH.displayName(p) + " to",
-          onChange: (e) => moveTo(p, e.target.value, false),
+          onChange: (e) => (e.target.value === "swim" || e.target.value === "volunteer" ? notPlaying(p, e.target.value) : moveTo(p, e.target.value, false)),
         },
         mainTeams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
-        h("option", { value: "unassigned" }, "Unassigned")
+        h("option", { value: "unassigned" }, "Unassigned"),
+        notPlayingOptions()
       );
     }
 
@@ -847,9 +861,10 @@ GUWH.Pages = GUWH.Pages || {};
                       h(
                         "select",
                         { className: inputCls + " !w-auto !py-1.5 text-sm", value: assignTo[p.id] || mainTeams[0].id, onChange: (e) => setAssignTo((prev) => Object.assign({}, prev, { [p.id]: e.target.value })) },
-                        mainTeams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
+                        mainTeams.map((t) => h("option", { key: t.id, value: t.id }, t.name)),
+                        notPlayingOptions()
                       ),
-                      h(Button, { size: "sm", onClick: () => assign(p) }, "Assign"),
+                      h(Button, { size: "sm", onClick: () => assign(p) }, (assignTo[p.id] === "swim" || assignTo[p.id] === "volunteer") ? "Change" : "Assign"),
                       devSelect(p)
                     ),
                   }))
@@ -1970,6 +1985,33 @@ GUWH.Pages = GUWH.Pages || {};
       }
       prevLeft.current = left;
     }, [left]);
+    // The flashing stops by itself after 30 seconds (5 Nov 2026), leaving
+    // the final score and a red 0:00 until the next game takes over.
+    React.useEffect(() => {
+      if (!alarmOn) return;
+      const t = setTimeout(() => setAlarmOn(false), 30000);
+      return () => clearTimeout(t);
+    }, [alarmOn]);
+
+    // Next game by itself (5 Nov 2026, Liam: the poolside screen sat on a
+    // flashing 0:00 until someone exited and reopened it). When a game's
+    // start time comes round, the board moves to it, so the poolside
+    // screen runs the whole night untouched. It follows its own pool: with
+    // Pool A and Pool B playing at once, a screen showing Pool B stays on
+    // Pool B. It only moves when a start time is reached, so going back to
+    // fix an earlier game isn't undone straight away.
+    const pool = pg.pool;
+    let scheduled = -1;
+    games.forEach((x, i) => {
+      if (x.pg.pool === pool && x.startMin != null && gameClockMs(sessionDate, x.startMin) <= now) scheduled = i;
+    });
+    const lastScheduled = React.useRef({ pool, idx: scheduled });
+    React.useEffect(() => {
+      const prev = lastScheduled.current;
+      lastScheduled.current = { pool, idx: scheduled };
+      if (prev.pool === pool && scheduled !== prev.idx && scheduled >= 0 && scheduled !== idx) setIdx(scheduled);
+      // eslint-disable-next-line
+    }, [scheduled, pool]);
 
     async function sendGoal(side, delta, memberId) {
       setPicker(null);
