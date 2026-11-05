@@ -12,6 +12,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { isAttendanceKind } from "./_shared/attendance.mts";
+import { ensureGameMvp, isGender } from "./_shared/game-mvp.mts";
 import { ONBOARDING_STEPS, ageFromDOB, ensureFamilyColumns, ensureUsualKindColumn, ensureMember, ensureNicknameColumn, ensureOnboardingColumns, getVerifiedUser, isGrade, isPosition, shortName, unauthorized } from "./_shared/roles.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
@@ -39,7 +40,7 @@ function dobToInputString(dob: string | Date | null | undefined): string | null 
 async function shapeProfile(db: any, memberId: string) {
   const [row] = await db.sql`
     select id, email, first_name, last_name, nickname, date_of_birth, emergency_name, emergency_phone, position, grade, phone, photo_version, is_new,
-           usual_kind, onboarding_seen, onboarding_hidden_at
+           usual_kind, gender, onboarding_seen, onboarding_hidden_at
     from members where id = ${memberId}
   `;
   const [{ count }] = await db.sql`
@@ -79,6 +80,8 @@ async function shapeProfile(db: any, memberId: string) {
     position: row.position || "Unknown",
     // player | swim | volunteer: the default when they book in.
     usualKind: row.usual_kind || "player",
+    // male | female | null - only for the MVP awards' categories (5 Nov 2026).
+    gender: row.gender || null,
     grade: row.grade,
     photoVersion: row.photo_version || 0,
     gamesPlayed: count,
@@ -100,6 +103,7 @@ export default async (req: Request, context: Context) => {
     await ensureOnboardingColumns(db);
     await ensureFamilyColumns(db);
     await ensureUsualKindColumn(db);
+    await ensureGameMvp(db);
 
     // Resolve who this login is, rather than upserting by Identity id here
     // (21 Oct 2026). A member added by the coordinator before they ever
@@ -209,6 +213,9 @@ export default async (req: Request, context: Context) => {
           grade = ${grade}
         where id = ${memberId}
       `;
+      if (body.gender !== undefined) {
+        await db.sql`update members set gender = ${isGender(body.gender) ? body.gender : null} where id = ${memberId}`;
+      }
       if (usualKind !== undefined) {
         await db.sql`update members set usual_kind = ${usualKind === "player" ? null : usualKind} where id = ${memberId}`;
       }

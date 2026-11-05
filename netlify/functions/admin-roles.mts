@@ -8,6 +8,8 @@
 // POST   /api/admin/roles  { action: "grade", memberId, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
 // POST   /api/admin/roles  { action: "set_non_player", memberId, nonPlayer }
+// POST   /api/admin/roles  { action: "set_gender", memberId, gender: "male" | "female" | null }
+//        -> for the MVP awards' categories (5 Nov 2026)
 // POST   /api/admin/roles  { action: "set_dob", memberId, dateOfBirth | null }
 //        -> correct or clear a date of birth (3 Nov 2026)
 //        -> never plays: books in as volunteering, never charged (3 Nov 2026)
@@ -31,6 +33,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { inviteMember } from "./_shared/identity-admin.mts";
+import { ensureGameMvp, isGender } from "./_shared/game-mvp.mts";
 import { ensureNonPlayerColumn, SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { byDate, categoryOn, gameFeeEntries, melbourneDate, totals } from "./_shared/finance.mts";
 
@@ -124,7 +127,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
   const [m] = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
            m.emergency_name, m.emergency_phone, m.waiver_accepted_at, m.waiver_signed_name, m.created_at,
-           m.parent_id, m.dependant_removed_at, m.non_player,
+           m.parent_id, m.dependant_removed_at, m.non_player, m.gender,
            array_remove(array_agg(mr.role), null) as roles
     from members m left join member_roles mr on mr.member_id = m.id
     where m.id = ${id}
@@ -216,6 +219,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
       joined: m.created_at,
       removedChild: !!m.dependant_removed_at,
       nonPlayer: !!m.non_player,
+      gender: m.gender || null,
       parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" "), adminName: adminName(parent.nickname, parent.first_name, parent.last_name) } : null,
       family: family.map((f: any) => ({ id: f.id, adminName: adminName(f.nickname, f.first_name, f.last_name), isChild: !!f.parent_id, age: ageFromDOB(f.date_of_birth) })),
       kids: kids.map((k: any) => ({ id: k.id, displayName: shortName(k.nickname, k.first_name, k.last_name), fullName: [k.first_name, k.last_name].filter(Boolean).join(" "), adminName: adminName(k.nickname, k.first_name, k.last_name), age: ageFromDOB(k.date_of_birth), removed: !!k.dependant_removed_at })),
@@ -236,6 +240,7 @@ export default async (req: Request, context: Context) => {
   await ensureNicknameColumn(db);
   await ensureFamilyColumns(db);
   await ensureNonPlayerColumn(db);
+  await ensureGameMvp(db);
   const caller = await ensureMember(db, user);
   if (!hasRole(caller.roles, "administrator")) {
     return forbidden("Only Administrators can manage roles");
@@ -329,6 +334,25 @@ export default async (req: Request, context: Context) => {
         resourceType: "member", resourceId: target.id,
         previousValue: { dateOfBirth: target.dob }, newValue: { dateOfBirth: dob },
         note: `${caller.email} ${dob ? "changed" : "cleared"} ${target.first_name} ${target.last_name}'s date of birth`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
+    // Gender (5 Nov 2026, Liam): an Administrator can set or change it, for
+    // the MVP awards' male/female categories.
+    if (req.method === "POST" && body.action === "set_gender") {
+      const id = String(body.memberId || "").trim();
+      const gender = isGender(body.gender) ? body.gender : null;
+      const [target] = await db.sql`select id, first_name, last_name, gender from members where id = ${id}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      await db.sql`update members set gender = ${gender} where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "gender_changed",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { gender: target.gender || null }, newValue: { gender },
+        note: `${caller.email} set ${target.first_name} ${target.last_name}'s gender to ${gender || "not specified"}`,
       });
       return await memberDetail(db, target.id);
     }

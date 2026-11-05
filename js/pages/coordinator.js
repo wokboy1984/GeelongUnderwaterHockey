@@ -118,7 +118,7 @@ GUWH.Pages = GUWH.Pages || {};
     // Add a player (21 Oct 2026): name and email, typed twice. A typo here
     // creates an account nobody can reach and emails a stranger.
     // A whole family (5 Nov 2026): children are added under them, no email.
-    const emptyAdd = () => ({ firstName: "", lastName: "", email: "", confirmEmail: "", kind: "player", children: [] });
+    const emptyAdd = () => ({ firstName: "", lastName: "", email: "", confirmEmail: "", kind: "player", gender: "", children: [] });
     const [addPlayer, setAddPlayer] = React.useState(emptyAdd);
     const [addingTrial, setAddingTrial] = React.useState(null); // trial signup id being added
     const [addNotice, setAddNotice] = React.useState(null);
@@ -210,7 +210,7 @@ GUWH.Pages = GUWH.Pages || {};
       if (e1 !== e2) { setError("The two email addresses don't match. Check for a typo — this one gets an invitation."); return; }
       const children = addPlayer.children.filter((c) => c.firstName.trim());
       if (addPlayer.kind === "none" && !children.length) { setError("Add the children they're bringing, or choose what they're here for."); return; }
-      const ok = await postNewPlayer({ firstName: f, lastName: l, email: e1, kind: addPlayer.kind, children });
+      const ok = await postNewPlayer({ firstName: f, lastName: l, email: e1, kind: addPlayer.kind, gender: addPlayer.gender || null, children });
       if (ok) setAddPlayer(emptyAdd());
     }
 
@@ -373,16 +373,38 @@ GUWH.Pages = GUWH.Pages || {};
               h("option", { value: "volunteer" }, "Volunteering"),
               addPlayer.children.length > 0 && h("option", { value: "none" }, "Just bringing the kids")
             )
+          ),
+          h(
+            FormField,
+            { label: "Gender", hint: "Optional, for the MVP awards" },
+            h(
+              "select",
+              { className: inputCls, value: addPlayer.gender, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { gender: e.target.value })) },
+              h("option", { value: "" }, "Not specified"),
+              h("option", { value: "male" }, "Male"),
+              h("option", { value: "female" }, "Female")
+            )
           )
         ),
         // Children (5 Nov 2026): one row each.
         addPlayer.children.map((c, i) =>
           h(
             "div",
-            { key: i, className: "rounded-xl bg-[var(--sand)] p-3 grid sm:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end" },
+            { key: i, className: "rounded-xl bg-[var(--sand)] p-3 grid sm:grid-cols-[1fr_1fr_1fr_auto_auto] gap-3 items-end" },
             h(FormField, { label: "Child's first name" }, h("input", { className: inputCls, value: c.firstName, onChange: (e) => setChild(i, "firstName", e.target.value) })),
             h(FormField, { label: "Last name", hint: "If not " + (addPlayer.lastName || "the parent's") }, h("input", { className: inputCls, value: c.lastName, placeholder: addPlayer.lastName, onChange: (e) => setChild(i, "lastName", e.target.value) })),
             h(FormField, { label: "Date of birth", hint: "If known" }, h("input", { type: "date", className: inputCls, value: c.dateOfBirth, onChange: (e) => setChild(i, "dateOfBirth", e.target.value) })),
+            h(
+              FormField,
+              { label: "Gender" },
+              h(
+                "select",
+                { className: inputCls + " !w-auto", value: c.gender || "", onChange: (e) => setChild(i, "gender", e.target.value) },
+                h("option", { value: "" }, "Not specified"),
+                h("option", { value: "male" }, "Male"),
+                h("option", { value: "female" }, "Female")
+              )
+            ),
             h(
               "div",
               { className: "flex items-center gap-2" },
@@ -400,7 +422,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           null,
-          h("button", { type: "button", className: "text-sm font-semibold text-[var(--accent-dark)] underline", onClick: () => setAddPlayer((v) => Object.assign({}, v, { children: v.children.concat({ firstName: "", lastName: "", dateOfBirth: "", kind: "player" }) })) }, "+ Add a child")
+          h("button", { type: "button", className: "text-sm font-semibold text-[var(--accent-dark)] underline", onClick: () => setAddPlayer((v) => Object.assign({}, v, { children: v.children.concat({ firstName: "", lastName: "", dateOfBirth: "", kind: "player", gender: "" }) })) }, "+ Add a child")
         ),
         addNotice && h("p", { className: "text-sm text-[var(--good-dark)]", role: "status" }, addNotice),
         h("div", null, h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), addPlayer.children.length ? "Add family" : "Add Player"))
@@ -2619,41 +2641,54 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // MVP nominations — read-only for coordinators/admins (arrange_teams),
-  // filled in by whoever refereed a pool game this session over on the
-  // public Game Board page (see gameboard.js's MvpNominationCard). Just a
-  // tally + who nominated whom, in case the club wants it for the raffle
-  // board or a shout-out at the next session.
+  // MVP votes — read-only for coordinators/admins (arrange_teams), cast by
+  // each game's referees on the Game Board page (see gameboard.js's
+  // MvpVoteCard and _shared/game-mvp.mts).
   function MvpResultsPanel({ mvp }) {
     if (!mvp || !mvp.canViewResults) return null;
-    const results = mvp.results || [];
+    // Per game (5 Nov 2026): each game's winners from the ballot that counts
+    // (the first-listed referee who voted), and which referees have voted.
+    const games = (mvp.results || []).filter((g) => (g.referees || []).length);
+    const night = mvp.nightResults || [];
     return h(
       "div",
       { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6 max-w-md mt-6" },
-      h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "MVP nominations"),
-      results.length === 0
-        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No nominations yet — referees can nominate from the Game Board page once the board is published.")
-        : h(
+      h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "MVP votes"),
+      games.length === 0 && night.length === 0 && h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No referees on any game yet. Referees vote from This Week's Game once the board is published."),
+      h(
+        "div",
+        { className: "flex flex-col gap-3" },
+        games.map((g) =>
+          h(
             "div",
-            { className: "flex flex-col gap-3" },
-            results.map((r) =>
-              h(
-                "div",
-                { key: r.nomineeId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
-                h(
-                  "div",
-                  { className: "flex items-center justify-between" },
-                  h("p", { className: "text-sm font-bold text-[var(--ink)]" }, r.name),
-                  h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, r.votes + " vote" + (r.votes === 1 ? "" : "s"))
-                ),
-                h(
-                  "div",
-                  { className: "mt-1.5 flex flex-col gap-0.5" },
-                  r.notes.map((n, i) => h("p", { key: i, className: "text-xs text-[var(--ink-soft)]" }, n.by + (n.note ? ': "' + n.note + '"' : "")))
-                )
-              )
+            { key: g.poolGameId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, g.label),
+            (g.winners || []).length
+              ? h("div", { className: "mt-1 flex flex-col gap-0.5" }, g.winners.map((w) => h("p", { key: w.category, className: "text-xs text-[var(--ink)]" }, h("span", { className: "font-semibold" }, w.label + ": "), w.name)))
+              : h("p", { className: "mt-1 text-xs text-[var(--ink-soft)]" }, "No votes yet."),
+            g.note && h("p", { className: "mt-1 text-xs text-[var(--ink-soft)]" }, '"' + g.note + '"'),
+            h(
+              "p",
+              { className: "mt-1.5 text-[11px] text-[var(--ink-soft)]" },
+              "Refs: " + g.referees.map((r) => r.name + (r.counts ? " (counts)" : r.voted ? " (voted, not counted)" : " (not voted)")).join(", ")
             )
           )
+        ),
+        // Nights before per-game voting.
+        night.map((r) =>
+          h(
+            "div",
+            { key: r.nomineeId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+            h(
+              "div",
+              { className: "flex items-center justify-between" },
+              h("p", { className: "text-sm font-bold text-[var(--ink)]" }, r.name),
+              h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, r.votes + " vote" + (r.votes === 1 ? "" : "s"))
+            ),
+            h("div", { className: "mt-1.5 flex flex-col gap-0.5" }, r.notes.map((n, i) => h("p", { key: i, className: "text-xs text-[var(--ink-soft)]" }, n.by + (n.note ? ': "' + n.note + '"' : ""))))
+          )
+        )
+      )
     );
   }
 

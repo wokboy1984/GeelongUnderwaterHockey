@@ -25,6 +25,7 @@ import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.m
 import { inviteMember } from "./_shared/identity-admin.mts";
 import { addChildren, cleanChildren, toAdultKind } from "./_shared/family-signup.mts";
 import { ensureUsualKindColumn } from "./_shared/roles.mts";
+import { ensureGameMvp, isGender } from "./_shared/game-mvp.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
   const parts = fullName.trim().split(/\s+/);
@@ -194,6 +195,11 @@ export default async (req: Request, context: Context) => {
             await ensureUsualKindColumn(db);
             await db.sql`update members set usual_kind = ${adultKind} where id = ${targetId}`;
           }
+        }
+        // Gender (5 Nov 2026), for the MVP awards: set if picked, never cleared here.
+        if (isGender(body.gender)) {
+          await ensureGameMvp(db);
+          await db.sql`update members set gender = ${body.gender} where id = ${targetId}`;
         }
         const childIds = await addChildren(db, targetId, children, sessionId);
         if (trial) await db.sql`update trial_signups set added_member_id = ${targetId} where id = ${trial.id}`;

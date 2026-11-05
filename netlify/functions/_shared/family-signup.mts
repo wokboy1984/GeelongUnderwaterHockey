@@ -13,10 +13,11 @@
 
 import { ageFromDOB, ensureFamilyColumns, ensureUsualKindColumn } from "./roles.mts";
 import { isAttendanceKind, type AttendanceKind } from "./attendance.mts";
+import { ensureGameMvp, isGender } from "./game-mvp.mts";
 
 export const MAX_FAMILY_CHILDREN = 8;
 
-export type ChildIn = { firstName: string; lastName: string; dateOfBirth: string | null; kind: AttendanceKind };
+export type ChildIn = { firstName: string; lastName: string; dateOfBirth: string | null; kind: AttendanceKind; gender: "male" | "female" | null };
 
 // What the person arriving is here for. 'none' = only bringing the kids:
 // they get an account (the kids are billed to it) but aren't booked in.
@@ -46,7 +47,7 @@ export function cleanChildren(raw: unknown): { children: ChildIn[]; error?: stri
       const age = ageFromDOB(dateOfBirth);
       if (age !== null && age >= 18) return { children: [], error: `${firstName} is 18 or over, so needs their own account rather than being added as a child.` };
     }
-    children.push({ firstName, lastName, dateOfBirth, kind: isAttendanceKind(c.kind) ? c.kind : "player" });
+    children.push({ firstName, lastName, dateOfBirth, kind: isAttendanceKind(c.kind) ? c.kind : "player", gender: isGender(c.gender) ? c.gender : null });
   }
   return { children };
 }
@@ -57,6 +58,7 @@ export async function addChildren(db: any, parentId: string, children: ChildIn[]
   if (!children.length) return [];
   await ensureFamilyColumns(db);
   await ensureUsualKindColumn(db);
+  await ensureGameMvp(db);
   const [parent] = await db.sql`select last_name, emergency_name, emergency_phone, phone from members where id = ${parentId}`;
   const ids: string[] = [];
   for (const c of children) {
@@ -76,6 +78,7 @@ export async function addChildren(db: any, parentId: string, children: ChildIn[]
                 ${parent ? parent.emergency_name : null}, ${parent ? parent.emergency_phone : null}, ${parent ? parent.phone : null}, true, ${parentId}, true)
       `;
     }
+    if (c.gender) await db.sql`update members set gender = ${c.gender} where id = ${id}`;
     // How they usually come, same as choosing it in Teams.
     await db.sql`update members set usual_kind = ${c.kind === "player" ? null : c.kind} where id = ${id}`;
     if (sessionId != null) {
