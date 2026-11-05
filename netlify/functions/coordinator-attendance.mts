@@ -5,6 +5,11 @@
 //
 // GET  /api/coordinator/attendance -> { ok, sessionDate, players: [...], declined: [...], noReply }
 // POST /api/coordinator/attendance { memberEmail, in } -> same shape
+// POST /api/coordinator/attendance { firstName, lastName, email, kind?, children?, trialSignupId? }
+//   -> adds a player and invites them; with children (5 Nov 2026), a whole
+//   family in one go - see _shared/family-signup.mts. kind 'none' = only
+//   bringing the kids (account made, not booked in). trialSignupId fills
+//   in their phone and emergency contact from a free-trial signup.
 // POST /api/coordinator/attendance { guestName } -> adds a name-only walk-in
 //   player (no account, no email) as confirmed for this session. Gives them
 //   a real `members` row with a synthetic, unguessable placeholder email so
@@ -18,6 +23,9 @@ import { getDatabase } from "@netlify/database";
 import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden, isLikelyEmail } from "./_shared/roles.mts";
 import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 import { inviteMember } from "./_shared/identity-admin.mts";
+import { addChildren, cleanChildren, toAdultKind } from "./_shared/family-signup.mts";
+import { ensureUsualKindColumn } from "./_shared/roles.mts";
+import { ensureGameMvp, isGender } from "./_shared/game-mvp.mts";
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
   const parts = fullName.trim().split(/\s+/);
@@ -133,6 +141,20 @@ export default async (req: Request, context: Context) => {
           return new Response(JSON.stringify({ ok: false, error: "That email address doesn't look right." }), { status: 400, headers: { "content-type": "application/json" } });
         }
 
+        const adultKind = toAdultKind(body.kind);
+        const { children, error: childError } = cleanChildren(body.children);
+        if (childError) {
+          return new Response(JSON.stringify({ ok: false, error: childError }), { status: 400, headers: { "content-type": "application/json" } });
+        }
+        if (adultKind === "none" && !children.length) {
+          return new Response(JSON.stringify({ ok: false, error: "Add the children they're bringing, or choose what they're here for." }), { status: 400, headers: { "content-type": "application/json" } });
+        }
+        // From a free-trial signup: their phone and emergency contact.
+        const trialId = Number(body.trialSignupId) || null;
+        const [trial] = trialId
+          ? await db.sql`select id, phone, emergency_name, emergency_phone from trial_signups where id = ${trialId}`
+          : [];
+
         const fullName = `${newFirst} ${newLast}`.trim();
         const [existing] = await db.sql`select id, email from members where email = ${newEmail}`;
 
@@ -156,27 +178,42 @@ export default async (req: Request, context: Context) => {
           else inviteProblem = invite.reason;
           targetId = invite.ok && invite.userId ? invite.userId : `pending_${crypto.randomUUID()}`;
           await db.sql`
-            insert into members (id, email, first_name, last_name, is_new)
-            values (${targetId}, ${newEmail}, ${newFirst}, ${newLast}, true)
+            insert into members (id, email, first_name, last_name, is_new, phone, emergency_name, emergency_phone)
+            values (${targetId}, ${newEmail}, ${newFirst}, ${newLast}, true,
+                    ${trial ? trial.phone : null}, ${trial ? trial.emergency_name : null}, ${trial ? trial.emergency_phone : null})
             on conflict (id) do nothing
           `;
         }
 
-        await db.sql`
-          insert into bookings (session_id, member_id, status, kind)
-          values (${sessionId}, ${targetId}, 'in', 'player')
-          on conflict (session_id, member_id) do update set status = excluded.status
-        `;
+        if (adultKind !== "none") {
+          await db.sql`
+            insert into bookings (session_id, member_id, status, kind)
+            values (${sessionId}, ${targetId}, 'in', ${adultKind})
+            on conflict (session_id, member_id) do update set status = excluded.status, kind = excluded.kind
+          `;
+          if (adultKind !== "player") {
+            await ensureUsualKindColumn(db);
+            await db.sql`update members set usual_kind = ${adultKind} where id = ${targetId}`;
+          }
+        }
+        // Gender (5 Nov 2026), for the MVP awards: set if picked, never cleared here.
+        if (isGender(body.gender)) {
+          await ensureGameMvp(db);
+          await db.sql`update members set gender = ${body.gender} where id = ${targetId}`;
+        }
+        const childIds = await addChildren(db, targetId, children, sessionId);
+        if (trial) await db.sql`update trial_signups set added_member_id = ${targetId} where id = ${trial.id}`;
         await logAudit(db, {
           actorId: caller.id,
           actorEmail: caller.email,
           action: recognised ? "player_booked_by_coordinator" : "player_added_and_invited",
           resourceType: "booking",
           resourceId: targetId,
-          newValue: { sessionDate, name: fullName, email: newEmail, invited },
-          note: recognised
+          newValue: { sessionDate, name: fullName, email: newEmail, invited, kind: adultKind, children: children.map((c) => c.firstName) },
+          note: (recognised
             ? `${caller.email} booked existing member ${newEmail} in for ${sessionDate}`
-            : `${caller.email} added ${fullName} (${newEmail}) for ${sessionDate}${invited ? " and invited them to sign up" : " — invitation not sent"}`,
+            : `${caller.email} added ${fullName} (${newEmail}) for ${sessionDate}${invited ? " and invited them to sign up" : " — invitation not sent"}`)
+            + (children.length ? ` with ${children.length} child${children.length === 1 ? "" : "ren"} (${children.map((c) => c.firstName).join(", ")})` : ""),
         });
         return new Response(JSON.stringify({
           ok: true,
@@ -184,6 +221,7 @@ export default async (req: Request, context: Context) => {
           recognised,
           invited,
           inviteProblem,
+          childrenAdded: childIds.length,
           players: await playerList(db, sessionId),
           declined: await declinedList(db, sessionId),
           noReply: await noReplyCount(db, sessionId),

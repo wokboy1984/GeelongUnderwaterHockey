@@ -136,6 +136,26 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Gender (5 Nov 2026): for the MVP awards; saves as soon as it's picked.
+    async function saveGender(value) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_gender", memberId: m.id, gender: value || null }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
     // Non-player (3 Nov 2026): books in as volunteering, never charged.
     async function saveNonPlayer(value) {
       setBusy(true);
@@ -333,6 +353,18 @@ GUWH.Pages = GUWH.Pages || {};
                 GUWH.POSITIONS.concat("Unknown").map((p) => h("option", { key: p, value: p }, p))
               )
             ),
+            h(
+              "label",
+              { className: "min-w-0" },
+              h("span", { className: "block text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-0.5" }, "Gender"),
+              h(
+                "select",
+                { className: inputCls + " !w-auto !py-1 text-sm", value: m.gender || "", disabled: busy, onChange: (e) => saveGender(e.target.value) },
+                h("option", { value: "" }, "Not specified"),
+                h("option", { value: "male" }, "Male"),
+                h("option", { value: "female" }, "Female")
+              )
+            ),
             h(Field, { label: "Phone", value: m.phone }),
             h(Field, { label: "Joined", value: fmtDate(m.joined) }),
             h(Field, { label: "Emergency contact", value: m.emergencyName }),
@@ -350,7 +382,7 @@ GUWH.Pages = GUWH.Pages || {};
               h("span", { className: "block text-xs text-[var(--ink-soft)]" }, "Never plays. Saying they're coming books them in as volunteering, they're left out of teams, and they're never charged a game fee.")
             )
           ),
-          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position and Non-player save as soon as you change them; Date of birth when you press Save.")
+          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position, Gender and Non-player save as soon as you change them; Date of birth when you press Save.")
         ),
 
         h(

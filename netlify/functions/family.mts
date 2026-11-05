@@ -12,6 +12,7 @@
 
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
+import { ensureGameMvp, isGender } from "./_shared/game-mvp.mts";
 import { ageFromDOB, ensureFamilyColumns, ensureMember, getVerifiedUser, isPosition, logAudit, unauthorized } from "./_shared/roles.mts";
 import { nextSessionDateISO } from "./_shared/attendance.mts";
 
@@ -27,7 +28,7 @@ function dobString(dob: string | Date | null | undefined): string | null {
 
 export async function listKids(db: any, parentId: string) {
   const rows = await db.sql`
-    select m.id, m.first_name, m.last_name, m.date_of_birth, m.position,
+    select m.id, m.first_name, m.last_name, m.date_of_birth, m.position, m.gender,
       (select count(*)::int from bookings b join sessions s on s.id = b.session_id
         where b.member_id = m.id and b.status = 'in' and s.session_date < current_date) as games,
       (select coalesce(sum(gg.goals), 0)::int from game_goals gg where gg.member_id = m.id) as career_goals,
@@ -48,6 +49,7 @@ export async function listKids(db: any, parentId: string) {
     dateOfBirth: dobString(r.date_of_birth),
     age: ageFromDOB(r.date_of_birth),
     position: r.position || "Unknown",
+    gender: r.gender || null,
     gamesPlayed: r.games,
     careerGoals: r.career_goals,
     seasonGoals: r.season_goals,
@@ -74,6 +76,7 @@ export default async (req: Request, context: Context) => {
   try {
     const db = getDatabase();
     await ensureFamilyColumns(db);
+    await ensureGameMvp(db);
     const caller = await ensureMember(db, user);
 
     if (req.method === "POST") {
@@ -92,6 +95,7 @@ export default async (req: Request, context: Context) => {
           values (${kidId}, ${kidId + "@no-login.guwh"}, ${f.firstName}, ${f.lastName || parent.last_name || ""}, ${f.dateOfBirth}, ${f.position}, 'Junior',
                   ${parent.emergency_name}, ${parent.emergency_phone}, ${parent.phone}, false, ${caller.id})
         `;
+        if (isGender(body.gender)) await db.sql`update members set gender = ${body.gender} where id = ${kidId}`;
         await logAudit(db, { actorId: caller.id, actorEmail: caller.email, action: "child_added", resourceType: "member", resourceId: kidId, newValue: { firstName: f.firstName }, note: `${caller.email} added child "${f.firstName}"` });
       } else if (action === "update" || action === "remove") {
         const id = String(body.id || "");
@@ -101,7 +105,8 @@ export default async (req: Request, context: Context) => {
           const f = cleanFields(body);
           if (f.error) return json({ ok: false, error: f.error }, 400);
           await db.sql`
-            update members set first_name = ${f.firstName}, last_name = ${f.lastName}, date_of_birth = ${f.dateOfBirth}, position = ${f.position}
+            update members set first_name = ${f.firstName}, last_name = ${f.lastName}, date_of_birth = ${f.dateOfBirth}, position = ${f.position},
+              gender = ${isGender(body.gender) ? body.gender : null}
             where id = ${id}
           `;
         } else {

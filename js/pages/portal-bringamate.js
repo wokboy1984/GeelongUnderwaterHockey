@@ -67,6 +67,12 @@ GUWH.Pages = GUWH.Pages || {};
   // Tracked links (13 Oct 2026): every invite has its own ?ref= token, and
   // the general share link carries the member's own invite code, so a
   // booking through either shows up here by itself.
+  // Kids the mate is bringing (5 Nov 2026), typed as first names.
+  function kidNames(text) {
+    return String(text || "").split(/,|&|\band\b/).map((k) => k.trim()).filter(Boolean).slice(0, 8);
+  }
+  const KIDS_HINT = "First names, e.g. Ava, Max. Their invite form will have them filled in.";
+
   function trialLink(ref) {
     return window.location.origin + window.location.pathname + "#/new-player" + (ref ? "?ref=" + ref : "");
   }
@@ -95,6 +101,7 @@ GUWH.Pages = GUWH.Pages || {};
     const wed = GUWH.nextWednesday();
     const [friendName, setFriendName] = React.useState("");
     const [contact, setContact] = React.useState("");
+    const [kids, setKids] = React.useState("");
     const [justSent, setJustSent] = React.useState(false);
     const [invites, setInvites] = React.useState([]);
     const [inviteCode, setInviteCode] = React.useState(null);
@@ -122,7 +129,7 @@ GUWH.Pages = GUWH.Pages || {};
       try {
         const res = await GUWH.Identity.authFetch("/api/invites", {
           method: "POST",
-          body: JSON.stringify({ guestName: friendName.trim(), guestEmail: contact.trim() || null }),
+          body: JSON.stringify({ guestName: friendName.trim(), guestEmail: contact.trim() || null, children: kidNames(kids) }),
         });
         const data = await res.json();
         if (data.ok) {
@@ -131,6 +138,7 @@ GUWH.Pages = GUWH.Pages || {};
           setJustSent({ name: friendName.trim(), contact: contact.trim(), url: data.invite && data.invite.token ? trialLink(data.invite.token) : null });
           setFriendName("");
           setContact("");
+          setKids("");
         } else {
           setError(data.error || "Something went wrong");
         }
@@ -160,6 +168,7 @@ GUWH.Pages = GUWH.Pages || {};
           h("h3", { className: "font-display font-bold text-[var(--ink)]" }, "Invite someone for " + GUWH.formatDate(wed)),
           h(FormField, { label: "Their name" }, h("input", { className: inputCls, value: friendName, onChange: (e) => setFriendName(e.target.value) })),
           h(FormField, { label: "Phone or email (optional)" }, h("input", { className: inputCls, value: contact, onChange: (e) => setContact(e.target.value) })),
+          h(FormField, { label: "Bringing their kids? (optional)", hint: KIDS_HINT }, h("input", { className: inputCls, value: kids, onChange: (e) => setKids(e.target.value) })),
           h(Button, { type: "submit" }, h(Icon, { name: "plus", size: 16 }), "Save & send invite"),
           h(SendItNow, { sent: justSent, url: inviteLink })
         ),
@@ -223,6 +232,7 @@ GUWH.Pages = GUWH.Pages || {};
     const wed = GUWH.nextWednesday();
     const [friendName, setFriendName] = React.useState("");
     const [contact, setContact] = React.useState("");
+    const [kids, setKids] = React.useState("");
     const [sending, setSending] = React.useState(false);
     const [justSent, setJustSent] = React.useState(false);
     const [error, setError] = React.useState(null);
@@ -240,7 +250,7 @@ GUWH.Pages = GUWH.Pages || {};
       try {
         const res = await GUWH.Identity.authFetch("/api/invites", {
           method: "POST",
-          body: JSON.stringify({ guestName: friendName.trim(), guestEmail: contact.trim() || null }),
+          body: JSON.stringify({ guestName: friendName.trim(), guestEmail: contact.trim() || null, children: kidNames(kids) }),
         });
         const data = await res.json();
         if (data.ok) {
@@ -248,6 +258,7 @@ GUWH.Pages = GUWH.Pages || {};
           setJustSent({ name: friendName.trim(), contact: contact.trim(), url: data.invite && data.invite.token ? trialLink(data.invite.token) : null });
           setFriendName("");
           setContact("");
+          setKids("");
           onSent && onSent(data.invites);
         } else {
           setError(data.error || "Something went wrong");
@@ -273,6 +284,7 @@ GUWH.Pages = GUWH.Pages || {};
         { onSubmit: send, className: "flex flex-col gap-4" },
         h(FormField, { label: "Their name" }, h("input", { className: inputCls, value: friendName, onChange: (e) => setFriendName(e.target.value), disabled: sending, autoFocus: true })),
         h(FormField, { label: "Phone or email (optional)" }, h("input", { className: inputCls, value: contact, onChange: (e) => setContact(e.target.value), disabled: sending })),
+        h(FormField, { label: "Bringing their kids? (optional)", hint: KIDS_HINT }, h("input", { className: inputCls, value: kids, onChange: (e) => setKids(e.target.value), disabled: sending })),
         h(Button, { type: "submit", disabled: sending || !friendName.trim() }, h(Icon, { name: "plus", size: 16 }), sending ? "Saving…" : "Save & send invite"),
         h(SendItNow, { sent: justSent, url: inviteLink })
       ),

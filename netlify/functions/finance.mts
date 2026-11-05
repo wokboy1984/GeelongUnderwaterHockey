@@ -1,5 +1,6 @@
 import { getDatabase } from '@netlify/database';
 import { getVerifiedUser, ensureMember, ensureFamilyColumns, ensureNicknameColumn, ensureAttendanceKinds, adminName, hasPermission, logAudit, unauthorized, forbidden } from './_shared/roles.mts';
+import { autoCloseAttendance } from './_shared/attendance.mts';
 import { FEES, byDate, categoryOn, cents, ensureCategoryChanges, gameFeeEntries, melbourneDate, validDate, totals } from './_shared/finance.mts';
 const json = (data: any, status = 200) => new Response(JSON.stringify(data), {status, headers: {'content-type':'application/json','cache-control':'no-store'}});
 export default async (req: Request) => {
@@ -7,6 +8,9 @@ export default async (req: Request) => {
  const user = await getVerifiedUser(req); if (!user) return unauthorized();
  try {
   const db = getDatabase(); await ensureFamilyColumns(db); await ensureNicknameColumn(db); await ensureAttendanceKinds(db); await ensureCategoryChanges(db); const caller = await ensureMember(db,user);
+  // Fees come from attendance, so catch up any night due to close at 8pm
+  // first (5 Nov 2026) - see autoCloseAttendance.
+  await autoCloseAttendance(db);
   const url = new URL(req.url);
   // Self-service summary for the member dashboard: any logged-in member can
   // see their OWN balance (never anyone else's, and never the full roster) —

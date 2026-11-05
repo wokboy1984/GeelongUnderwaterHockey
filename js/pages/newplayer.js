@@ -20,6 +20,9 @@ GUWH.Pages = GUWH.Pages || {};
       phone: "", email: "", sessionDate: "", guardianConsent: false, disclaimer: false,
       website: "", // honeypot - hidden from people, bots fill it in
       ref: "", // Bring a Mate link (13 Oct 2026)
+      // Family sign-up (5 Nov 2026): children coming too, and whether the
+      // parent is getting in themselves.
+      children: [], parentPlaying: true,
     };
   }
 
@@ -56,6 +59,7 @@ GUWH.Pages = GUWH.Pages || {};
               heardAbout: HEARD_OPTIONS[0],
               firstName: f.firstName || parts[0] || "",
               lastName: f.lastName || parts.slice(1).join(" "),
+              children: f.children.length ? f.children : (d.invite.children || []).map((name) => ({ firstName: name, age: "", finSize: "" })),
             }));
           }
         })
@@ -67,6 +71,11 @@ GUWH.Pages = GUWH.Pages || {};
     }, [dates]);
 
     const isJunior = Number(form.age) > 0 && Number(form.age) < 18;
+    const kids = form.children.filter((c) => c.firstName.trim());
+    function setChild(i, key, value) {
+      setForm((f) => Object.assign({}, f, { children: f.children.map((c, j) => (j === i ? Object.assign({}, c, { [key]: value }) : c)) }));
+      setErrors((e) => Object.assign({}, e, { children: undefined, guardianConsent: undefined }));
+    }
 
     function set(key, value) {
       setForm((f) => Object.assign({}, f, { [key]: value }));
@@ -78,12 +87,13 @@ GUWH.Pages = GUWH.Pages || {};
       if (!form.firstName.trim()) e.firstName = "Enter a first name.";
       if (!form.lastName.trim()) e.lastName = "Enter a last name.";
       if (!form.age || Number(form.age) < 5 || Number(form.age) > 99) e.age = "Enter a realistic age.";
-      if (!form.finSize.trim()) e.finSize = "Let us know a fin/shoe size so we can pull the right size.";
+      if (!form.finSize.trim() && !(kids.length && !form.parentPlaying)) e.finSize = "Let us know a fin/shoe size so we can pull the right size.";
       if (!form.emergencyName.trim()) e.emergencyName = "We need someone to call if needed.";
       if (!form.emergencyPhone.trim()) e.emergencyPhone = "Enter a phone number for that contact.";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) e.email = "Enter your email so we can confirm your spot.";
       if (!form.sessionDate) e.sessionDate = "Pick the Wednesday you're planning to come.";
-      if (isJunior && !form.guardianConsent) e.guardianConsent = "A parent or guardian needs to acknowledge this for under-18s.";
+      if ((isJunior || kids.length) && !form.guardianConsent) e.guardianConsent = "A parent or guardian needs to acknowledge this for under-18s.";
+      if (kids.some((c) => !(Number(c.age) >= 1 && Number(c.age) <= 17))) e.children = "Enter an age (under 18) for each child.";
       if (!form.disclaimer) e.disclaimer = "Please acknowledge this to continue.";
       setErrors(e);
       return Object.keys(e).length === 0;
@@ -102,7 +112,7 @@ GUWH.Pages = GUWH.Pages || {};
           const res = await fetch("/api/trial-signup", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(form),
+            body: JSON.stringify(Object.assign({}, form, { children: kids })),
           });
           const data = await res.json();
           if (data.ok) {
@@ -135,7 +145,7 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "rounded-3xl bg-white ring-1 ring-black/5 p-8 sm:p-10 text-center" },
           h("div", { className: "mx-auto h-14 w-14 rounded-full bg-[var(--good-15)] text-[var(--good-dark)] flex items-center justify-center mb-5" }, h(Icon, { name: "check", size: 26 })),
-          h("h1", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, "You're booked in, " + form.firstName + "!"),
+          h("h1", { className: "font-display text-3xl font-bold text-[var(--ink)]" }, "You're booked in, " + form.firstName + (kids.length ? " and " + kids.map((c) => c.firstName.trim()).join(" & ") : "") + "!"),
           h("p", { className: "mt-2 text-[var(--ink-soft)]" }, (submitted.invitedBy ? submitted.invitedBy + " will see you're booked in. " : "") + "The club has your details and will have loan gear ready for you. Here's everything you need."),
           h(
             "div",
@@ -342,12 +352,41 @@ GUWH.Pages = GUWH.Pages || {};
           ),
           errors.sessionDate && h(FieldError, { text: errors.sessionDate }),
 
-          isJunior &&
+          // Bringing children (5 Nov 2026): they're booked in with you, on
+          // your account. No email or login needed for them.
+          h(
+            "div",
+            { className: "rounded-2xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+            h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Bringing children?"),
+            h("p", { className: "text-xs text-[var(--ink-soft)] -mt-2" }, "Add each child coming with you. Their first three sessions are free too, and they don't need their own email."),
+            form.children.map((c, i) =>
+              h(
+                "div",
+                { key: i, className: "grid grid-cols-[1fr_1fr_auto] sm:grid-cols-[1fr_5rem_5rem_auto] gap-2 items-end" },
+                // Name on its own row on a phone, beside the rest on a computer.
+                h("div", { className: "col-span-3 sm:col-span-1 min-w-0" }, h(FormField, { label: "First name" }, h("input", { className: inputCls, value: c.firstName, onChange: (e) => setChild(i, "firstName", e.target.value) }))),
+                h(FormField, { label: "Age" }, h("input", { type: "number", min: 1, max: 17, className: inputCls, value: c.age, onChange: (e) => setChild(i, "age", e.target.value) })),
+                h(FormField, { label: "Fin size" }, h("input", { className: inputCls, value: c.finSize, onChange: (e) => setChild(i, "finSize", e.target.value) })),
+                h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline pb-3", onClick: () => setForm((f) => Object.assign({}, f, { children: f.children.filter((_, j) => j !== i) })) }, "Remove")
+              )
+            ),
+            errors.children && h("p", { className: "text-xs text-[var(--bad)]" }, errors.children),
+            h("div", null, h("button", { type: "button", className: "text-sm font-semibold text-[var(--accent-dark)] underline", onClick: () => setForm((f) => Object.assign({}, f, { children: f.children.concat({ firstName: "", age: "", finSize: "" }) })) }, "+ Add a child")),
+            kids.length > 0 &&
+              h(
+                "label",
+                { className: "flex items-start gap-3 text-sm text-[var(--ink)]" },
+                h("input", { type: "checkbox", className: "mt-0.5", checked: !form.parentPlaying, onChange: (e) => set("parentPlaying", !e.target.checked) }),
+                h("span", null, "I'm only bringing the kids - I won't be getting in myself.")
+              )
+          ),
+
+          (isJunior || kids.length > 0) &&
             h(
               "label",
               { className: "flex items-start gap-3 rounded-xl bg-[var(--warn-10)] p-3.5 text-sm text-[var(--ink)]" },
               h("input", { type: "checkbox", className: "mt-0.5", checked: form.guardianConsent, onChange: (e) => set("guardianConsent", e.target.checked) }),
-              h("span", null, "I am this player's parent or guardian and I'm okay with them taking part.")
+              h("span", null, kids.length ? "I am the parent or guardian of " + (isJunior ? "this player and " : "") + "the children above, and I'm okay with them taking part." : "I am this player's parent or guardian and I'm okay with them taking part.")
             ),
           errors.guardianConsent && h(FieldError, { text: errors.guardianConsent }),
 
@@ -389,6 +428,7 @@ GUWH.Pages = GUWH.Pages || {};
       emergencyContact: (f.emergencyName + " " + f.emergencyPhone).trim(),
       heardAbout: f.heardAbout || "",
       invitedBy: invitedBy || "",
+      children: (f.children || []).filter((c) => c.firstName.trim()).map((c) => c.firstName.trim() + " (" + c.age + ")").join(", ") + ((f.children || []).length && !f.parentPlaying ? " - parent not playing" : ""),
     };
     fetch("/", {
       method: "POST",

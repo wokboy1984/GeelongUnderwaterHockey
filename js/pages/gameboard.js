@@ -343,32 +343,34 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // MVP nomination card — only ever shown to someone who actually refereed
-  // a pool game in this session's timetable (checked server-side by
-  // /api/mvp, never inferred here). One nomination per referee per night;
-  // submitting again just updates it.
-  function MvpNominationCard({ mvp, onSaved }) {
-    const [nomineeId, setNomineeId] = React.useState((mvp.myNomination && mvp.myNomination.nomineeId) || "");
-    const [note, setNote] = React.useState((mvp.myNomination && mvp.myNomination.note) || "");
+  // MVP votes (5 Nov 2026, Liam) — one card per game the person refereed
+  // (checked server-side by /api/mvp, never inferred here). Four optional
+  // categories, each listing only that game's players who fit it. If more
+  // than one referee votes, the first-listed referee's votes count.
+  const MVP_CATS = [
+    { key: "junior_male", label: "Junior male" },
+    { key: "junior_female", label: "Junior female" },
+    { key: "senior_male", label: "Senior male" },
+    { key: "senior_female", label: "Senior female" },
+  ];
+  function MvpVoteCard({ game, sessionDate, onSaved }) {
+    const [votes, setVotes] = React.useState(Object.assign({}, game.myVotes));
+    const [note, setNote] = React.useState(game.myNote || "");
     const [saving, setSaving] = React.useState(false);
     const [saved, setSaved] = React.useState(false);
     const [error, setError] = React.useState(null);
+    const hadVotes = Object.keys(game.myVotes || {}).length > 0;
 
     async function submit(ev) {
       ev.preventDefault();
-      if (!nomineeId) return;
       setSaving(true);
       setError(null);
       setSaved(false);
       try {
-        const res = await GUWH.Identity.authFetch("/api/mvp", { method: "POST", body: JSON.stringify({ sessionDate: mvp.sessionDate, nomineeId, note }) });
+        const res = await GUWH.Identity.authFetch("/api/mvp", { method: "POST", body: JSON.stringify({ sessionDate, poolGameId: game.poolGameId, votes, note }) });
         const d = await res.json();
-        if (d.ok) {
-          setSaved(true);
-          onSaved(d);
-        } else {
-          setError(d.error || "Something went wrong");
-        }
+        if (d.ok) { setSaved(true); onSaved(d); }
+        else setError(d.error || "Something went wrong");
       } catch (e) {
         setError(String(e));
       } finally {
@@ -377,34 +379,45 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     return h(
-      "div",
-      { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6 mt-6" },
-      h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, "Nominate tonight's MVP"),
-      h("p", { className: "text-sm text-[var(--ink-soft)] mb-3" }, "You reffed a game this session — pick who impressed you most."),
+      "form",
+      { onSubmit: submit, className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6" },
+      h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-1" }, "MVPs for " + game.label),
+      h("p", { className: "text-sm text-[var(--ink-soft)] mb-3" }, "You reffed this game. Pick an MVP in any category that played; leave the rest blank."),
       error && h("p", { className: "text-sm text-[var(--bad)] mb-2" }, error),
       h(
-        "form",
-        { onSubmit: submit, className: "flex flex-col gap-3 max-w-sm" },
-        h(
-          "select",
-          { className: inputCls, value: nomineeId, onChange: (e) => setNomineeId(e.target.value) },
-          h("option", { value: "" }, "Choose a player…"),
-          mvp.nominees.map((p) => h("option", { key: p.id, value: p.id }, GUWH.displayName(p)))
-        ),
-        h("input", { type: "text", maxLength: 280, placeholder: "Optional note (e.g. why)", className: inputCls, value: note, onChange: (e) => setNote(e.target.value) }),
-        h(Button, { type: "submit", disabled: !nomineeId || saving }, mvp.myNomination ? "Update nomination" : "Submit nomination")
+        "div",
+        { className: "grid sm:grid-cols-2 gap-3" },
+        MVP_CATS.map((c) =>
+          h(
+            "label",
+            { key: c.key, className: "flex flex-col gap-1" },
+            h("span", { className: "text-xs font-semibold text-[var(--ink)]" }, c.label),
+            h(
+              "select",
+              { className: inputCls, value: votes[c.key] || "", disabled: (game.options[c.key] || []).length === 0, onChange: (e) => setVotes((v) => Object.assign({}, v, { [c.key]: e.target.value })) },
+              h("option", { value: "" }, (game.options[c.key] || []).length ? "No vote" : "Nobody in this category"),
+              (game.options[c.key] || []).map((p) => h("option", { key: p.id, value: p.id }, p.name))
+            )
+          )
+        )
       ),
-      saved && h("p", { className: "text-xs text-[var(--good-dark)] mt-2" }, "Saved.")
+      h("input", { type: "text", maxLength: 280, placeholder: "Optional note (e.g. why)", className: inputCls + " mt-3", value: note, onChange: (e) => setNote(e.target.value) }),
+      h("div", { className: "mt-3 flex items-center gap-3" },
+        h(Button, { type: "submit", disabled: saving }, saving ? "Saving…" : hadVotes ? "Update votes" : "Submit votes"),
+        saved && h("span", { className: "text-xs text-[var(--good-dark)]" }, "Saved.")
+      )
     );
   }
 
   // Results for the week (2 Oct 2026): final scores, goal scorers and the
   // night's MVP, from /api/game-board. Renders nothing until something has
   // been recorded for that week.
-  function ResultsCard({ rows, mvp, highlightTeamName }) {
+  // Each game's MVPs and referees (5 Nov 2026); coordinators also see which
+  // referees have voted, from /api/mvp (refStatus, by game label).
+  function ResultsCard({ rows, mvp, highlightTeamName, refStatus }) {
     const games = [];
     (rows || []).forEach((row) => (row.poolGames || []).forEach((pg) => {
-      if (pg.blackScore != null && pg.whiteScore != null) games.push(Object.assign({ rowLabel: row.label, single: (row.gameCount || (row.poolGames || []).length) === 1 }, pg));
+      if ((pg.blackScore != null && pg.whiteScore != null) || (pg.mvps || []).length) games.push(Object.assign({ rowLabel: row.label, single: (row.gameCount || (row.poolGames || []).length) === 1 }, pg));
     }));
     const mvps = mvp || [];
     if (games.length === 0 && mvps.length === 0) return null;
@@ -442,6 +455,25 @@ GUWH.Pages = GUWH.Pages || {};
                 { className: "flex justify-between gap-3 text-xs text-[var(--ink-soft)] mt-0.5" },
                 h("span", null, scorerLine(pg, "white")),
                 h("span", { className: "text-right" }, scorerLine(pg, "black"))
+              ),
+            (pg.mvps || []).length > 0 &&
+              h(
+                "div",
+                { className: "mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs" },
+                h(Icon, { name: "trophy", size: 13, className: "text-[var(--accent-dark)]" }),
+                pg.mvps.map((m) => h("span", { key: m.category }, h("span", { className: "font-semibold text-[var(--accent-dark)]" }, m.label + ": "), h("span", { className: "text-[var(--ink)]" }, m.name)))
+              ),
+            // Who reffed, so a missing vote can be followed up.
+            (pg.referees || []).length > 0 &&
+              h(
+                "p",
+                { className: "mt-1 text-[11px] text-[var(--ink-soft)]" },
+                "Refs: ",
+                pg.referees.map((r, j) => {
+                  const st = refStatus && refStatus[(pg.single ? pg.rowLabel : pg.rowLabel + " · " + pg.pool)];
+                  const s = st && st.find((x) => x.id === r.id);
+                  return h("span", { key: r.id }, (j ? ", " : "") + GUWH.displayName(r), s ? (s.counts ? " (voted, counts)" : s.voted ? " (voted)" : " (not voted)") : null);
+                })
               )
           )
         )
@@ -460,6 +492,11 @@ GUWH.Pages = GUWH.Pages || {};
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
 
+    // After a vote, refresh the results without the loading flicker.
+    function reloadBoard() {
+      const q = data ? "?date=" + encodeURIComponent(data.sessionDate) : "";
+      GUWH.Identity.authFetch("/api/game-board" + q).then((r) => r.json()).then((d) => { if (d.ok) setData(d); }).catch(() => {});
+    }
     function load(date) {
       setLoading(true);
       setError(null);
@@ -510,7 +547,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           React.Fragment,
           null,
-          data.published && h(ResultsCard, { rows: data.rows, mvp: data.mvp, highlightTeamName: myTeamName }),
+          data.published && h(ResultsCard, { rows: data.rows, mvp: data.mvp, highlightTeamName: myTeamName, refStatus: mvp && mvp.results ? Object.fromEntries(mvp.results.map((g) => [g.label, g.referees || []])) : null }),
           h(
             "div",
             { className: "mb-10" },
@@ -548,7 +585,12 @@ GUWH.Pages = GUWH.Pages || {};
             h("h3", { className: "font-display text-lg font-bold text-[var(--ink)] mb-3" }, "The night's timetable"),
             h(PublicTimetable, { rows: data.rows, highlightTeamName: myTeamName })
           ),
-          mvp && mvp.canNominate && h(MvpNominationCard, { mvp, onSaved: setMvp })
+          mvp && mvp.canNominate &&
+            h(
+              "div",
+              { className: "mt-6 flex flex-col gap-4" },
+              mvp.games.map((g) => h(MvpVoteCard, { key: g.poolGameId + ":" + mvp.sessionDate, game: g, sessionDate: mvp.sessionDate, onSaved: (d) => { setMvp(d); reloadBoard(); } }))
+            )
         )
     );
   }

@@ -50,8 +50,8 @@ export default async (req: Request, context: Context) => {
     if (date) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ ok: false, error: "Invalid date" }, 400);
       const [closeout] = await db.sql`
-        select c.closed_at, m.first_name, m.last_name
-        from session_attendance_closeouts c join members m on m.id = c.closed_by
+        select c.closed_at, c.closed_by, m.first_name, m.last_name
+        from session_attendance_closeouts c left join members m on m.id = c.closed_by
         where c.session_date = ${date}::date
       `;
       if (!closeout) return json({ ok: false, error: "That day hasn't been closed out" }, 404);
@@ -65,7 +65,8 @@ export default async (req: Request, context: Context) => {
         ok: true,
         sessionDate: date,
         closedAt: closeout.closed_at,
-        closedByName: (closeout.first_name + " " + closeout.last_name).trim(),
+        // No closed_by: closed automatically at 8pm (5 Nov 2026).
+        closedByName: closeout.closed_by ? (closeout.first_name + " " + closeout.last_name).trim() : "Automatic (8pm)",
         players: players.map((p: any) => ({
           firstName: p.first_name,
           lastName: p.last_name,
@@ -76,9 +77,9 @@ export default async (req: Request, context: Context) => {
     }
 
     const days = await db.sql`
-      select c.session_date, c.closed_at, m.first_name, m.last_name,
+      select c.session_date, c.closed_at, c.closed_by, m.first_name, m.last_name,
         (select count(*)::int from session_attendance sa where sa.session_date = c.session_date and sa.attended = true) as attended_count
-      from session_attendance_closeouts c join members m on m.id = c.closed_by
+      from session_attendance_closeouts c left join members m on m.id = c.closed_by
       order by c.session_date desc
       limit 60
     `;
@@ -87,7 +88,7 @@ export default async (req: Request, context: Context) => {
       days: days.map((d: any) => ({
         sessionDate: dateToString(d.session_date),
         closedAt: d.closed_at,
-        closedByName: (d.first_name + " " + d.last_name).trim(),
+        closedByName: d.closed_by ? (d.first_name + " " + d.last_name).trim() : "Automatic (8pm)",
         attendedCount: d.attended_count,
       })),
     });

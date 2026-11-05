@@ -15,7 +15,9 @@
 //                                              Administrator only.
 // POST /api/trial-signup { firstName, lastName, age, finSize, handed,
 //                          emergencyName, emergencyPhone, phone, email,
-//                          sessionDate, heardAbout, website, ref }
+//                          sessionDate, heardAbout, website, ref,
+//                          children?: [{ firstName, age, finSize }], parentPlaying? }
+//        children (5 Nov 2026): a parent booking their kids in too
 //        -> { ok, signup }                     public, no login. signup.invitedBy =
 //                                              the member's name when a valid ref came in
 //
@@ -68,6 +70,11 @@ async function ensureTable(db: any) {
     )
   `;
   await db.sql`alter table trial_signups add column if not exists invited_by text`;
+  // Family sign-up (5 Nov 2026): children coming too, and the member the
+  // coordinator made from this signup ("Add to tonight").
+  await db.sql`alter table trial_signups add column if not exists children jsonb`;
+  await db.sql`alter table trial_signups add column if not exists parent_playing boolean not null default true`;
+  await db.sql`alter table trial_signups add column if not exists added_member_id text`;
   await ensureNicknameColumn(db);
   await ensureInviteColumns(db);
   tableReady = true;
@@ -92,6 +99,7 @@ export default async (req: Request, context: Context) => {
       const sessionDate = askedDate ? requestedSessionDate(askedDate) : nextSessionDateISO();
       const rows = await db.sql`
         select t.id, t.first_name, t.last_name, t.email, t.phone, t.age, t.fin_size, t.handed, t.emergency_name, t.emergency_phone, t.heard_from, t.created_at,
+               t.children, t.parent_playing, t.added_member_id,
                m.nickname as inv_nickname, m.first_name as inv_first_name, m.last_name as inv_last_name
         from trial_signups t
         left join members m on m.id = t.invited_by
@@ -104,6 +112,11 @@ export default async (req: Request, context: Context) => {
         signups: rows.map((r: any) => ({
           id: r.id,
           name: `${r.first_name} ${r.last_name}`.trim(),
+          firstName: r.first_name,
+          lastName: r.last_name,
+          children: Array.isArray(r.children) ? r.children : [],
+          parentPlaying: r.parent_playing !== false,
+          added: !!r.added_member_id,
           email: r.email,
           phone: r.phone,
           age: r.age,
@@ -120,7 +133,7 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "GET") {
       const r = await resolveRef(db, cleanRef(url.searchParams.get("ref")));
-      return json({ ok: true, dates: nextFourWednesdays(), invite: r ? { inviterName: r.inviterName, guestName: r.guestName } : null });
+      return json({ ok: true, dates: nextFourWednesdays(), invite: r ? { inviterName: r.inviterName, guestName: r.guestName, children: r.children || [] } : null });
     }
 
     if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
@@ -144,11 +157,24 @@ export default async (req: Request, context: Context) => {
     if (!firstName) missing.push("first name");
     if (!lastName) missing.push("last name");
     if (!Number.isFinite(age) || age < 5 || age > 99) missing.push("age");
-    if (!finSize) missing.push("fin / shoe size");
+    // Not needed from a parent who's only bringing the kids (5 Nov 2026).
+    const bringingOnly = Array.isArray(body.children) && body.children.length > 0 && body.parentPlaying === false;
+    if (!finSize && !bringingOnly) missing.push("fin / shoe size");
     if (!emergencyName) missing.push("emergency contact name");
     if (!emergencyPhone) missing.push("emergency contact phone");
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) missing.push("a valid email");
     if (missing.length) return json({ ok: false, error: "Please fill in: " + missing.join(", ") }, 400);
+
+    // Children coming too (5 Nov 2026).
+    const rawKids = Array.isArray(body.children) ? body.children.filter((c: any) => c && clean(c.firstName)) : [];
+    if (rawKids.length > 8) return json({ ok: false, error: "That's more than 8 children - message the club and we'll sort it out." }, 400);
+    const children = [];
+    for (const c of rawKids) {
+      const kidAge = Number(c.age);
+      if (!Number.isFinite(kidAge) || kidAge < 1 || kidAge > 17) return json({ ok: false, error: "Please enter an age (under 18) for " + clean(c.firstName, 60) + "." }, 400);
+      children.push({ firstName: clean(c.firstName, 60), age: Math.floor(kidAge), finSize: clean(c.finSize, 20) || null });
+    }
+    const parentPlaying = !(children.length && body.parentPlaying === false);
 
     if (!nextFourWednesdays().includes(sessionDate)) {
       return json({ ok: false, error: "Please pick one of the Wednesdays in the list." }, 400);
@@ -164,14 +190,15 @@ export default async (req: Request, context: Context) => {
         update trial_signups set
           first_name = ${firstName}, last_name = ${lastName}, phone = ${phone}, age = ${Math.floor(age)},
           fin_size = ${finSize}, handed = ${handed}, emergency_name = ${emergencyName},
-          emergency_phone = ${emergencyPhone}, heard_from = ${heardFrom}
+          emergency_phone = ${emergencyPhone}, heard_from = ${heardFrom},
+          children = ${JSON.stringify(children)}::jsonb, parent_playing = ${parentPlaying}
         where id = ${existing.id}
         returning id, session_date::text as session_date, first_name
       `;
     } else {
       [row] = await db.sql`
-        insert into trial_signups (session_date, first_name, last_name, email, phone, age, fin_size, handed, emergency_name, emergency_phone, heard_from)
-        values (${sessionDate}, ${firstName}, ${lastName}, ${email}, ${phone}, ${Math.floor(age)}, ${finSize}, ${handed}, ${emergencyName}, ${emergencyPhone}, ${heardFrom})
+        insert into trial_signups (session_date, first_name, last_name, email, phone, age, fin_size, handed, emergency_name, emergency_phone, heard_from, children, parent_playing)
+        values (${sessionDate}, ${firstName}, ${lastName}, ${email}, ${phone}, ${Math.floor(age)}, ${finSize}, ${handed}, ${emergencyName}, ${emergencyPhone}, ${heardFrom}, ${JSON.stringify(children)}::jsonb, ${parentPlaying})
         returning id, session_date::text as session_date, first_name
       `;
     }

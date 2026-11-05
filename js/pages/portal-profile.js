@@ -295,7 +295,7 @@ GUWH.Pages = GUWH.Pages || {};
   // parent's own profile. They don't get a login. Booking them in for
   // Wednesday happens on the Dashboard; game fees bill to the parent.
   function FamilyCard({ parentName }) {
-    const emptyForm = { firstName: "", lastName: "", dateOfBirth: "", position: "Unknown" };
+    const emptyForm = { firstName: "", lastName: "", dateOfBirth: "", position: "Unknown", gender: "" };
     const [kids, setKids] = React.useState(null);
     const [editingId, setEditingId] = React.useState(null); // a kid id, "new", or null
     const [form, setForm] = React.useState(emptyForm);
@@ -311,7 +311,7 @@ GUWH.Pages = GUWH.Pages || {};
 
     function set(k, v) { setForm((f) => Object.assign({}, f, { [k]: v })); }
     function startNew() { setForm(emptyForm); setEditingId("new"); setError(null); }
-    function startEdit(k) { setForm({ firstName: k.firstName, lastName: k.lastName, dateOfBirth: k.dateOfBirth || "", position: k.position || "Unknown" }); setEditingId(k.id); setError(null); }
+    function startEdit(k) { setForm({ firstName: k.firstName, lastName: k.lastName, dateOfBirth: k.dateOfBirth || "", position: k.position || "Unknown", gender: k.gender || "" }); setEditingId(k.id); setError(null); }
 
     async function save(ev) {
       ev.preventDefault();
@@ -381,6 +381,17 @@ GUWH.Pages = GUWH.Pages || {};
                 h("select", { className: inputCls, value: form.position, onChange: (e) => set("position", e.target.value) }, REAL_POSITIONS.map((p) => h("option", { key: p, value: p }, p)))
               )
             ),
+            h(
+              FormField,
+              { label: "Gender", hint: "Optional. Only used for the MVP awards." },
+              h(
+                "select",
+                { className: inputCls + " sm:max-w-xs", value: form.gender, onChange: (e) => set("gender", e.target.value) },
+                h("option", { value: "" }, "Not specified"),
+                h("option", { value: "male" }, "Male"),
+                h("option", { value: "female" }, "Female")
+              )
+            ),
             h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Your emergency contact and phone number (above) are used for your children too."),
             error && h("p", { className: "text-xs text-[var(--bad)]" }, error),
             h(
@@ -427,6 +438,7 @@ GUWH.Pages = GUWH.Pages || {};
               phone: d.member.phone || "",
               position: d.member.position || "Unknown",
               usualKind: d.member.usualKind || "player",
+              gender: d.member.gender || "",
               grade: d.member.grade || "",
             });
           } else setError(d.error || "Something went wrong");
@@ -554,6 +566,19 @@ GUWH.Pages = GUWH.Pages || {};
           "p",
           { className: "text-xs text-[var(--ink-soft)] -mt-3" },
           "Pick your own grade to start — a Game Coordinator or Administrator may adjust it once they've seen you play."
+        ),
+        // Gender (5 Nov 2026): only used for the MVP awards' male and female
+        // categories. Optional.
+        h(
+          FormField,
+          { label: "Gender", hint: "Optional. Only used for the MVP awards (junior/senior, male/female)." },
+          h(
+            "select",
+            { className: inputCls + " sm:max-w-xs", value: form.gender, onChange: (e) => set("gender", e.target.value) },
+            h("option", { value: "" }, "Not specified"),
+            h("option", { value: "male" }, "Male"),
+            h("option", { value: "female" }, "Female")
+          )
         ),
         // How they usually come (3 Nov 2026, committee request): the
         // default when they book in from the Dashboard.

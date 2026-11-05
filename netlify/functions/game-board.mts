@@ -15,7 +15,8 @@
 // every published Wednesday up to the upcoming one, newest first, plus the
 // upcoming one itself, for the page's Previous/Next buttons. Each pool game
 // now also carries its final score and goal scorers when recorded, and
-// `mvp` lists the night's MVP(s) once referees have nominated.
+// `mvp` lists the night's MVP(s) once referees have nominated (nights
+// before 5 Nov 2026); since then each pool game has its own `mvps`.
 //
 // Each row is either a non-game activity or a 'game' row with up to two
 // simultaneous pool games (Pool A / Pool B), each carrying its own
@@ -28,6 +29,7 @@ import { getDatabase } from "@netlify/database";
 import { ensureDevelopmentTeams, ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, shortName, unauthorized } from "./_shared/roles.mts";
 import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
+import { gameMvpResults } from "./_shared/game-mvp.mts";
 import { ensureLineupChanges } from "./_shared/lineups.mts";
 
 function shapePlayer(r: any) {
@@ -111,6 +113,8 @@ export default async (req: Request, context: Context) => {
           select tpr.pool_game_id, m.id, m.nickname, m.first_name, m.last_name, m.is_new
           from timetable_pool_referees tpr join members m on m.id = tpr.member_id
           where tpr.pool_game_id = any(${poolGameIds})
+          -- Timetable order: the first-listed referee's MVP votes count.
+          order by tpr.id asc
         `
       : [];
     // Goal scorers per pool game, with which side they played on.
@@ -143,6 +147,8 @@ export default async (req: Request, context: Context) => {
       if (!refsByPG[r.pool_game_id]) refsByPG[r.pool_game_id] = [];
       refsByPG[r.pool_game_id].push(shapePlayer(r));
     });
+    // Each game's MVPs (5 Nov 2026) - see _shared/game-mvp.mts.
+    const mvpByPG = published ? await gameMvpResults(db, poolGameIds, memberDisplayName) : {};
     const pgsByRow: Record<number, any[]> = {};
     poolGameRows.forEach((pg: any) => {
       if (!pgsByRow[pg.row_id]) pgsByRow[pg.row_id] = [];
@@ -160,6 +166,7 @@ export default async (req: Request, context: Context) => {
           blackTeamName: pg && pg.black_team_id != null ? teamNames[pg.black_team_id] || null : null,
           whiteTeamName: pg && pg.white_team_id != null ? teamNames[pg.white_team_id] || null : null,
           referees: pg ? refsByPG[pg.id] || [] : [],
+          mvps: pg && mvpByPG[pg.id] ? mvpByPG[pg.id].winners : [],
           blackScore: pg ? pg.black_score : null,
           whiteScore: pg ? pg.white_score : null,
           scorers: pg

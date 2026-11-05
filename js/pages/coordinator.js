@@ -117,7 +117,10 @@ GUWH.Pages = GUWH.Pages || {};
     const [addResults, setAddResults] = React.useState([]);
     // Add a player (21 Oct 2026): name and email, typed twice. A typo here
     // creates an account nobody can reach and emails a stranger.
-    const [addPlayer, setAddPlayer] = React.useState({ firstName: "", lastName: "", email: "", confirmEmail: "" });
+    // A whole family (5 Nov 2026): children are added under them, no email.
+    const emptyAdd = () => ({ firstName: "", lastName: "", email: "", confirmEmail: "", kind: "player", gender: "", children: [] });
+    const [addPlayer, setAddPlayer] = React.useState(emptyAdd);
+    const [addingTrial, setAddingTrial] = React.useState(null); // trial signup id being added
     const [addNotice, setAddNotice] = React.useState(null);
     const [roll, setRoll] = React.useState({}); // memberId -> ticked, pending edits not yet saved
     const [savingRoll, setSavingRoll] = React.useState(false);
@@ -172,6 +175,12 @@ GUWH.Pages = GUWH.Pages || {};
     // can still be corrected (see coordinator-checkin.mts).
     const isFuture = !!(checkin && checkin.today && checkin.sessionDate > checkin.today);
     const isPast = !!(checkin && checkin.today && checkin.sessionDate < checkin.today);
+    // Automatic attendance (5 Nov 2026): from 11 Nov the night records
+    // itself at 8pm from who's booked in, so there's nothing to tick until
+    // then. Once it has, the night can be reopened and edited by hand.
+    const auto = checkin && checkin.autoClose;
+    const autoPending = !!(auto && !auto.ran);
+    const editable = !!(checkin && !checkin.closed && !isFuture && !autoPending);
     const weeks = checkin && checkin.upcoming
       ? Array.from({ length: 13 }, (_, i) => addDaysISO(checkin.upcoming, -7 * i))
       : [];
@@ -199,26 +208,57 @@ GUWH.Pages = GUWH.Pages || {};
       if (!f || !l) { setError("Enter both a first and last name."); return; }
       if (!isLikelyEmail(e1)) { setError("That email address doesn't look right."); return; }
       if (e1 !== e2) { setError("The two email addresses don't match. Check for a typo — this one gets an invitation."); return; }
+      const children = addPlayer.children.filter((c) => c.firstName.trim());
+      if (addPlayer.kind === "none" && !children.length) { setError("Add the children they're bringing, or choose what they're here for."); return; }
+      const ok = await postNewPlayer({ firstName: f, lastName: l, email: e1, kind: addPlayer.kind, gender: addPlayer.gender || null, children });
+      if (ok) setAddPlayer(emptyAdd());
+    }
+
+    // Shared by the form above and "Add to tonight" on a free-trial signup.
+    async function postNewPlayer(fields) {
+      setError(null);
+      setAddNotice(null);
       try {
         const res = await GUWH.Identity.authFetch("/api/coordinator/attendance", {
           method: "POST",
-          body: JSON.stringify({ sessionDate, firstName: f, lastName: l, email: e1 }),
+          body: JSON.stringify(Object.assign({ sessionDate }, fields)),
         });
         const data = await res.json();
-        if (!data.ok) { setError(data.error || "Something went wrong"); return; }
+        if (!data.ok) { setError(data.error || "Something went wrong"); return false; }
         setSessionDate(data.sessionDate);
         setPlayers(data.players);
-        setAddPlayer({ firstName: "", lastName: "", email: "", confirmEmail: "" });
+        const f = fields.firstName;
+        const kids = data.childrenAdded ? " and " + data.childrenAdded + " child" + (data.childrenAdded === 1 ? "" : "ren") : "";
         setAddNotice(
           data.recognised
-            ? f + " is already a member — booked them in for this week."
+            ? f + " is already a member — booked " + (kids ? "them" + kids : "them") + " in for this week."
             : data.invited
-            ? f + " added, and an invitation is on its way to " + e1 + "."
-            : f + " added to the roll, but the invitation couldn't be sent" + (data.inviteProblem ? ": " + data.inviteProblem : ".")
+            ? f + kids + " added, and an invitation is on its way to " + fields.email + "."
+            : f + kids + " added to the roll, but the invitation couldn't be sent" + (data.inviteProblem ? ": " + data.inviteProblem : ".")
         );
+        return true;
       } catch (e) {
         setError(String(e));
+        return false;
       }
+    }
+
+    // Free-trial signup -> real members, booked in, in one tap.
+    async function addTrialToTonight(t) {
+      setAddingTrial(t.id);
+      const ok = await postNewPlayer({
+        firstName: t.firstName,
+        lastName: t.lastName,
+        email: t.email,
+        kind: t.parentPlaying ? "player" : "none",
+        children: (t.children || []).map((c) => ({ firstName: c.firstName })),
+        trialSignupId: t.id,
+      });
+      setAddingTrial(null);
+      if (ok) setTrialSignups((list) => list.map((x) => (x.id === t.id ? Object.assign({}, x, { added: true }) : x)));
+    }
+    function setChild(i, key, value) {
+      setAddPlayer((v) => Object.assign({}, v, { children: v.children.map((c, j) => (j === i ? Object.assign({}, c, { [key]: value }) : c)) }));
     }
 
     function onSearchChange(value) {
@@ -313,18 +353,79 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "form",
         { onSubmit: addGuestPlayer, className: "mt-3 rounded-2xl bg-white ring-1 ring-black/5 p-5 flex flex-col gap-3" },
-        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Add a player"),
-        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-2" }, "Books them in for this week and emails them an invitation to set up their account. The email is typed twice because a mistake here invites a stranger."),
+        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, "Add a player or family"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-2" }, "Books them in for this week and emails them an invitation to set up their account. The email is typed twice because a mistake here invites a stranger. Bringing children? Add them below: they go on this person's account, no email needed."),
         h(
           "div",
           { className: "grid sm:grid-cols-2 gap-3" },
           h(FormField, { label: "First name" }, h("input", { className: inputCls, value: addPlayer.firstName, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { firstName: e.target.value })) })),
           h(FormField, { label: "Last name" }, h("input", { className: inputCls, value: addPlayer.lastName, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { lastName: e.target.value })) })),
           h(FormField, { label: "Email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.email, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { email: e.target.value })) })),
-          h(FormField, { label: "Confirm email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.confirmEmail, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { confirmEmail: e.target.value })) }))
+          h(FormField, { label: "Confirm email" }, h("input", { type: "email", autoComplete: "off", className: inputCls, value: addPlayer.confirmEmail, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { confirmEmail: e.target.value })) })),
+          h(
+            FormField,
+            { label: "Here for" },
+            h(
+              "select",
+              { className: inputCls, value: addPlayer.kind, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { kind: e.target.value })) },
+              h("option", { value: "player" }, "Playing"),
+              h("option", { value: "swim" }, "Lane swim"),
+              h("option", { value: "volunteer" }, "Volunteering"),
+              addPlayer.children.length > 0 && h("option", { value: "none" }, "Just bringing the kids")
+            )
+          ),
+          h(
+            FormField,
+            { label: "Gender", hint: "Optional, for the MVP awards" },
+            h(
+              "select",
+              { className: inputCls, value: addPlayer.gender, onChange: (e) => setAddPlayer((v) => Object.assign({}, v, { gender: e.target.value })) },
+              h("option", { value: "" }, "Not specified"),
+              h("option", { value: "male" }, "Male"),
+              h("option", { value: "female" }, "Female")
+            )
+          )
+        ),
+        // Children (5 Nov 2026): one row each.
+        addPlayer.children.map((c, i) =>
+          h(
+            "div",
+            { key: i, className: "rounded-xl bg-[var(--sand)] p-3 grid sm:grid-cols-[1fr_1fr_1fr_auto_auto] gap-3 items-end" },
+            h(FormField, { label: "Child's first name" }, h("input", { className: inputCls, value: c.firstName, onChange: (e) => setChild(i, "firstName", e.target.value) })),
+            h(FormField, { label: "Last name", hint: "If not " + (addPlayer.lastName || "the parent's") }, h("input", { className: inputCls, value: c.lastName, placeholder: addPlayer.lastName, onChange: (e) => setChild(i, "lastName", e.target.value) })),
+            h(FormField, { label: "Date of birth", hint: "If known" }, h("input", { type: "date", className: inputCls, value: c.dateOfBirth, onChange: (e) => setChild(i, "dateOfBirth", e.target.value) })),
+            h(
+              FormField,
+              { label: "Gender" },
+              h(
+                "select",
+                { className: inputCls + " !w-auto", value: c.gender || "", onChange: (e) => setChild(i, "gender", e.target.value) },
+                h("option", { value: "" }, "Not specified"),
+                h("option", { value: "male" }, "Male"),
+                h("option", { value: "female" }, "Female")
+              )
+            ),
+            h(
+              "div",
+              { className: "flex items-center gap-2" },
+              h(
+                "select",
+                { className: inputCls + " !w-auto", "aria-label": "Here for", value: c.kind, onChange: (e) => setChild(i, "kind", e.target.value) },
+                h("option", { value: "player" }, "Playing"),
+                h("option", { value: "swim" }, "Lane swim"),
+                h("option", { value: "volunteer" }, "Volunteering")
+              ),
+              h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline", onClick: () => setAddPlayer((v) => Object.assign({}, v, { children: v.children.filter((_, j) => j !== i), kind: v.kind === "none" && v.children.length === 1 ? "player" : v.kind })) }, "Remove")
+            )
+          )
+        ),
+        h(
+          "div",
+          null,
+          h("button", { type: "button", className: "text-sm font-semibold text-[var(--accent-dark)] underline", onClick: () => setAddPlayer((v) => Object.assign({}, v, { children: v.children.concat({ firstName: "", lastName: "", dateOfBirth: "", kind: "player", gender: "" }) })) }, "+ Add a child")
         ),
         addNotice && h("p", { className: "text-sm text-[var(--good-dark)]", role: "status" }, addNotice),
-        h("div", null, h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), "Add Player"))
+        h("div", null, h(Button, { type: "submit", variant: "ghost" }, h(Icon, { name: "plus", size: 16 }), addPlayer.children.length ? "Add family" : "Add Player"))
       ),
 
       // ---- Confirmed list — tick who showed up, then Save Roll / Close Roll ----
@@ -340,17 +441,21 @@ GUWH.Pages = GUWH.Pages || {};
           ? h(
               React.Fragment,
               null,
-              h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Everyone who said they're coming starts ticked. Untick anyone who didn't turn up, then Save Roll. Nothing is charged until the roll is saved — see Finance."),
-              !isFuture && !checkin.closed && players.some((p) => !(checkin.players.find((c) => c.id === p.id) || {}).marked) &&
+              autoPending
+                ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Nothing to tick: attendance records itself at 8pm on the night. Everyone listed here is counted as coming for what they booked, and charged for it. Someone didn't turn up? Press Cancel next to their name before 8pm.")
+                : auto && !checkin.closed
+                ? h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Reopened. Tick or untick anyone, then Save Roll, and Close Roll when you're done. Saving changes that night's game fees.")
+                : !auto && h("p", { className: "text-xs text-[var(--ink-soft)] mb-1" }, "Everyone who said they're coming starts ticked. Untick anyone who didn't turn up, then Save Roll. Nothing is charged until the roll is saved — see Finance."),
+              editable && players.some((p) => !(checkin.players.find((c) => c.id === p.id) || {}).marked) &&
                 h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-1" }, "Not saved yet."),
-              isFuture && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
+              isFuture && !auto && h("p", { className: "text-xs font-semibold text-[#8a5a12] mb-3" }, "This game hasn't happened yet — the roll opens on the night. You can still add or cancel players."),
               isPast && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)] mb-3" }, "Past week — saving updates that night's roll and game fees."),
               !isFuture && !isPast && h("div", { className: "mb-3" }),
               checkin.closed &&
                 h(
                   "div",
                   { className: "flex items-center gap-2 mb-3" },
-                  h(Pill, { tone: "good" }, h(Icon, { name: "check", size: 12 }), "Closed out by " + checkin.closedByName),
+                  h(Pill, { tone: "good" }, h(Icon, { name: "check", size: 12 }), checkin.closedAuto ? "Closed automatically at 8pm" : "Closed out by " + checkin.closedByName),
                   h(Button, { size: "sm", variant: "ghost", onClick: reopenRoll }, "Reopen")
                 )
             )
@@ -396,7 +501,7 @@ GUWH.Pages = GUWH.Pages || {};
                   h(
                     "div",
                     { className: "flex items-center gap-3" },
-                    checkin &&
+                    checkin && !autoPending &&
                       h(
                         "label",
                         { className: "flex items-center gap-1.5 text-xs font-semibold text-[var(--ink)]" },
@@ -413,9 +518,7 @@ GUWH.Pages = GUWH.Pages || {};
                 )
               )
             ),
-        checkin &&
-          !checkin.closed &&
-          !isFuture &&
+        editable &&
           h(
             "div",
             { className: "mt-4 flex flex-wrap gap-3" },
@@ -452,9 +555,20 @@ GUWH.Pages = GUWH.Pages || {};
                   t.invitedBy && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)]" }, t.invitedBy + "'s mate"),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Fins/shoe " + (t.finSize || "?") + " · " + (t.handed || "Right") + "-handed" + (t.heardFrom ? " · heard via " + t.heardFrom : "")),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, (t.phone ? t.phone + " · " : "") + t.email),
-                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone)
+                  h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone),
+                  (t.children || []).length > 0 &&
+                    h("p", { className: "text-xs font-semibold text-[var(--ink)] mt-1" },
+                      (t.parentPlaying ? "Bringing " : "Not playing, bringing ") +
+                      t.children.map((c) => c.firstName + " (" + c.age + (c.finSize ? ", fins " + c.finSize : "") + ")").join(", "))
                 ),
-                h(Pill, { tone: "accent" }, "Free trial")
+                h(
+                  "div",
+                  { className: "flex flex-col items-end gap-2 shrink-0" },
+                  h(Pill, { tone: "accent" }, "Free trial"),
+                  t.added
+                    ? h("span", { className: "text-xs font-semibold text-[var(--good-dark)] flex items-center gap-1" }, h(Icon, { name: "check", size: 12 }), "Added")
+                    : h(Button, { size: "sm", disabled: addingTrial === t.id, onClick: () => addTrialToTonight(t) }, addingTrial === t.id ? "Adding…" : (t.children || []).length ? "Add family to tonight" : "Add to tonight")
+                )
               )
             )
           ),
@@ -681,16 +795,39 @@ GUWH.Pages = GUWH.Pages || {};
       const firstMain = board.teams.find((t) => !t.isDevelopment);
       const teamId = assignTo[player.id] || (firstMain && firstMain.id);
       if (!teamId) return;
+      if (teamId === "swim" || teamId === "volunteer") return notPlaying(player, teamId);
       call({ action: "assign", memberEmail: player.email, teamId: Number(teamId) });
     }
 
+    // Not playing after all (5 Nov 2026, Liam): someone added at the pool, or
+    // already in a team, is lane swimming or volunteering instead. Changes
+    // their booking and takes them out of any team for the night.
+    function notPlaying(player, kind) {
+      if (!window.confirm("Change " + GUWH.displayName(player) + " to " + (kind === "swim" ? "lane swim" : "volunteering") + "? They'll come out of any team, and future weeks will book them in the same way until it's changed (on their Profile, or by putting them back in a team here).")) return;
+      call({ action: "book_in", memberEmail: player.email, kind });
+    }
+    const notPlayingOptions = () => [
+      h("option", { key: "swim", value: "swim" }, "Lane swim (no team)"),
+      h("option", { key: "volunteer", value: "volunteer" }, "Volunteering (no team)"),
+    ];
+
     // Someone who said they weren't coming turned up anyway (27 Oct 2026,
     // Liam): book them in and, unless "Unassigned" was picked, place them.
+    // From the Lane swim & volunteering box: playing after all, or the other
+    // of the two.
+    function playAfterAll(player, value) {
+      if (!value) return;
+      if (value === "swim" || value === "volunteer") return notPlaying(player, value);
+      const team = value === "unassigned" ? null : board.teams.find((t) => String(t.id) === value);
+      if (!window.confirm(GUWH.displayName(player) + " is playing" + (team ? " for " + team.name : "") + "? Future weeks will book them in to play again.")) return;
+      call({ action: "book_in", memberEmail: player.email, teamId: team ? team.id : null });
+    }
+
     // Lane swim / Volunteering (3 Nov 2026): book them in for that, no team.
     function bookInAnyway(player, value) {
       if (!value) return;
       if (value === "swim" || value === "volunteer") {
-        if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session as " + (value === "swim" ? "a lane swimmer" : "a volunteer") + "?")) return;
+        if (!window.confirm("Book " + GUWH.displayName(player) + " in for this session as " + (value === "swim" ? "a lane swimmer" : "a volunteer") + "? Future weeks will book them in the same way until it's changed (on their Profile, or by putting them back in a team here).")) return;
         call({ action: "book_in", memberEmail: player.email, kind: value });
         return;
       }
@@ -730,10 +867,11 @@ GUWH.Pages = GUWH.Pages || {};
           className: inputCls + " !w-auto !py-1 text-xs",
           value: String(team.id),
           "aria-label": "Move " + GUWH.displayName(p) + " to",
-          onChange: (e) => moveTo(p, e.target.value, false),
+          onChange: (e) => (e.target.value === "swim" || e.target.value === "volunteer" ? notPlaying(p, e.target.value) : moveTo(p, e.target.value, false)),
         },
         mainTeams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
-        h("option", { value: "unassigned" }, "Unassigned")
+        h("option", { value: "unassigned" }, "Unassigned"),
+        notPlayingOptions()
       );
     }
 
@@ -847,9 +985,10 @@ GUWH.Pages = GUWH.Pages || {};
                       h(
                         "select",
                         { className: inputCls + " !w-auto !py-1.5 text-sm", value: assignTo[p.id] || mainTeams[0].id, onChange: (e) => setAssignTo((prev) => Object.assign({}, prev, { [p.id]: e.target.value })) },
-                        mainTeams.map((t) => h("option", { key: t.id, value: t.id }, t.name))
+                        mainTeams.map((t) => h("option", { key: t.id, value: t.id }, t.name)),
+                        notPlayingOptions()
                       ),
-                      h(Button, { size: "sm", onClick: () => assign(p) }, "Assign"),
+                      h(Button, { size: "sm", onClick: () => assign(p) }, (assignTo[p.id] === "swim" || assignTo[p.id] === "volunteer") ? "Change" : "Assign"),
                       devSelect(p)
                     ),
                   }))
@@ -868,6 +1007,45 @@ GUWH.Pages = GUWH.Pages || {};
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Development teams"),
           h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "For the development game. Each player here also keeps their main team for the later games."),
           h("div", { className: "grid sm:grid-cols-2 gap-5" }, devTeams.map(teamCard))
+        ),
+
+      // Lane swim & volunteering (5 Nov 2026): so they can be put back in
+      // a team if they're playing after all. Doing so makes playing their
+      // default again.
+      (board.notPlaying || []).length > 0 &&
+        h(
+          "div",
+          { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mt-6" },
+          h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Lane swim & volunteering (" + board.notPlaying.length + ")"),
+          h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "Booked in but not playing. Playing after all? Pick a team next to their name. Future weeks will book them in to play again."),
+          h(
+            "div",
+            { className: "flex flex-col gap-2" },
+            board.notPlaying.map((p) =>
+              h(PlayerRow, {
+                key: p.id,
+                player: p,
+                action: h(
+                  "div",
+                  { className: "flex items-center gap-2 flex-wrap justify-end" },
+                  h("span", { className: "text-[10px] font-semibold text-[var(--ink-soft)]" }, p.kind === "swim" ? "Lane swim" : "Volunteering"),
+                  h(
+                    "select",
+                    {
+                      className: inputCls + " !w-auto !py-1 text-xs",
+                      value: "",
+                      "aria-label": "Move " + GUWH.displayName(p) + " to a team",
+                      onChange: (e) => playAfterAll(p, e.target.value),
+                    },
+                    h("option", { value: "" }, "Playing? Move to…"),
+                    board.teams.map((t) => h("option", { key: t.id, value: String(t.id) }, t.name)),
+                    h("option", { value: "unassigned" }, "Unassigned"),
+                    p.kind === "swim" ? h("option", { value: "volunteer" }, "Volunteering (no team)") : h("option", { value: "swim" }, "Lane swim (no team)")
+                  )
+                ),
+              })
+            )
+          )
         ),
 
       // Said they're not coming. Kept at the bottom, out of the way, but
@@ -1970,6 +2148,33 @@ GUWH.Pages = GUWH.Pages || {};
       }
       prevLeft.current = left;
     }, [left]);
+    // The flashing stops by itself after 30 seconds (5 Nov 2026), leaving
+    // the final score and a red 0:00 until the next game takes over.
+    React.useEffect(() => {
+      if (!alarmOn) return;
+      const t = setTimeout(() => setAlarmOn(false), 30000);
+      return () => clearTimeout(t);
+    }, [alarmOn]);
+
+    // Next game by itself (5 Nov 2026, Liam: the poolside screen sat on a
+    // flashing 0:00 until someone exited and reopened it). When a game's
+    // start time comes round, the board moves to it, so the poolside
+    // screen runs the whole night untouched. It follows its own pool: with
+    // Pool A and Pool B playing at once, a screen showing Pool B stays on
+    // Pool B. It only moves when a start time is reached, so going back to
+    // fix an earlier game isn't undone straight away.
+    const pool = pg.pool;
+    let scheduled = -1;
+    games.forEach((x, i) => {
+      if (x.pg.pool === pool && x.startMin != null && gameClockMs(sessionDate, x.startMin) <= now) scheduled = i;
+    });
+    const lastScheduled = React.useRef({ pool, idx: scheduled });
+    React.useEffect(() => {
+      const prev = lastScheduled.current;
+      lastScheduled.current = { pool, idx: scheduled };
+      if (prev.pool === pool && scheduled !== prev.idx && scheduled >= 0 && scheduled !== idx) setIdx(scheduled);
+      // eslint-disable-next-line
+    }, [scheduled, pool]);
 
     async function sendGoal(side, delta, memberId) {
       setPicker(null);
@@ -2436,41 +2641,54 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
-  // MVP nominations — read-only for coordinators/admins (arrange_teams),
-  // filled in by whoever refereed a pool game this session over on the
-  // public Game Board page (see gameboard.js's MvpNominationCard). Just a
-  // tally + who nominated whom, in case the club wants it for the raffle
-  // board or a shout-out at the next session.
+  // MVP votes — read-only for coordinators/admins (arrange_teams), cast by
+  // each game's referees on the Game Board page (see gameboard.js's
+  // MvpVoteCard and _shared/game-mvp.mts).
   function MvpResultsPanel({ mvp }) {
     if (!mvp || !mvp.canViewResults) return null;
-    const results = mvp.results || [];
+    // Per game (5 Nov 2026): each game's winners from the ballot that counts
+    // (the first-listed referee who voted), and which referees have voted.
+    const games = (mvp.results || []).filter((g) => (g.referees || []).length);
+    const night = mvp.nightResults || [];
     return h(
       "div",
       { className: "rounded-2xl border-2 border-black/5 p-5 sm:p-6 max-w-md mt-6" },
-      h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "MVP nominations"),
-      results.length === 0
-        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No nominations yet — referees can nominate from the Game Board page once the board is published.")
-        : h(
+      h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "MVP votes"),
+      games.length === 0 && night.length === 0 && h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No referees on any game yet. Referees vote from This Week's Game once the board is published."),
+      h(
+        "div",
+        { className: "flex flex-col gap-3" },
+        games.map((g) =>
+          h(
             "div",
-            { className: "flex flex-col gap-3" },
-            results.map((r) =>
-              h(
-                "div",
-                { key: r.nomineeId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
-                h(
-                  "div",
-                  { className: "flex items-center justify-between" },
-                  h("p", { className: "text-sm font-bold text-[var(--ink)]" }, r.name),
-                  h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, r.votes + " vote" + (r.votes === 1 ? "" : "s"))
-                ),
-                h(
-                  "div",
-                  { className: "mt-1.5 flex flex-col gap-0.5" },
-                  r.notes.map((n, i) => h("p", { key: i, className: "text-xs text-[var(--ink-soft)]" }, n.by + (n.note ? ': "' + n.note + '"' : "")))
-                )
-              )
+            { key: g.poolGameId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+            h("p", { className: "text-sm font-bold text-[var(--ink)]" }, g.label),
+            (g.winners || []).length
+              ? h("div", { className: "mt-1 flex flex-col gap-0.5" }, g.winners.map((w) => h("p", { key: w.category, className: "text-xs text-[var(--ink)]" }, h("span", { className: "font-semibold" }, w.label + ": "), w.name)))
+              : h("p", { className: "mt-1 text-xs text-[var(--ink-soft)]" }, "No votes yet."),
+            g.note && h("p", { className: "mt-1 text-xs text-[var(--ink-soft)]" }, '"' + g.note + '"'),
+            h(
+              "p",
+              { className: "mt-1.5 text-[11px] text-[var(--ink-soft)]" },
+              "Refs: " + g.referees.map((r) => r.name + (r.counts ? " (counts)" : r.voted ? " (voted, not counted)" : " (not voted)")).join(", ")
             )
           )
+        ),
+        // Nights before per-game voting.
+        night.map((r) =>
+          h(
+            "div",
+            { key: r.nomineeId, className: "rounded-xl bg-[var(--sand)] p-3.5" },
+            h(
+              "div",
+              { className: "flex items-center justify-between" },
+              h("p", { className: "text-sm font-bold text-[var(--ink)]" }, r.name),
+              h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, r.votes + " vote" + (r.votes === 1 ? "" : "s"))
+            ),
+            h("div", { className: "mt-1.5 flex flex-col gap-0.5" }, r.notes.map((n, i) => h("p", { key: i, className: "text-xs text-[var(--ink-soft)]" }, n.by + (n.note ? ': "' + n.note + '"' : ""))))
+          )
+        )
+      )
     );
   }
 

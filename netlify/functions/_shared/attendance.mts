@@ -56,6 +56,81 @@ export function melbourneToUTC(dateISO: string, hour: number, minute: number): D
 }
 
 
+// Attendance closes itself at 8pm (5 Nov 2026, Liam): members book in
+// ("I'm coming", before the night or at the pool), so the roll no longer
+// needs ticking or closing. At 8pm Melbourne time on a game night, everyone
+// booked in is recorded as attended, as whatever they booked for, which is
+// what charges their game fee, and the night is closed. Anyone the
+// coordinator already marked stays as they were. It runs once per night:
+// a night someone reopens to fix by hand isn't closed again behind them.
+// Nights before AUTO_CLOSE_FROM keep the old tick-and-save roll.
+//
+// Run by the scheduled attendance-autoclose function on Wednesday evenings,
+// and on loading the Attendance and Finance pages, so a missed run catches
+// up the next time anyone looks. Automatic rows have no marked_by/closed_by.
+export const AUTO_CLOSE_FROM = '2026-11-11';
+export const AUTO_CLOSE_HOUR = 20;
+let autoCloseReady = false;
+export async function ensureAutoClose(db: any): Promise<void> {
+ if (autoCloseReady) return;
+ await db.sql`create table if not exists attendance_autoclose_runs (
+  session_date date primary key,
+  ran_at timestamptz not null default now(),
+  recorded integer not null default 0
+ )`;
+ await db.sql`create table if not exists session_attendance_closeouts (
+  session_date date primary key,
+  closed_at timestamptz not null default now(),
+  closed_by text references members(id)
+ )`;
+ await db.sql`alter table session_attendance add column if not exists kind text not null default 'player'`;
+ await db.sql`alter table session_attendance alter column marked_by drop not null`;
+ await db.sql`alter table session_attendance_history alter column marked_by drop not null`;
+ await db.sql`alter table session_attendance_closeouts alter column closed_by drop not null`;
+ autoCloseReady = true;
+}
+
+export function autoCloseAt(sessionDate: string): Date {
+ return melbourneToUTC(sessionDate, AUTO_CLOSE_HOUR, 0);
+}
+
+// Returns the nights it closed just now.
+export async function autoCloseAttendance(db: any, now = new Date()): Promise<string[]> {
+ await ensureAutoClose(db);
+ const today = clubToday(now);
+ const due = await db.sql`
+  select to_char(s.session_date, 'YYYY-MM-DD') as d from sessions s
+  where s.session_date >= ${AUTO_CLOSE_FROM}::date and s.session_date <= ${today}::date
+    and not exists (select 1 from attendance_autoclose_runs r where r.session_date = s.session_date)
+  order by s.session_date`;
+ const closed: string[] = [];
+ for (const { d } of due) {
+  if (now < autoCloseAt(d)) continue;
+  // Claim the night first, so two runs at once can't both do it.
+  const claimed = await db.sql`insert into attendance_autoclose_runs (session_date) values (${d}::date) on conflict do nothing returning session_date`;
+  if (!claimed.length) continue;
+  // Already closed by hand before 8pm: that roll is the coordinator's.
+  const [already] = await db.sql`select 1 from session_attendance_closeouts where session_date = ${d}::date`;
+  if (already) continue;
+  const added = await db.sql`
+   with added as (
+    insert into session_attendance (session_date, member_id, attended, marked_by, kind)
+    select ${d}::date, b.member_id, true, null, b.kind
+    from bookings b join sessions s on s.id = b.session_id
+    where s.session_date = ${d}::date and b.status = 'in'
+    on conflict (session_date, member_id) do nothing
+    returning session_date, member_id, attended, marked_by
+   )
+   insert into session_attendance_history (session_date, member_id, attended, marked_by)
+   select session_date, member_id, attended, marked_by from added
+   returning member_id`;
+  await db.sql`insert into session_attendance_closeouts (session_date, closed_by) values (${d}::date, null) on conflict (session_date) do nothing`;
+  await db.sql`update attendance_autoclose_runs set recorded = ${added.length} where session_date = ${d}::date`;
+  closed.push(d);
+ }
+ return closed;
+}
+
 // Week-by-week browsing (2 Oct 2026). Game Board, Scores and MVP can now
 // look at any past Wednesday instead of only "the upcoming one", which
 // flipped to next week at midnight Wednesday. A requested date is only

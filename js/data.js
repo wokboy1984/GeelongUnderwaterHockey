@@ -12,7 +12,7 @@ GUWH.club = {
   venueAddress: "Foreshore Road, Corio VIC 3214",
   mapUrl: "https://www.google.com/maps/search/?api=1&query=Handbury+Centre+for+Wellbeing+Foreshore+Road+Corio",
   sessionDay: "Wednesday",
-  sessionTime: "6:00 – 7:30pm",
+  sessionTime: "6:00 – 7:45pm",
   freeSessions: 3,
   facebook: "https://www.facebook.com/GeelongUWHStu",
   highlightsVideo: "https://www.youtube.com/watch?v=JoiUTu4emcE",

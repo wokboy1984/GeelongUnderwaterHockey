@@ -300,7 +300,7 @@ GUWH.Pages = GUWH.Pages || {};
             "div",
             null,
             h(Pill, { tone: "accent" }, h(Icon, { name: "heart", size: 14 }), "After the whistle"),
-            h("h3", { className: "font-display text-2xl font-bold text-[var(--ink)] mt-3" }, "Wednesday doesn't end at 7:30."),
+            h("h3", { className: "font-display text-2xl font-bold text-[var(--ink)] mt-3" }, "Wednesday doesn't end at 7:45."),
             h(
               "p",
               { className: "mt-2 text-[var(--ink-soft)] max-w-md" },
