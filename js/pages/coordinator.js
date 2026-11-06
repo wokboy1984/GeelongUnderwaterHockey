@@ -2003,44 +2003,87 @@ GUWH.Pages = GUWH.Pages || {};
     const m = Math.floor(total / 60), s = total % 60;
     return m + ":" + String(s).padStart(2, "0");
   }
-  // End-of-game buzzer: two long, harsh blasts (3 Nov 2026, Liam: "a
-  // buzzer sound - as loud as possible"). Square and sawtooth waves at a low
-  // pitch, slightly detuned, pushed to full scale through a compressor so it
-  // plays at the loudest the device allows. Loudness is then down to the
-  // device's own volume.
-  function playAlarm(ctx) {
-    if (!ctx) return;
+  // Buzzer sounds (6 Nov 2026, Liam). Two tones:
+  //   standard - the deep, harsh buzz from 3 Nov ("as loud as possible"),
+  //              for the device's own speaker;
+  //   pool     - a higher, harsher buzz (around 700-1050 Hz) for an
+  //              underwater pool speaker, which can't reproduce the deep one
+  //              well and which carries better underwater.
+  // And three patterns, so two games at once can be told apart by ear at a
+  // similar pitch: fast pulses, slow pulses, or one steady tone. "Auto"
+  // gives Pool A fast pulses and Pool B slow ones. All square/sawtooth
+  // waves, slightly detuned, through a compressor at full scale, so the
+  // loudness is down to the device (or amplifier) volume.
+  const BUZZ_TONES = {
+    standard: [["square", 220], ["sawtooth", 223], ["square", 110]],
+    pool: [["square", 700], ["sawtooth", 706], ["square", 1050]],
+  };
+  const BUZZ_PATTERNS = {
+    fast: { on: 0.12, off: 0.08, min: 0.6 },
+    slow: { on: 0.45, off: 0.35, min: 1.6 },
+    steady: { on: 30, off: 0, min: 0.5 },
+  };
+  function buzzPattern(choice, pool) {
+    if (choice === "fast" || choice === "slow" || choice === "steady") return choice;
+    return pool === "Pool B" ? "slow" : "fast";
+  }
+  // Starts a buzz; returns stop(), which lets it run at least one full
+  // pattern so a quick tap is still a recognisable signal.
+  function startBuzz(ctx, toneName, patternName) {
+    if (!ctx) return () => {};
     try {
       if (ctx.state === "suspended") ctx.resume();
+      const tone = BUZZ_TONES[toneName] || BUZZ_TONES.standard;
+      const p = BUZZ_PATTERNS[patternName] || BUZZ_PATTERNS.fast;
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -10;
       comp.knee.value = 0;
       comp.ratio.value = 20;
       comp.attack.value = 0.001;
       comp.release.value = 0.05;
-      const master = ctx.createGain();
-      master.gain.value = 1;
-      comp.connect(master);
-      master.connect(ctx.destination);
-      const t = ctx.currentTime + 0.05;
-      [[0, 1.4], [1.7, 1.4]].forEach(([offset, length]) => {
-        const at = t + offset;
-        const env = ctx.createGain();
+      const env = ctx.createGain();
+      env.connect(comp);
+      comp.connect(ctx.destination);
+      const t0 = ctx.currentTime + 0.03;
+      const LIMIT = 30; // seconds: a stuck button can't buzz forever
+      env.gain.setValueAtTime(0.0001, t0);
+      for (let at = t0; at < t0 + LIMIT; at += p.on + p.off) {
         env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(1, at + 0.01);
-        env.gain.setValueAtTime(1, at + length - 0.03);
-        env.gain.exponentialRampToValueAtTime(0.0001, at + length);
-        env.connect(comp);
-        [["square", 220], ["sawtooth", 223], ["square", 110]].forEach(([type, freq]) => {
-          const osc = ctx.createOscillator();
-          osc.type = type;
-          osc.frequency.value = freq;
-          osc.connect(env);
-          osc.start(at);
-          osc.stop(at + length + 0.02);
-        });
+        env.gain.exponentialRampToValueAtTime(1, at + 0.008);
+        env.gain.setValueAtTime(1, at + p.on - 0.01);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + p.on);
+        if (!p.off) break;
+      }
+      const oscs = tone.map(([type, freq]) => {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.value = freq;
+        o.connect(env);
+        o.start(t0);
+        o.stop(t0 + LIMIT);
+        return o;
       });
-    } catch (e) {}
+      let stopped = false;
+      return function stop() {
+        if (stopped) return;
+        stopped = true;
+        // Finish the current pulse, and at least one full pattern.
+        let end = Math.max(ctx.currentTime, t0 + p.min);
+        if (p.off) { const cycle = p.on + p.off; end = t0 + Math.ceil((end - t0) / cycle) * cycle - p.off; }
+        try {
+          env.gain.cancelScheduledValues(end);
+          env.gain.setValueAtTime(0.0001, end + 0.01);
+          oscs.forEach((o) => o.stop(end + 0.03));
+        } catch (e) {}
+      };
+    } catch (e) {
+      return () => {};
+    }
+  }
+  // End of game: about three seconds of the chosen sound.
+  function playAlarm(ctx, toneName, patternName) {
+    const stop = startBuzz(ctx, toneName, patternName);
+    setTimeout(stop, 3000);
   }
 
   // Live (3 Nov 2026): every device with this open polls the game's score
@@ -2051,6 +2094,8 @@ GUWH.Pages = GUWH.Pages || {};
   const LIVE_POLL_MS = 4000;
   function readPref(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : v === "1"; } catch (e) { return fallback; } }
   function writePref(key, on) { try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} }
+  function readChoice(key, fallback, allowed) { try { const v = localStorage.getItem(key); return allowed.indexOf(v) >= 0 ? v : fallback; } catch (e) { return fallback; } }
+  function writeChoice(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
 
   function Scoreboard({ games, startIndex, sessionDate, onClose }) {
     const [idx, setIdx] = React.useState(startIndex || 0);
@@ -2070,6 +2115,14 @@ GUWH.Pages = GUWH.Pages || {};
     const [alarmOn, setAlarmOn] = React.useState(false);
     const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
+    // Buzzer sound (6 Nov 2026), remembered per device: tone for the
+    // device's own speaker or an underwater pool speaker, and the pattern
+    // that tells two games apart.
+    const [tone, setTone] = React.useState(() => readChoice("guwh.scoreboard.tone", "standard", ["standard", "pool"]));
+    const [pattern, setPattern] = React.useState(() => readChoice("guwh.scoreboard.pattern", "auto", ["auto", "fast", "slow", "steady"]));
+    const [soundOpen, setSoundOpen] = React.useState(false);
+    const buzzing = React.useRef(null); // stop() of the buzz the Buzzer button is holding
+    const [held, setHeld] = React.useState(false);
     // Scoreboard only (3 Nov 2026, Liam): for the device the players see.
     // Just the clock and each team's score, no buttons; scores come from
     // whichever device the scorekeeper is using. Remembered per device.
@@ -2144,7 +2197,7 @@ GUWH.Pages = GUWH.Pages || {};
       if (left == null) return;
       if (prevLeft.current != null && prevLeft.current > 0 && left <= 0) {
         setAlarmOn(true);
-        playAlarm(audio.current);
+        playAlarm(audio.current, tone, buzzPattern(pattern, pg.pool));
       }
       prevLeft.current = left;
     }, [left]);
@@ -2278,6 +2331,49 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     // Who scored? A big tap target per player, plus "No scorer".
+    // Hold to buzz (6 Nov 2026): sounds while held, so the ref controls how
+    // long each blast is; a quick tap still gives one full pattern.
+    function buzzDown(ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      if (buzzing.current) return;
+      buzzing.current = startBuzz(audio.current, tone, buzzPattern(pattern, pg.pool));
+      setHeld(true);
+    }
+    function buzzUp() {
+      if (buzzing.current) { buzzing.current(); buzzing.current = null; }
+      setHeld(false);
+    }
+    const patternName = { fast: "Fast pulses", slow: "Slow pulses", steady: "Steady" };
+
+    function soundPanel() {
+      if (!soundOpen) return null;
+      const opt = (active) => Object.assign({}, small, { padding: "0.8em 1.1em", background: active ? "#fff" : "rgba(255,255,255,0.12)", color: active ? "#000" : "#fff" });
+      const pick = (key, v, set) => { set(v); writeChoice(key, v); };
+      return h(
+        "div",
+        { style: { position: "absolute", inset: 0, background: "rgba(10,15,22,0.95)", display: "flex", flexDirection: "column", padding: "3vh 3vw", gap: "2.2vh", zIndex: 2, overflowY: "auto" } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } },
+          h("div", { style: { fontSize: "max(18px, 4vh)", fontWeight: 800 } }, "Buzzer sound"),
+          h("button", { type: "button", style: small, onClick: () => setSoundOpen(false) }, "Done")
+        ),
+        h("div", { style: { fontWeight: 700, opacity: 0.8 } }, "Playing through"),
+        h("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+          h("button", { type: "button", style: opt(tone === "standard"), onClick: () => pick("guwh.scoreboard.tone", "standard", setTone) }, "This device's speaker (deep)"),
+          h("button", { type: "button", style: opt(tone === "pool"), onClick: () => pick("guwh.scoreboard.tone", "pool", setTone) }, "Underwater pool speaker (higher)")
+        ),
+        h("div", { style: { fontWeight: 700, opacity: 0.8 } }, "Pattern - give each game at once its own"),
+        h("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+          h("button", { type: "button", style: opt(pattern === "auto"), onClick: () => pick("guwh.scoreboard.pattern", "auto", setPattern) }, "Auto: Pool A fast, Pool B slow"),
+          ["fast", "slow", "steady"].map((k) => h("button", { key: k, type: "button", style: opt(pattern === k), onClick: () => pick("guwh.scoreboard.pattern", k, setPattern) }, patternName[k]))
+        ),
+        h("div", { style: { opacity: 0.75, fontSize: "max(13px, 2vh)" } },
+          "This game (" + (g.label || pg.pool) + ") buzzes with " + patternName[buzzPattern(pattern, pg.pool)].toLowerCase() + ". The Buzzer sounds for as long as it's held; a tap gives one short burst. Try it:"),
+        h("div", null,
+          h("button", { type: "button", style: Object.assign({}, opt(held), { background: held ? "#ff5a4e" : "#d62828", color: "#fff", touchAction: "none" }), onPointerDown: buzzDown, onPointerUp: buzzUp, onPointerLeave: buzzUp, onPointerCancel: buzzUp, onContextMenu: (e) => e.preventDefault() }, "Hold to test")
+        )
+      );
+    }
+
     function pickerPanel() {
       if (!picker) return null;
       const team = pg[picker.side];
@@ -2321,6 +2417,7 @@ GUWH.Pages = GUWH.Pages || {};
           manualEnd != null && hasTimes && h("button", { type: "button", style: small, onClick: () => setClock(null) }, "Back to timetable"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
+          h("button", { type: "button", style: small, onClick: () => setSoundOpen(true) }, "Sound"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.displayOnly", true, setDisplayOnly) }, "Scoreboard only"),
           h("button", { type: "button", style: small, onClick: onClose }, "Exit")
         )
@@ -2351,14 +2448,21 @@ GUWH.Pages = GUWH.Pages || {};
           {
             type: "button",
             "aria-label": "Sound the buzzer",
-            style: { flexShrink: 0, width: "13vw", minWidth: 90, alignSelf: "center", height: "min(60%, 34vh)", minHeight: 90, borderRadius: 24, border: "4px solid #fff", background: "#d62828", color: "#fff", fontSize: "max(18px, min(4.5vh, 2.6vw))", fontWeight: 900, letterSpacing: "0.03em", cursor: "pointer", boxShadow: "0 0 0 6px rgba(214,40,40,0.35)", touchAction: "manipulation" },
-            onClick: () => playAlarm(audio.current),
+            style: { flexShrink: 0, width: "13vw", minWidth: 90, alignSelf: "center", height: "min(60%, 34vh)", minHeight: 90, borderRadius: 24, border: "4px solid #fff", background: held ? "#ff5a4e" : "#d62828", color: "#fff", fontSize: "max(18px, min(4.5vh, 2.6vw))", fontWeight: 900, letterSpacing: "0.03em", cursor: "pointer", boxShadow: held ? "0 0 0 12px rgba(255,90,78,0.45)" : "0 0 0 6px rgba(214,40,40,0.35)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none" },
+            onPointerDown: buzzDown,
+            onPointerUp: buzzUp,
+            onPointerLeave: buzzUp,
+            onPointerCancel: buzzUp,
+            onContextMenu: (e) => e.preventDefault(),
+            onKeyDown: (e) => { if ((e.key === "Enter" || e.key === " ") && !e.repeat) buzzDown(e); },
+            onKeyUp: (e) => { if (e.key === "Enter" || e.key === " ") buzzUp(); },
           },
           "Buzzer"
         ),
         side(order[1])
       ),
-      pickerPanel()
+      pickerPanel(),
+      soundPanel()
     );
   }
 
