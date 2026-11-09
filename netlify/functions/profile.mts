@@ -118,9 +118,21 @@ export default async (req: Request, context: Context) => {
       const body = await req.json().catch(() => ({}));
 
       // Getting started checklist (12 Oct 2026): { action: "onboarding",
-      // seen?: "guide"|"board"|"forum", hide?: true }. Separate from the
-      // profile save below, which needs the full form.
+      // seen?: "guide"|"board"|"forum"|"position", hide?: true }. Separate
+      // from the profile save below, which needs the full form.
+      // "How will you take part?" (10 Nov 2026) also sends position? or
+      // usualKind?, answered straight from the checklist.
       if (body.action === "onboarding") {
+        if (body.position != null) {
+          const pos = String(body.position).trim();
+          if (!isPosition(pos)) return new Response(JSON.stringify({ ok: false, error: "Not a valid position" }), { status: 400, headers: { "content-type": "application/json" } });
+          await db.sql`update members set position = ${pos} where id = ${memberId}`;
+        }
+        if (body.usualKind != null) {
+          const kind = String(body.usualKind);
+          if (!isAttendanceKind(kind)) return new Response(JSON.stringify({ ok: false, error: "Not a valid choice" }), { status: 400, headers: { "content-type": "application/json" } });
+          await db.sql`update members set usual_kind = ${kind === "player" ? null : kind} where id = ${memberId}`;
+        }
         const seen = String(body.seen || "");
         if (seen && ONBOARDING_STEPS.includes(seen)) {
           await db.sql`

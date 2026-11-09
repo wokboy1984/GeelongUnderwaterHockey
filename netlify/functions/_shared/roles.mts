@@ -109,7 +109,9 @@ export async function ensureOnboardingColumns(db: any): Promise<void> {
   await db.sql`alter table members add column if not exists onboarding_hidden_at timestamptz`;
   onboardingColumnsReady = true;
 }
-export const ONBOARDING_STEPS = ["guide", "board", "forum"];
+// "position" (10 Nov 2026): the member answered "Not sure yet" to "How
+// will you take part?", which leaves their position as Unknown.
+export const ONBOARDING_STEPS = ["guide", "board", "forum", "position"];
 
 // "My kids" (14 Oct 2026). Columns added by migration
 // 20261014000001_family_members; ensured here too, same reason as above.
