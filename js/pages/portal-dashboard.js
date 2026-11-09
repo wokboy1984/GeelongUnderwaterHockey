@@ -329,6 +329,10 @@ GUWH.Pages = GUWH.Pages || {};
     // teaches them to ignore the checklist.
     const answered = !!((status && status.myStatus) || (profile.gamesPlayed || 0) > 0);
     const forumOk = !!(forumMe && forumMe.eligible);
+    // A lane swimmer or volunteer ("I usually come to" on Profile), or a
+    // non-player, has no position to pick (10 Nov 2026: a lane swimmer was
+    // stuck on 7 of 8 with "Pick your position").
+    const plays = !(profile.usualKind === "swim" || profile.usualKind === "volunteer" || (status && status.myNonPlayer));
 
     function post(body) {
       return GUWH.Identity.authFetch("/api/profile", { method: "POST", body: JSON.stringify(Object.assign({ action: "onboarding" }, body)) })
@@ -350,7 +354,7 @@ GUWH.Pages = GUWH.Pages || {};
         hint: "Everyone in the pool needs an emergency contact on file.",
         done: hasProfile, action: "Finish profile", go: "/portal/profile",
       },
-      {
+      plays && {
         label: "Pick your position",
         hint: "Forward, Wing, Centre, Back or Full Back. Not sure yet? Ask on the night and change it later.",
         done: !!(profile.position && profile.position !== "Unknown"), action: "Choose", go: "/portal/profile",
