@@ -539,7 +539,14 @@ GUWH.Pages = GUWH.Pages || {};
         ),
         // Read-only numbers (games played, goals) live on the Player Stats
         // page now (14 Oct 2026) - this page is only things you can edit.
-        h(
+        // Grade and position are for players only (10 Nov 2026, Liam: a lane
+        // swimmer was shown "Grade: Not set" and "Unknown" as if her profile
+        // was unfinished). They're kept, just hidden, while "I usually come
+        // to" below is Lane swim or Volunteer.
+        form.usualKind !== "player" &&
+          h("p", { className: "text-sm text-[var(--ink-soft)] rounded-xl bg-[var(--sand)] px-4 py-3" },
+            "Grade and position are only needed for playing. Change \"I usually come to\" below to Play if you'd like to join the games."),
+        form.usualKind === "player" && h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
           h(
@@ -562,7 +569,7 @@ GUWH.Pages = GUWH.Pages || {};
             )
           )
         ),
-        h(
+        form.usualKind === "player" && h(
           "p",
           { className: "text-xs text-[var(--ink-soft)] -mt-3" },
           "Pick your own grade to start — a Game Coordinator or Administrator may adjust it once they've seen you play."
