@@ -17,7 +17,8 @@ GUWH.club = {
   facebook: "https://www.facebook.com/GeelongUWHStu",
   highlightsVideo: "https://www.youtube.com/watch?v=JoiUTu4emcE",
   highlightsVideoId: "JoiUTu4emcE",
-  email: "info@geelongunderwaterhockey.org.au",
+  // Club email (11 Nov 2026, Liam). Shown on the member Contacts page.
+  email: "club@geelongunderwaterhockey.org.au",
   postalAddress: "PO Box 5006, Geelong North VIC 3215",
   // Committee (11 Nov 2026, from the old club site's contact page), shown on
   // the member Contacts page (js/pages/portal-contacts.js). Update after
