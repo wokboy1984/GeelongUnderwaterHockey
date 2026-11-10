@@ -17,18 +17,18 @@ GUWH.club = {
   facebook: "https://www.facebook.com/GeelongUWHStu",
   highlightsVideo: "https://www.youtube.com/watch?v=JoiUTu4emcE",
   highlightsVideoId: "JoiUTu4emcE",
-  // Club email (11 Nov 2026, Liam). Shown on the member Contacts page.
+  // Club email (11 Nov 2026, as on the old site's contact page).
   email: "club@geelongunderwaterhockey.org.au",
   postalAddress: "PO Box 5006, Geelong North VIC 3215",
   // Committee (11 Nov 2026, from the old club site's contact page), shown on
   // the member Contacts page (js/pages/portal-contacts.js). Update after
-  // each AGM.
+  // each AGM. email = that role's club address, never a personal one.
   committee: {
     season: "2025–2026",
     officeBearers: [
-      { role: "President", name: "Matthew Walters" },
+      { role: "President", name: "Matthew Walters", email: "president@geelongunderwaterhockey.org.au" },
       { role: "Vice-President", name: "Charlie Di Iorio" },
-      { role: "Secretary", name: "Nicola Fraser" },
+      { role: "Secretary", name: "Nicola Fraser", email: "secretary@geelongunderwaterhockey.org.au" },
       { role: "Treasurer", name: "Stuart McCallum" },
       { role: "Vice-Treasurer", name: "Charlie Di Iorio" },
       { role: "Supplier & Grants Liaison", name: "Gail Joordens" },
@@ -40,8 +40,8 @@ GUWH.club = {
     ],
     exOfficio: [
       { role: "Advisor Representing Club Youth", name: "Byron Fraser" },
-      { role: "Chief Referee", name: "Kevin Chisholm" },
-      { role: "Member Protection & Information Officer", name: "Matthew Walters" },
+      { role: "Chief Referee", name: "Kevin Chisholm", email: "chief.referee@geelongunderwaterhockey.org.au" },
+      { role: "Member Protection & Information Officer", name: "Matthew Walters", email: "mpio@geelongunderwaterhockey.org.au" },
     ],
   },
   founded: 1978,

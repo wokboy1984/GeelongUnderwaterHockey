@@ -3,8 +3,8 @@
 // club, in the member nav after Bring a Mate. Taken from the old club
 // site's contact page (geelongunderwaterhockey.org.au/contact). The names
 // and roles live in GUWH.club.committee in js/data.js - update them there
-// after each AGM. No personal phone numbers or emails: members contact the
-// club email, Facebook, or anyone on the committee at the pool.
+// after each AGM. Only the club's role addresses (president@, secretary@,
+// chief.referee@, mpio@), as on the old site - no personal numbers or emails.
 // ---------------------------------------------------------------------------
 window.GUWH = window.GUWH || {};
 GUWH.Pages = GUWH.Pages || {};
@@ -25,7 +25,12 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "li",
             { key: i, className: "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-5 py-3" },
-            h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, p.name),
+            h(
+              "div",
+              { className: "min-w-0" },
+              h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, p.name),
+              p.email && h("a", { className: "text-xs font-semibold text-[var(--accent-dark)] hover:underline break-all", href: "mailto:" + p.email }, p.email)
+            ),
             p.role && h("span", { className: "text-xs font-semibold uppercase tracking-wide text-[var(--accent-dark)]" }, p.role)
           )
         )
