@@ -255,7 +255,10 @@ GUWH.Pages = GUWH.Pages || {};
         trialSignupId: t.id,
       });
       setAddingTrial(null);
-      if (ok) setTrialSignups((list) => list.map((x) => (x.id === t.id ? Object.assign({}, x, { added: true }) : x)));
+      if (ok) {
+        setTrialSignups((list) => list.map((x) => (x.id === t.id ? Object.assign({}, x, { added: true }) : x)));
+        coordChanged(); // clears it from the menu badge and Dashboard card
+      }
     }
     function setChild(i, key, value) {
       setAddPlayer((v) => Object.assign({}, v, { children: v.children.map((c, j) => (j === i ? Object.assign({}, c, { [key]: value }) : c)) }));

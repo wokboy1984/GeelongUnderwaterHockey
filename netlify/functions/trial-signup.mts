@@ -8,6 +8,12 @@
 //        -> { ok, dates: ["YYYY-MM-DD" x4], invite? }  the next four Wednesdays (public);
 //           with a Bring a Mate ref, invite = { inviterName, guestName } for the
 //           "Kev invited you" banner and a pre-filled name (13 Oct 2026)
+// GET  /api/trial-signup?scope=alerts
+//        -> { ok, pending[] }  in-app alert (11 Nov 2026, Liam): free-trial
+//                              bookings nobody has added yet, from two weeks
+//                              back (missed: true) to any future Wednesday.
+//                              Game Coordinator / Administrator; anyone else
+//                              gets an empty list.
 // GET  /api/trial-signup?scope=coordinator
 //        -> { ok, sessionDate, signups[] }     newcomers booked for the upcoming
 //                                              Wednesday, with gear + emergency
@@ -87,6 +93,34 @@ export default async (req: Request, context: Context) => {
     const db = getDatabase();
     await ensureTable(db);
     const url = new URL(req.url);
+
+    if (req.method === "GET" && url.searchParams.get("scope") === "alerts") {
+      const user = await getVerifiedUser(req);
+      if (!user) return unauthorized();
+      const caller = await ensureMember(db, user);
+      if (!hasPermission(caller.roles, "manage_others_attendance")) return json({ ok: true, pending: [] });
+      const upcoming = nextSessionDateISO();
+      const rows = await db.sql`
+        select id, first_name, last_name, phone, children, parent_playing, to_char(session_date, 'YYYY-MM-DD') as session_date
+        from trial_signups
+        where added_member_id is null and session_date >= ${upcoming}::date - 14
+        order by session_date asc, created_at asc
+        limit 30
+      `;
+      return json({
+        ok: true,
+        upcoming,
+        pending: rows.map((r: any) => ({
+          id: r.id,
+          name: `${r.first_name} ${r.last_name}`.trim(),
+          phone: r.phone,
+          sessionDate: r.session_date,
+          kids: Array.isArray(r.children) ? r.children.length : 0,
+          parentPlaying: r.parent_playing !== false,
+          missed: r.session_date < upcoming,
+        })),
+      });
+    }
 
     if (req.method === "GET" && url.searchParams.get("scope") === "coordinator") {
       const user = await getVerifiedUser(req);

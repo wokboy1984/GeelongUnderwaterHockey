@@ -534,6 +534,51 @@ window.GUWH = window.GUWH || {};
     );
   }
 
+  // Free-trial booking alerts (11 Nov 2026, Liam): bookings from the Try It
+  // Free page that no coordinator has added yet. Shared by the Attendance
+  // badge in the menu and the Dashboard card, so it's fetched once and
+  // refreshed every 5 minutes, on login, and whenever coordinator tools
+  // change something (guwh:coord-changed). Only coordinators and admins.
+  const trialAlerts = { data: null, at: 0, loading: false, listeners: new Set() };
+  function canSeeTrialAlerts() {
+    const roles = GUWH.Identity && GUWH.Identity.currentRoles ? GUWH.Identity.currentRoles() || [] : [];
+    return roles.indexOf("game_coordinator") !== -1 || roles.indexOf("administrator") !== -1;
+  }
+  function refreshTrialAlerts(force) {
+    if (!canSeeTrialAlerts() || trialAlerts.loading) return;
+    if (!force && Date.now() - trialAlerts.at < 60000) return;
+    trialAlerts.loading = true;
+    GUWH.Identity.authFetch("/api/trial-signup?scope=alerts")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.ok) return;
+        trialAlerts.data = d.pending || [];
+        trialAlerts.at = Date.now();
+        trialAlerts.listeners.forEach((fn) => fn());
+      })
+      .catch(() => {})
+      .finally(() => { trialAlerts.loading = false; });
+  }
+  GUWH.refreshTrialAlerts = refreshTrialAlerts;
+  GUWH.useTrialAlerts = function useTrialAlerts() {
+    const [, rerender] = React.useReducer((n) => n + 1, 0);
+    React.useEffect(() => {
+      trialAlerts.listeners.add(rerender);
+      refreshTrialAlerts(false);
+      const timer = setInterval(() => refreshTrialAlerts(true), 5 * 60000);
+      const onCoord = () => refreshTrialAlerts(true);
+      window.addEventListener("guwh:coord-changed", onCoord);
+      const offIdentity = GUWH.Identity && GUWH.Identity.onChange ? GUWH.Identity.onChange(() => { refreshTrialAlerts(false); rerender(); }) : null;
+      return () => {
+        trialAlerts.listeners.delete(rerender);
+        clearInterval(timer);
+        window.removeEventListener("guwh:coord-changed", onCoord);
+        if (offIdentity) offIdentity();
+      };
+    }, []);
+    return canSeeTrialAlerts() ? trialAlerts.data : null;
+  };
+
   // devTeam (27 Oct 2026): the development team they play the early game
   // in, alongside their main team. Either can be missing.
   // kind (10 Nov 2026, Liam): "swim" or "volunteer" when they're coming

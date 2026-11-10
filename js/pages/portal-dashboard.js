@@ -39,6 +39,53 @@ GUWH.Pages = GUWH.Pages || {};
     );
   }
 
+  // New free-trial bookings (11 Nov 2026, Liam): for coordinators and
+  // admins, bookings from the Try It Free page that nobody has added to a
+  // night yet. Upcoming ones are added on Attendance; one whose Wednesday
+  // has gone by was never added, so it's flagged to follow up.
+  function TrialAlertCard() {
+    const list = GUWH.useTrialAlerts();
+    if (!list || list.length === 0) return null;
+    const upcoming = list.filter((t) => !t.missed);
+    const missed = list.filter((t) => t.missed);
+    const day = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+    const who = (t) => t.name + (t.kids ? (t.parentPlaying ? " + " : " (bringing ") + t.kids + (t.kids === 1 ? " child" : " children") + (t.parentPlaying ? "" : ")") : "");
+    const row = (t) =>
+      h(
+        "li",
+        { key: t.id, className: "flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2" },
+        h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, who(t)),
+        h("span", { className: cx("text-xs whitespace-nowrap", t.missed ? "font-semibold text-[var(--bad)]" : "text-[var(--ink-soft)]") },
+          day(t.sessionDate) + (t.missed ? " · not added" + (t.phone ? " · " + t.phone : "") : ""))
+      );
+    return h(
+      "div",
+      { className: "rounded-2xl bg-[var(--warn-10)] ring-1 ring-black/5 p-4 sm:p-5 mb-6" },
+      h(
+        "div",
+        { className: "flex flex-wrap items-center justify-between gap-3" },
+        h(
+          "div",
+          { className: "min-w-0" },
+          h("p", { className: "font-display font-bold text-[var(--ink)]" },
+            list.length === 1 ? "1 new free-trial booking" : list.length + " new free-trial bookings"),
+          h("p", { className: "text-sm text-[var(--ink-soft)] mt-0.5" },
+            "Add them on Attendance when they arrive, so they're on the roll and in the teams.")
+        ),
+        h(Button, { size: "sm", onClick: () => navigate("/attendance") }, "Open Attendance", h(Icon, { name: "chevronRight", size: 14 }))
+      ),
+      upcoming.length > 0 && h("ul", { className: "mt-2 divide-y divide-black/5" }, upcoming.map(row)),
+      missed.length > 0 &&
+        h(
+          React.Fragment,
+          null,
+          h("p", { className: "mt-3 text-xs font-bold uppercase tracking-wide text-[var(--bad)]" }, "Booked but never added"),
+          h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Their Wednesday has gone. Give them a call, or add them by name on Attendance if they came."),
+          h("ul", { className: "divide-y divide-black/5" }, missed.map(row))
+        )
+    );
+  }
+
   function bookingWindow(wed) {
     const opensAt = new Date(wed);
     opensAt.setDate(opensAt.getDate() - 7);
@@ -807,6 +854,9 @@ GUWH.Pages = GUWH.Pages || {};
       ),
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
+
+      // Coordinators and admins only; nothing shows when there's none.
+      h(TrialAlertCard),
 
       h(
         "div",
