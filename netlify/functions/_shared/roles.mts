@@ -109,7 +109,9 @@ export async function ensureOnboardingColumns(db: any): Promise<void> {
   await db.sql`alter table members add column if not exists onboarding_hidden_at timestamptz`;
   onboardingColumnsReady = true;
 }
-export const ONBOARDING_STEPS = ["guide", "board", "forum"];
+// "position" (10 Nov 2026): the member answered "Not sure yet" to "How
+// will you take part?", which leaves their position as Unknown.
+export const ONBOARDING_STEPS = ["guide", "board", "forum", "position"];
 
 // "My kids" (14 Oct 2026). Columns added by migration
 // 20261014000001_family_members; ensured here too, same reason as above.
@@ -248,6 +250,8 @@ let gameCountColumnReady = false;
 export async function ensureGameCountColumn(db: any): Promise<void> {
   if (gameCountColumnReady) return;
   await db.sql`alter table timetable_rows add column if not exists game_count smallint not null default 2`;
+  // Which pool a one-game row is in (10 Nov 2026), migration 20261110000001.
+  await db.sql`alter table timetable_rows add column if not exists single_pool text not null default 'Pool A'`;
   gameCountColumnReady = true;
 }
 

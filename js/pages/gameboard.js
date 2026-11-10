@@ -150,7 +150,7 @@ GUWH.Pages = GUWH.Pages || {};
                   "div",
                   { className: "flex flex-col gap-2.5" },
                   ((row.gameCount || (row.poolGames || []).length) === 1
-                    ? [{ key: "", data: poolA }]
+                    ? [{ key: ((row.poolGames || [])[0] || {}).pool || "Pool A", data: (row.poolGames || [])[0] }]
                     : [
                     { key: "Pool A", data: poolA },
                     { key: "Pool B", data: poolB },
@@ -217,7 +217,13 @@ GUWH.Pages = GUWH.Pages || {};
         h("div", { className: head }, "Black Stick"),
         rows.map((row) => {
           const g = (row.poolGames || [])[0];
-          const time = h("div", { key: row.id + "-t", className: "py-2.5 border-b border-black/5 font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" }, minToClockReal(row.startMin) || "—");
+          // The pool under the time (10 Nov 2026), for game rows.
+          const time = h(
+            "div",
+            { key: row.id + "-t", className: "py-2.5 border-b border-black/5 font-mono text-xs font-bold text-[var(--accent-dark)] tabular-nums" },
+            minToClockReal(row.startMin) || "—",
+            row.isGame && g && h("span", { className: "block font-sans text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, g.pool)
+          );
           if (!row.isGame) {
             return h(
               React.Fragment,
@@ -286,8 +292,10 @@ GUWH.Pages = GUWH.Pages || {};
           // pool columns, and the referee line spans all four.
           if ((row.gameCount || (row.poolGames || []).length) === 1) {
             // One game at a time (12 Oct 2026): a single matchup across all
-            // four pool columns ("White: X v Black: Y"), referees underneath.
-            const refs = poolA && poolA.referees && poolA.referees.length > 0 ? poolA.referees : null;
+            // four pool columns ("Pool A · White: X v Black: Y"), referees
+            // underneath. It can be in either pool (10 Nov 2026).
+            const one = (row.poolGames || [])[0];
+            const refs = one && one.referees && one.referees.length > 0 ? one.referees : null;
             return h(
               React.Fragment,
               { key: row.id },
@@ -295,11 +303,12 @@ GUWH.Pages = GUWH.Pages || {};
               h(
                 "div",
                 { className: "py-2.5 border-b border-black/5 col-span-4 text-sm font-semibold text-[var(--ink)] flex flex-wrap items-baseline gap-x-2" },
+                one && h("span", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)] mr-1" }, one.pool),
                 h("span", { className: "text-[var(--ink-soft)] font-normal" }, "White:"),
-                teamNameInline(poolA && poolA.whiteTeamName, highlightTeamName),
+                teamNameInline(one && one.whiteTeamName, highlightTeamName),
                 h("span", { className: "text-[var(--ink-soft)] font-normal px-1" }, "v"),
                 h("span", { className: "text-[var(--ink-soft)] font-normal" }, "Black:"),
-                teamNameInline(poolA && poolA.blackTeamName, highlightTeamName),
+                teamNameInline(one && one.blackTeamName, highlightTeamName),
                 (row.notes || refs) && h("span", { className: "basis-full text-xs font-normal text-[var(--ink-soft)] mt-0.5" }, [row.notes, refs && "Referees: " + refNames(refs)].filter(Boolean).join(" · "))
               )
             );
@@ -417,7 +426,7 @@ GUWH.Pages = GUWH.Pages || {};
   function ResultsCard({ rows, mvp, highlightTeamName, refStatus }) {
     const games = [];
     (rows || []).forEach((row) => (row.poolGames || []).forEach((pg) => {
-      if ((pg.blackScore != null && pg.whiteScore != null) || (pg.mvps || []).length) games.push(Object.assign({ rowLabel: row.label, single: (row.gameCount || (row.poolGames || []).length) === 1 }, pg));
+      if ((pg.blackScore != null && pg.whiteScore != null) || (pg.mvps || []).length) games.push(Object.assign({ rowLabel: row.label }, pg));
     }));
     const mvps = mvp || [];
     if (games.length === 0 && mvps.length === 0) return null;
@@ -441,7 +450,7 @@ GUWH.Pages = GUWH.Pages || {};
           h(
             "div",
             { key: i, className: "py-2.5" },
-            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, pg.single ? pg.rowLabel : pg.rowLabel + " · " + pg.pool),
+            h("p", { className: "text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, pg.rowLabel + " · " + pg.pool),
             h(
               "div",
               { className: "flex items-center justify-between gap-3 mt-0.5" },
@@ -470,7 +479,8 @@ GUWH.Pages = GUWH.Pages || {};
                 { className: "mt-1 text-[11px] text-[var(--ink-soft)]" },
                 "Refs: ",
                 pg.referees.map((r, j) => {
-                  const st = refStatus && refStatus[(pg.single ? pg.rowLabel : pg.rowLabel + " · " + pg.pool)];
+                  // Same label as /api/mvp's games (always with the pool).
+                  const st = refStatus && refStatus[pg.rowLabel + " · " + pg.pool];
                   const s = st && st.find((x) => x.id === r.id);
                   return h("span", { key: r.id }, (j ? ", " : "") + GUWH.displayName(r), s ? (s.counts ? " (voted, counts)" : s.voted ? " (voted)" : " (not voted)") : null);
                 })

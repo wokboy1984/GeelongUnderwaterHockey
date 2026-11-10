@@ -27,7 +27,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureDevelopmentTeams, ensureGameCountColumn, ensureMember, ensureNicknameColumn, getVerifiedUser, memberDisplayName, shortName, unauthorized } from "./_shared/roles.mts";
-import { POOLS, ROW_TYPE_LABELS } from "./_shared/timetable.mts";
+import { ROW_TYPE_LABELS, rowPools } from "./_shared/timetable.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 import { gameMvpResults } from "./_shared/game-mvp.mts";
 import { ensureLineupChanges } from "./_shared/lineups.mts";
@@ -98,7 +98,7 @@ export default async (req: Request, context: Context) => {
     const teams = teamRows.map((t: any) => ({ id: t.id, name: t.name, isDevelopment: !!t.is_development, players: byTeam[t.id] || [] }));
 
     const rowRows = await db.sql`
-      select id, row_order, row_type, label, start_min, duration_min, notes, game_count
+      select id, row_order, row_type, label, start_min, duration_min, notes, game_count, single_pool
       from timetable_rows
       where session_id = ${session.id} and archived_at is null
       order by row_order asc, id asc
@@ -157,9 +157,10 @@ export default async (req: Request, context: Context) => {
 
     const rows = rowRows.map((r: any) => {
       const pgs = pgsByRow[r.id] || [];
-      // One game or two at once (12 Oct 2026): a one-game row only has Pool A.
+      // One game or two at once (12 Oct 2026); a one-game row's pool is
+      // Pool A or Pool B (10 Nov 2026).
       const gameCount = Number(r.game_count) === 1 ? 1 : 2;
-      const poolGames = POOLS.slice(0, gameCount).map((pool) => {
+      const poolGames = rowPools(gameCount, r.single_pool).map((pool) => {
         const pg = pgs.find((x: any) => x.pool === pool);
         return {
           pool,

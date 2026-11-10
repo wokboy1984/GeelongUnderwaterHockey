@@ -50,6 +50,12 @@ export function isPool(value: string): value is Pool {
 export function otherPool(pool: Pool): Pool {
   return pool === "Pool A" ? "Pool B" : "Pool A";
 }
+// The pool(s) a Game row uses: both for two games at once (game_count 2),
+// otherwise its single_pool (10 Nov 2026 - before that always Pool A).
+export function rowPools(gameCount: unknown, singlePool: unknown): Pool[] {
+  if (Number(gameCount) !== 1) return [...POOLS];
+  return [singlePool === "Pool B" ? "Pool B" : "Pool A"];
+}
 
 export function endMin(startMin: number | null, durationMin: number | null): number | null {
   if (startMin == null || durationMin == null) return null;

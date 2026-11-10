@@ -11,12 +11,15 @@
 //   -> { ok, sessionDate, teams, rows, rowTypes, validation }
 //
 // POST /api/coordinator/schedule { action, ... }
-//   add_row          { rowType, label, startMin, durationMin, notes, gameCount? }
+//   add_row          { rowType, label, startMin, durationMin, notes, gameCount?, pool? }
 //   clear_all_rows   {}  -- start this week's timetable from scratch
 //                    (removes never-published rows, archives published ones)
-//   set_game_count   { rowId, gameCount: 1 | 2 }  -- one game, or two at once
-//                    (switching to 1 deletes that row's Pool B game: teams,
-//                    referees and any recorded score) - 12 Oct 2026
+//   set_game_count   { rowId, gameCount: 1 | 2, pool? }  -- one game, or two
+//                    at once (12 Oct 2026). pool (10 Nov 2026) is which pool
+//                    a one-game row is in, default Pool A. Going from two to
+//                    one deletes the other pool's game (teams, referees and
+//                    any recorded score); moving a one-game row to the other
+//                    pool takes its teams, referees and score with it.
 //   update_row       { rowId, rowType?, label, startMin, durationMin, notes }
 //   duplicate_row    { rowId }
 //   remove_row       { rowId }              -- only if never published
@@ -53,8 +56,9 @@ import {
   isRowType,
   ROW_TYPE_LABELS,
   ROW_TYPE_DEFAULT_DURATION,
-  POOLS,
   isPool,
+  otherPool,
+  rowPools,
   computeEligibility,
   validateTimetable,
   type RowSnap,
@@ -144,7 +148,7 @@ async function loadSnapshot(db: any, sessionId: number) {
 
   const rowRows = await db.sql`
     select id, row_order, row_type, label, start_min, duration_min, notes, published_at, archived_at,
-           created_by, updated_by, created_at, updated_at, game_count
+           created_by, updated_by, created_at, updated_at, game_count, single_pool
     from timetable_rows where session_id = ${sessionId} order by row_order asc, id asc
   `;
   const rowIds = rowRows.map((r: any) => r.id);
@@ -205,12 +209,12 @@ function toRowSnaps(rowRows: any[], poolGamesByRow: Record<number, any[]>, refsB
   });
 }
 
-// Creates the row's pool game(s): Pool A only for a one-game row, Pool A
-// and Pool B for a two-games-at-once row (game_count, 12 Oct 2026).
+// Creates the row's pool game(s): Pool A and Pool B for a two-games-at-once
+// row (game_count, 12 Oct 2026), else the row's one pool (single_pool,
+// 10 Nov 2026).
 async function ensurePoolGamesExist(db: any, rowId: number) {
-  const [r] = await db.sql`select game_count from timetable_rows where id = ${rowId}`;
-  const count = r && Number(r.game_count) === 1 ? 1 : 2;
-  for (const pool of POOLS.slice(0, count)) {
+  const [r] = await db.sql`select game_count, single_pool from timetable_rows where id = ${rowId}`;
+  for (const pool of rowPools(r ? r.game_count : 2, r ? r.single_pool : null)) {
     await db.sql`
       insert into timetable_pool_games (row_id, pool) values (${rowId}, ${pool})
       on conflict (row_id, pool) do nothing
@@ -276,7 +280,8 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
   const rows = snap.rowRows.map((r: any) => {
     const pgs = snap.poolGamesByRow[r.id] || [];
     const gameCount = Number(r.game_count) === 1 ? 1 : 2;
-    const poolGames = POOLS.slice(0, gameCount).map((pool) => {
+    const singlePool = rowPools(1, r.single_pool)[0];
+    const poolGames = rowPools(gameCount, singlePool).map((pool) => {
       const pg = pgs.find((x: any) => x.pool === pool);
       const referees = pg ? (snap.refsByPoolGame[pg.id] || []) : [];
       let eligible: any[] = [];
@@ -320,6 +325,7 @@ async function buildResponse(db: any, sessionId: number, sessionDate: string) {
       durationMin: r.duration_min,
       notes: r.notes,
       gameCount,
+      singlePool,
       published: !!r.published_at,
       archived: !!r.archived_at,
       createdBy: r.created_by,
@@ -379,11 +385,13 @@ export default async (req: Request, context: Context) => {
         "set_game_count", "clear_all_rows", "apply_template",
       ];
 
-      // A one-game row has no Pool B - refuse anything aimed at it.
-      if (["assign_team", "assign_referee"].includes(action) && body.pool === "Pool B" ||
-          action === "swap_teams" && (body.poolA === "Pool B" || body.poolB === "Pool B")) {
-        const [gc] = await db.sql`select game_count from timetable_rows where id = ${Number(body.rowId)} and session_id = ${sessionId}`;
-        if (gc && Number(gc.game_count) === 1) return badRequest("This row is set to one game - switch it to two games first");
+      // A one-game row only has its own pool - refuse anything aimed at the other.
+      if (["assign_team", "assign_referee", "swap_teams"].includes(action)) {
+        const [gc] = await db.sql`select game_count, single_pool from timetable_rows where id = ${Number(body.rowId)} and session_id = ${sessionId}`;
+        const wanted = action === "swap_teams" ? [body.poolA, body.poolB] : [body.pool];
+        if (gc && wanted.some((p) => p != null && !rowPools(gc.game_count, gc.single_pool).includes(p))) {
+          return badRequest("This row is one game in " + rowPools(1, gc.single_pool)[0] + " - switch it to both pools first");
+        }
       }
 
       if (action === "add_row") {
@@ -395,13 +403,14 @@ export default async (req: Request, context: Context) => {
         const durationMin = body.durationMin === "" || body.durationMin == null ? null : Number(body.durationMin);
         const notes = body.notes ? String(body.notes).trim() || null : null;
         const gameCount = Number(body.gameCount) === 1 ? 1 : 2;
+        const singlePool = rowPools(1, body.pool)[0];
 
         const [{ next }] = await db.sql`
           select coalesce(max(row_order), 0) + 1 as next from timetable_rows where session_id = ${sessionId} and archived_at is null
         `;
         const [row] = await db.sql`
-          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
-          values (${sessionId}, ${next}, ${rowType}, ${label}, ${startMin}, ${durationMin}, ${notes}, ${caller.id}, ${caller.id}, ${gameCount})
+          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count, single_pool)
+          values (${sessionId}, ${next}, ${rowType}, ${label}, ${startMin}, ${durationMin}, ${notes}, ${caller.id}, ${caller.id}, ${gameCount}, ${singlePool})
           returning id
         `;
         if (rowType === "game") await ensurePoolGamesExist(db, row.id);
@@ -453,20 +462,30 @@ export default async (req: Request, context: Context) => {
       } else if (action === "set_game_count") {
         const rowId = Number(body.rowId);
         const gameCount = Number(body.gameCount) === 1 ? 1 : 2;
-        const [existing] = await db.sql`select id, game_count from timetable_rows where id = ${rowId} and session_id = ${sessionId} and row_type = 'game'`;
+        const [existing] = await db.sql`select id, game_count, single_pool from timetable_rows where id = ${rowId} and session_id = ${sessionId} and row_type = 'game'`;
         if (!existing) return badRequest("That isn't a Game row in this session");
-        await db.sql`update timetable_rows set game_count = ${gameCount}, updated_by = ${caller.id}, updated_at = now() where id = ${rowId}`;
+        const was = rowPools(existing.game_count, existing.single_pool);
+        const pool = gameCount === 1 ? rowPools(1, body.pool)[0] : rowPools(1, existing.single_pool)[0];
         if (gameCount === 1) {
-          // Pool B's teams, referees (and any score/goals, via cascade) go.
-          await db.sql`delete from timetable_pool_games where row_id = ${rowId} and pool = 'Pool B'`;
-        } else {
-          await ensurePoolGamesExist(db, rowId);
+          const [kept] = await db.sql`select id from timetable_pool_games where row_id = ${rowId} and pool = ${pool}`;
+          if (kept || was.length === 2) {
+            // Two games -> one: the other pool's teams, referees (and any
+            // score/goals, via cascade) go.
+            await db.sql`delete from timetable_pool_games where row_id = ${rowId} and pool = ${otherPool(pool)}`;
+          } else {
+            // One game moving to the other pool: it keeps its teams,
+            // referees and score.
+            await db.sql`update timetable_pool_games set pool = ${pool} where row_id = ${rowId} and pool = ${otherPool(pool)}`;
+          }
         }
+        await db.sql`update timetable_rows set game_count = ${gameCount}, single_pool = ${pool}, updated_by = ${caller.id}, updated_at = now() where id = ${rowId}`;
+        await ensurePoolGamesExist(db, rowId);
+        const describe = (pools: string[]) => (pools.length === 2 ? "two games at once" : "one game in " + pools[0]);
         await logAudit(db, {
           actorId: caller.id, actorEmail: caller.email, action: "timetable_row_edited",
           resourceType: "timetable_row", resourceId: String(rowId),
-          previousValue: { gameCount: Number(existing.game_count) || 2 }, newValue: { gameCount },
-          note: `${caller.email} set a game row to ${gameCount === 1 ? "one game" : "two games at once"}`,
+          previousValue: { gameCount: Number(existing.game_count) || 2, pools: was }, newValue: { gameCount, pools: rowPools(gameCount, pool) },
+          note: `${caller.email} set a game row to ${describe(rowPools(gameCount, pool))}`,
         });
       } else if (action === "duplicate_row") {
         const rowId = Number(body.rowId);
@@ -478,8 +497,8 @@ export default async (req: Request, context: Context) => {
           where session_id = ${sessionId} and archived_at is null and row_order > ${existing.row_order}
         `;
         const [copy] = await db.sql`
-          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
-          values (${sessionId}, ${existing.row_order + 1}, ${existing.row_type}, ${existing.label + " (copy)"}, ${existing.start_min}, ${existing.duration_min}, ${existing.notes}, ${caller.id}, ${caller.id}, ${Number(existing.game_count) === 1 ? 1 : 2})
+          insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count, single_pool)
+          values (${sessionId}, ${existing.row_order + 1}, ${existing.row_type}, ${existing.label + " (copy)"}, ${existing.start_min}, ${existing.duration_min}, ${existing.notes}, ${caller.id}, ${caller.id}, ${Number(existing.game_count) === 1 ? 1 : 2}, ${rowPools(1, existing.single_pool)[0]})
           returning id
         `;
         if (existing.row_type === "game") {
@@ -669,15 +688,18 @@ export default async (req: Request, context: Context) => {
           const r = tplRows[i];
           if (!isRowType(r.rowType)) continue;
           const gameCount = Number(r.gameCount) === 1 ? 1 : 2;
+          // Older saved timetables have no singlePool: their one game's pool.
+          const singlePool = rowPools(1, r.singlePool || ((r.games || [])[0] || {}).pool)[0];
+          const pools = rowPools(gameCount, singlePool);
           const [row] = await db.sql`
-            insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
-            values (${sessionId}, ${i + 1}, ${r.rowType}, ${r.label || ROW_TYPE_LABELS[r.rowType]}, ${r.startMin ?? null}, ${r.durationMin ?? null}, ${r.notes || null}, ${caller.id}, ${caller.id}, ${gameCount})
+            insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count, single_pool)
+            values (${sessionId}, ${i + 1}, ${r.rowType}, ${r.label || ROW_TYPE_LABELS[r.rowType]}, ${r.startMin ?? null}, ${r.durationMin ?? null}, ${r.notes || null}, ${caller.id}, ${caller.id}, ${gameCount}, ${singlePool})
             returning id
           `;
           if (r.rowType !== "game") continue;
           await ensurePoolGamesExist(db, row.id);
           for (const g of r.games || []) {
-            if (!isPool(g.pool) || (gameCount === 1 && g.pool === "Pool B")) continue;
+            if (!isPool(g.pool) || !pools.includes(g.pool)) continue;
             await db.sql`
               update timetable_pool_games set white_team_id = ${teamId(g.white)}, black_team_id = ${teamId(g.black)}
               where row_id = ${row.id} and pool = ${g.pool}
@@ -724,6 +746,7 @@ export default async (req: Request, context: Context) => {
           .filter((r: any) => !r.archived_at)
           .map((r: any) => {
             const gameCount = Number(r.game_count) === 1 ? 1 : 2;
+            const singlePool = rowPools(1, r.single_pool)[0];
             return {
               rowType: r.row_type,
               label: r.label,
@@ -731,8 +754,9 @@ export default async (req: Request, context: Context) => {
               durationMin: r.duration_min,
               notes: r.notes,
               gameCount,
+              singlePool,
               games: r.row_type !== "game" ? [] : (snap.poolGamesByRow[r.id] || [])
-                .filter((pg: any) => POOLS.slice(0, gameCount).includes(pg.pool))
+                .filter((pg: any) => rowPools(gameCount, singlePool).includes(pg.pool))
                 .map((pg: any) => ({
                   pool: pg.pool,
                   white: teamName(pg.white_team_id),

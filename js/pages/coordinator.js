@@ -1362,19 +1362,24 @@ GUWH.Pages = GUWH.Pages || {};
     const blurOnEnter = (e) => { if (e.key === "Enter") e.target.blur(); };
 
     const isGame = row.rowType === "game";
-    const single = row.gameCount === 1;
-    const poolA = (row.poolGames || []).find((p) => p.pool === "Pool A") || { pool: "Pool A", black: null, white: null, referees: [], eligible: [], unavailable: [] };
-    const poolB = (row.poolGames || []).find((p) => p.pool === "Pool B") || { pool: "Pool B", black: null, white: null, referees: [], eligible: [], unavailable: [] };
+    // Which pool(s) the row uses (10 Nov 2026, Liam): one game in Pool A,
+    // one game in Pool B, or both pools at once (12 Oct 2026, Cheongy).
+    const pools = row.gameCount === 1 ? [row.singlePool === "Pool B" ? "Pool B" : "Pool A"] : ["Pool A", "Pool B"];
+    const poolChoice = pools.length === 2 ? "both" : pools[0];
+    const poolGameFor = (pool) => (row.poolGames || []).find((p) => p.pool === pool) || { pool, black: null, white: null, referees: [], eligible: [], unavailable: [] };
 
-    // One game / two games at once (12 Oct 2026, Cheongy). Switching to one
-    // game drops Pool B's teams, referees and any score, so it asks first
-    // when there's something to lose.
-    function chooseGameCount(n) {
-      if (n === row.gameCount) return;
-      if (n === 1 && (poolB.black || poolB.white || (poolB.referees || []).length)) {
-        if (!window.confirm("Switch to one game? Pool B's teams and referees for this row will be removed.")) return;
+    // Going from both pools to one drops the other pool's teams, referees
+    // and any score, so it asks first when there's something to lose.
+    // Moving a one-game row to the other pool keeps its teams.
+    function choosePools(choice) {
+      if (choice === poolChoice) return;
+      if (choice !== "both" && pools.length === 2) {
+        const lost = poolGameFor(choice === "Pool A" ? "Pool B" : "Pool A");
+        if (lost.black || lost.white || (lost.referees || []).length) {
+          if (!window.confirm("Switch to one game in " + choice + "? " + lost.pool + "'s teams and referees for this row will be removed.")) return;
+        }
       }
-      onSetGameCount(row, n);
+      onSetGameCount(row, choice === "both" ? 2 : 1, choice === "both" ? null : choice);
     }
 
     return h(
@@ -1436,16 +1441,16 @@ GUWH.Pages = GUWH.Pages || {};
         isGame &&
           h(
             "div",
-            { className: "inline-flex rounded-full ring-1 ring-black/10 p-0.5 bg-white ml-auto", role: "group", "aria-label": "Games at once" },
-            [[1, "One game"], [2, "Two games at once"]].map(([n, text]) =>
+            { className: "inline-flex rounded-full ring-1 ring-black/10 p-0.5 bg-white ml-auto", role: "group", "aria-label": "Pool" },
+            [["Pool A", "Pool A"], ["Pool B", "Pool B"], ["both", "Both pools"]].map(([choice, text]) =>
               h(
                 "button",
                 {
-                  key: n,
+                  key: choice,
                   type: "button",
-                  "aria-pressed": row.gameCount === n,
-                  onClick: () => chooseGameCount(n),
-                  className: cx("rounded-full px-3 py-1 text-xs font-semibold transition", row.gameCount === n ? "bg-[var(--navy)] text-white" : "text-[var(--ink-soft)] hover:text-[var(--ink)]"),
+                  "aria-pressed": poolChoice === choice,
+                  onClick: () => choosePools(choice),
+                  className: cx("rounded-full px-3 py-1 text-xs font-semibold transition", poolChoice === choice ? "bg-[var(--navy)] text-white" : "text-[var(--ink-soft)] hover:text-[var(--ink)]"),
                 },
                 text
               )
@@ -1464,8 +1469,7 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "flex flex-col sm:flex-row gap-3" },
-          h(PoolBlock, { rowId: row.id, pool: "Pool A", title: single ? "Game" : "Pool A", poolGame: poolA, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }),
-          !single && h(PoolBlock, { rowId: row.id, pool: "Pool B", poolGame: poolB, teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef })
+          pools.map((pool) => h(PoolBlock, { key: pool, rowId: row.id, pool, poolGame: poolGameFor(pool), teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }))
         ),
       rowErrors.length > 0 &&
         h(
@@ -1513,6 +1517,7 @@ GUWH.Pages = GUWH.Pages || {};
       durationMin: r.durationMin,
       isGame: r.rowType === "game",
       gameCount: r.gameCount,
+      singlePool: r.singlePool,
       poolGames: (r.poolGames || []).map((pg) => ({
         pool: pg.pool,
         blackTeamName: pg.black ? pg.black.name : null,
@@ -1596,7 +1601,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [error, setError] = React.useState(null);
     const [showArchived, setShowArchived] = React.useState(false);
     const [preview, setPreview] = React.useState(false);
-    const [addForm, setAddForm] = React.useState({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "", gameCount: 2 });
+    const [addForm, setAddForm] = React.useState({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "", pools: "Pool A" });
     const [drag, setDrag] = React.useState(null);
     const [dragOverKey, setDragOverKey] = React.useState(null);
     const [draggingRowId, setDraggingRowId] = React.useState(null);
@@ -1661,17 +1666,18 @@ GUWH.Pages = GUWH.Pages || {};
         startMin: timeInputToMin(addForm.time),
         durationMin: addForm.durationMin === "" ? null : Number(addForm.durationMin),
         notes: addForm.notes.trim() || null,
-        gameCount: addForm.gameCount,
+        gameCount: addForm.pools === "both" ? 2 : 1,
+        pool: addForm.pools === "both" ? null : addForm.pools,
       });
-      // Keep the games-at-once choice for the next row — usually the same all night.
-      setAddForm((f) => ({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "", gameCount: f.gameCount }));
+      // Keep the pool choice for the next row — usually the same all night.
+      setAddForm((f) => ({ rowType: "game", label: "", labelTouched: false, time: "", timeTouched: false, durationMin: "20", notes: "", pools: f.pools }));
     }
 
     function updateRow(row, patch) {
       call(Object.assign({ action: "update_row", rowId: row.id, rowType: row.rowType, label: row.label, startMin: row.startMin, durationMin: row.durationMin, notes: row.notes }, patch));
     }
     function duplicateRow(row) { call({ action: "duplicate_row", rowId: row.id }); }
-    function setGameCount(row, gameCount) { call({ action: "set_game_count", rowId: row.id, gameCount }); }
+    function setGameCount(row, gameCount, pool) { call({ action: "set_game_count", rowId: row.id, gameCount, pool }); }
     function removeOrArchive(row) {
       if (row.published) {
         if (window.confirm('Archive "' + row.label + '"? It already went out to players, so it\'ll be hidden rather than deleted.')) call({ action: "archive_row", rowId: row.id });
@@ -1734,7 +1740,7 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "flex flex-wrap items-center justify-between gap-3 mb-4" },
-        h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md" }, "Build the night as a sequence of rows, then drag teams from Available Teams into each game. Each game row can be one game, or two at once (Pool A + Pool B)."),
+        h("p", { className: "text-sm text-[var(--ink-soft)] max-w-md" }, "Build the night as a sequence of rows, then drag teams from Available Teams into each game. Each game row is one game in Pool A or Pool B, or two at once in both pools."),
         h(Button, { size: "sm", variant: "secondary", onClick: () => setPreview(true) }, h(Icon, { name: "share", size: 14 }), "Preview public timetable")
       ),
 
@@ -1792,12 +1798,13 @@ GUWH.Pages = GUWH.Pages || {};
         addForm.rowType === "game" &&
           h(
             FormField,
-            { label: "Games at once" },
+            { label: "Pool" },
             h(
               "select",
-              { className: inputCls + " !w-40", value: String(addForm.gameCount), onChange: (e) => setAddForm((f) => Object.assign({}, f, { gameCount: Number(e.target.value) })) },
-              h("option", { value: "1" }, "One game"),
-              h("option", { value: "2" }, "Two at once")
+              { className: inputCls + " !w-48", value: addForm.pools, onChange: (e) => setAddForm((f) => Object.assign({}, f, { pools: e.target.value })) },
+              h("option", { value: "Pool A" }, "Pool A"),
+              h("option", { value: "Pool B" }, "Pool B"),
+              h("option", { value: "both" }, "Both pools (two games)")
             )
           ),
         h(FormField, { label: "Notes" }, h("input", { className: inputCls + " !w-40", value: addForm.notes, onChange: (e) => setAddForm((f) => Object.assign({}, f, { notes: e.target.value })), placeholder: "Optional" })),
@@ -1871,7 +1878,7 @@ GUWH.Pages = GUWH.Pages || {};
   // Teams tab. "Add or move a player" puts anyone who was there that night
   // on this side for this game only (e.g. swapping to even up a one-sided
   // game); they're marked "swapped in", and Undo puts them back.
-  function ScoreCard({ pg, rowLabel, single, onSave, nightPlayers, onLineup, onScoreboard }) {
+  function ScoreCard({ pg, rowLabel, onSave, nightPlayers, onLineup, onScoreboard }) {
     const [blackScore, setBlackScore] = React.useState(pg.blackScore == null ? "" : String(pg.blackScore));
     const [whiteScore, setWhiteScore] = React.useState(pg.whiteScore == null ? "" : String(pg.whiteScore));
     const [goals, setGoals] = React.useState(() => {
@@ -1949,7 +1956,7 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       { className: "rounded-2xl border-2 border-black/5 p-4 sm:p-5 flex flex-col gap-4" },
-      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, single ? rowLabel : rowLabel + " · " + pg.pool),
+      h("p", { className: "text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, rowLabel + " · " + pg.pool),
       h(
         "div",
         { className: "grid sm:grid-cols-2 gap-4" },
@@ -2003,44 +2010,87 @@ GUWH.Pages = GUWH.Pages || {};
     const m = Math.floor(total / 60), s = total % 60;
     return m + ":" + String(s).padStart(2, "0");
   }
-  // End-of-game buzzer: two long, harsh blasts (3 Nov 2026, Liam: "a
-  // buzzer sound - as loud as possible"). Square and sawtooth waves at a low
-  // pitch, slightly detuned, pushed to full scale through a compressor so it
-  // plays at the loudest the device allows. Loudness is then down to the
-  // device's own volume.
-  function playAlarm(ctx) {
-    if (!ctx) return;
+  // Buzzer sounds (6 Nov 2026, Liam). Two tones:
+  //   standard - the deep, harsh buzz from 3 Nov ("as loud as possible"),
+  //              for the device's own speaker;
+  //   pool     - a higher, harsher buzz (around 700-1050 Hz) for an
+  //              underwater pool speaker, which can't reproduce the deep one
+  //              well and which carries better underwater.
+  // And three patterns, so two games at once can be told apart by ear at a
+  // similar pitch: fast pulses, slow pulses, or one steady tone. "Auto"
+  // gives Pool A fast pulses and Pool B slow ones. All square/sawtooth
+  // waves, slightly detuned, through a compressor at full scale, so the
+  // loudness is down to the device (or amplifier) volume.
+  const BUZZ_TONES = {
+    standard: [["square", 220], ["sawtooth", 223], ["square", 110]],
+    pool: [["square", 700], ["sawtooth", 706], ["square", 1050]],
+  };
+  const BUZZ_PATTERNS = {
+    fast: { on: 0.12, off: 0.08, min: 0.6 },
+    slow: { on: 0.45, off: 0.35, min: 1.6 },
+    steady: { on: 30, off: 0, min: 0.5 },
+  };
+  function buzzPattern(choice, pool) {
+    if (choice === "fast" || choice === "slow" || choice === "steady") return choice;
+    return pool === "Pool B" ? "slow" : "fast";
+  }
+  // Starts a buzz; returns stop(), which lets it run at least one full
+  // pattern so a quick tap is still a recognisable signal.
+  function startBuzz(ctx, toneName, patternName) {
+    if (!ctx) return () => {};
     try {
       if (ctx.state === "suspended") ctx.resume();
+      const tone = BUZZ_TONES[toneName] || BUZZ_TONES.standard;
+      const p = BUZZ_PATTERNS[patternName] || BUZZ_PATTERNS.fast;
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -10;
       comp.knee.value = 0;
       comp.ratio.value = 20;
       comp.attack.value = 0.001;
       comp.release.value = 0.05;
-      const master = ctx.createGain();
-      master.gain.value = 1;
-      comp.connect(master);
-      master.connect(ctx.destination);
-      const t = ctx.currentTime + 0.05;
-      [[0, 1.4], [1.7, 1.4]].forEach(([offset, length]) => {
-        const at = t + offset;
-        const env = ctx.createGain();
+      const env = ctx.createGain();
+      env.connect(comp);
+      comp.connect(ctx.destination);
+      const t0 = ctx.currentTime + 0.03;
+      const LIMIT = 30; // seconds: a stuck button can't buzz forever
+      env.gain.setValueAtTime(0.0001, t0);
+      for (let at = t0; at < t0 + LIMIT; at += p.on + p.off) {
         env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(1, at + 0.01);
-        env.gain.setValueAtTime(1, at + length - 0.03);
-        env.gain.exponentialRampToValueAtTime(0.0001, at + length);
-        env.connect(comp);
-        [["square", 220], ["sawtooth", 223], ["square", 110]].forEach(([type, freq]) => {
-          const osc = ctx.createOscillator();
-          osc.type = type;
-          osc.frequency.value = freq;
-          osc.connect(env);
-          osc.start(at);
-          osc.stop(at + length + 0.02);
-        });
+        env.gain.exponentialRampToValueAtTime(1, at + 0.008);
+        env.gain.setValueAtTime(1, at + p.on - 0.01);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + p.on);
+        if (!p.off) break;
+      }
+      const oscs = tone.map(([type, freq]) => {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.value = freq;
+        o.connect(env);
+        o.start(t0);
+        o.stop(t0 + LIMIT);
+        return o;
       });
-    } catch (e) {}
+      let stopped = false;
+      return function stop() {
+        if (stopped) return;
+        stopped = true;
+        // Finish the current pulse, and at least one full pattern.
+        let end = Math.max(ctx.currentTime, t0 + p.min);
+        if (p.off) { const cycle = p.on + p.off; end = t0 + Math.ceil((end - t0) / cycle) * cycle - p.off; }
+        try {
+          env.gain.cancelScheduledValues(end);
+          env.gain.setValueAtTime(0.0001, end + 0.01);
+          oscs.forEach((o) => o.stop(end + 0.03));
+        } catch (e) {}
+      };
+    } catch (e) {
+      return () => {};
+    }
+  }
+  // End of game: about three seconds of the chosen sound.
+  function playAlarm(ctx, toneName, patternName) {
+    const stop = startBuzz(ctx, toneName, patternName);
+    setTimeout(stop, 3000);
   }
 
   // Live (3 Nov 2026): every device with this open polls the game's score
@@ -2051,8 +2101,13 @@ GUWH.Pages = GUWH.Pages || {};
   const LIVE_POLL_MS = 4000;
   function readPref(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : v === "1"; } catch (e) { return fallback; } }
   function writePref(key, on) { try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} }
+  function readChoice(key, fallback, allowed) { try { const v = localStorage.getItem(key); return allowed.indexOf(v) >= 0 ? v : fallback; } catch (e) { return fallback; } }
+  function writeChoice(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
 
-  function Scoreboard({ games, startIndex, sessionDate, onClose }) {
+  // games: one pool's games only (10 Nov 2026), so the arrows and the
+  // move to the next game keep a screen on its own pool all night.
+  // showPool: the night uses both pools, so the pool is shown big.
+  function Scoreboard({ games, startIndex, sessionDate, onClose, showPool }) {
     const [idx, setIdx] = React.useState(startIndex || 0);
     const g = games[idx];
     const pg = g.pg;
@@ -2070,6 +2125,14 @@ GUWH.Pages = GUWH.Pages || {};
     const [alarmOn, setAlarmOn] = React.useState(false);
     const [swapped, setSwapped] = React.useState(() => readPref("guwh.scoreboard.swapped", false));
     const [askScorer, setAskScorer] = React.useState(() => readPref("guwh.scoreboard.askScorer", true));
+    // Buzzer sound (6 Nov 2026), remembered per device: tone for the
+    // device's own speaker or an underwater pool speaker, and the pattern
+    // that tells two games apart.
+    const [tone, setTone] = React.useState(() => readChoice("guwh.scoreboard.tone", "standard", ["standard", "pool"]));
+    const [pattern, setPattern] = React.useState(() => readChoice("guwh.scoreboard.pattern", "auto", ["auto", "fast", "slow", "steady"]));
+    const [soundOpen, setSoundOpen] = React.useState(false);
+    const buzzing = React.useRef(null); // stop() of the buzz the Buzzer button is holding
+    const [held, setHeld] = React.useState(false);
     // Scoreboard only (3 Nov 2026, Liam): for the device the players see.
     // Just the clock and each team's score, no buttons; scores come from
     // whichever device the scorekeeper is using. Remembered per device.
@@ -2144,7 +2207,7 @@ GUWH.Pages = GUWH.Pages || {};
       if (left == null) return;
       if (prevLeft.current != null && prevLeft.current > 0 && left <= 0) {
         setAlarmOn(true);
-        playAlarm(audio.current);
+        playAlarm(audio.current, tone, buzzPattern(pattern, pg.pool));
       }
       prevLeft.current = left;
     }, [left]);
@@ -2245,6 +2308,8 @@ GUWH.Pages = GUWH.Pages || {};
       setClock(now + (lengthMs || 18 * 60000));
     }
     function go(step) { setIdx((i) => Math.min(games.length - 1, Math.max(0, i + step))); }
+    const nextGame = games[idx + 1] || null;
+    const poolBadge = { padding: "0.25em 0.7em", borderRadius: 10, background: pg.pool === "Pool B" ? "#f0b429" : "#5aa9ff", color: "#000", fontWeight: 900, fontSize: "max(16px, 3.2vh)", letterSpacing: "0.06em" };
     function toggle(key, value, set) { set(value); writePref(key, value); }
 
     const small = { background: "rgba(255,255,255,0.12)", color: "#fff", border: "none", borderRadius: 10, padding: "0.5em 0.9em", fontSize: "max(13px, 2.1vh)", fontWeight: 700, cursor: "pointer" };
@@ -2278,6 +2343,49 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     // Who scored? A big tap target per player, plus "No scorer".
+    // Hold to buzz (6 Nov 2026): sounds while held, so the ref controls how
+    // long each blast is; a quick tap still gives one full pattern.
+    function buzzDown(ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      if (buzzing.current) return;
+      buzzing.current = startBuzz(audio.current, tone, buzzPattern(pattern, pg.pool));
+      setHeld(true);
+    }
+    function buzzUp() {
+      if (buzzing.current) { buzzing.current(); buzzing.current = null; }
+      setHeld(false);
+    }
+    const patternName = { fast: "Fast pulses", slow: "Slow pulses", steady: "Steady" };
+
+    function soundPanel() {
+      if (!soundOpen) return null;
+      const opt = (active) => Object.assign({}, small, { padding: "0.8em 1.1em", background: active ? "#fff" : "rgba(255,255,255,0.12)", color: active ? "#000" : "#fff" });
+      const pick = (key, v, set) => { set(v); writeChoice(key, v); };
+      return h(
+        "div",
+        { style: { position: "absolute", inset: 0, background: "rgba(10,15,22,0.95)", display: "flex", flexDirection: "column", padding: "3vh 3vw", gap: "2.2vh", zIndex: 2, overflowY: "auto" } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } },
+          h("div", { style: { fontSize: "max(18px, 4vh)", fontWeight: 800 } }, "Buzzer sound"),
+          h("button", { type: "button", style: small, onClick: () => setSoundOpen(false) }, "Done")
+        ),
+        h("div", { style: { fontWeight: 700, opacity: 0.8 } }, "Playing through"),
+        h("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+          h("button", { type: "button", style: opt(tone === "standard"), onClick: () => pick("guwh.scoreboard.tone", "standard", setTone) }, "This device's speaker (deep)"),
+          h("button", { type: "button", style: opt(tone === "pool"), onClick: () => pick("guwh.scoreboard.tone", "pool", setTone) }, "Underwater pool speaker (higher)")
+        ),
+        h("div", { style: { fontWeight: 700, opacity: 0.8 } }, "Pattern - give each game at once its own"),
+        h("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+          h("button", { type: "button", style: opt(pattern === "auto"), onClick: () => pick("guwh.scoreboard.pattern", "auto", setPattern) }, "Auto: Pool A fast, Pool B slow"),
+          ["fast", "slow", "steady"].map((k) => h("button", { key: k, type: "button", style: opt(pattern === k), onClick: () => pick("guwh.scoreboard.pattern", k, setPattern) }, patternName[k]))
+        ),
+        h("div", { style: { opacity: 0.75, fontSize: "max(13px, 2vh)" } },
+          "This game (" + (g.label || pg.pool) + ") buzzes with " + patternName[buzzPattern(pattern, pg.pool)].toLowerCase() + ". The Buzzer sounds for as long as it's held; a tap gives one short burst. Try it:"),
+        h("div", null,
+          h("button", { type: "button", style: Object.assign({}, opt(held), { background: held ? "#ff5a4e" : "#d62828", color: "#fff", touchAction: "none" }), onPointerDown: buzzDown, onPointerUp: buzzUp, onPointerLeave: buzzUp, onPointerCancel: buzzUp, onContextMenu: (e) => e.preventDefault() }, "Hold to test")
+        )
+      );
+    }
+
     function pickerPanel() {
       if (!picker) return null;
       const team = pg[picker.side];
@@ -2305,11 +2413,14 @@ GUWH.Pages = GUWH.Pages || {};
       "div",
       { ref: rootRef, style: { position: "fixed", inset: 0, zIndex: 1000, background: "#1d2733", color: "#fff", display: "flex", flexDirection: "column", padding: "2vh 2vw", gap: "1.5vh", userSelect: "none", fontFamily: "inherit" } },
       // Scoreboard only: a faint corner button is the only way back.
+      // Which pool this screen is (10 Nov 2026), when both are in use.
+      showPool && displayOnly && h("div", { style: Object.assign({ position: "absolute", top: "1.5vh", left: "1.5vw", zIndex: 1 }, poolBadge) }, pg.pool.toUpperCase()),
       displayOnly && h("button", { type: "button", "aria-label": "Show the scoreboard controls", style: Object.assign({}, small, { position: "absolute", top: "1.5vh", right: "1.5vw", zIndex: 1, opacity: 0.35 }), onClick: () => toggle("guwh.scoreboard.displayOnly", false, setDisplayOnly) }, "Controls"),
       !displayOnly && h(
         "div",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" } },
         h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+          showPool && h("span", { style: poolBadge }, pg.pool.toUpperCase()),
           h("button", { type: "button", style: small, disabled: idx === 0, onClick: () => go(-1) }, "‹"),
           h("span", { style: { fontSize: "max(14px, 2.6vh)", fontWeight: 700, opacity: 0.85 } }, g.label + (games.length > 1 ? "  (" + (idx + 1) + " of " + games.length + ")" : "")),
           h("button", { type: "button", style: small, disabled: idx === games.length - 1, onClick: () => go(1) }, "›")
@@ -2321,6 +2432,7 @@ GUWH.Pages = GUWH.Pages || {};
           manualEnd != null && hasTimes && h("button", { type: "button", style: small, onClick: () => setClock(null) }, "Back to timetable"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.swapped", !swapped, setSwapped) }, "⇄ Swap sides"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.askScorer", !askScorer, setAskScorer) }, "Ask who scored: " + (askScorer ? "On" : "Off")),
+          h("button", { type: "button", style: small, onClick: () => setSoundOpen(true) }, "Sound"),
           h("button", { type: "button", style: small, onClick: () => toggle("guwh.scoreboard.displayOnly", true, setDisplayOnly) }, "Scoreboard only"),
           h("button", { type: "button", style: small, onClick: onClose }, "Exit")
         )
@@ -2336,6 +2448,9 @@ GUWH.Pages = GUWH.Pages || {};
           left == null ? "--:--" : farAway ? fmtCountdown(lengthMs) : fmtCountdown(notStarted ? start - now : left)
         ),
         finished && h("div", { style: { fontSize: "3.5vh", fontWeight: 800, color: "#ff5a4e", marginTop: "0.5vh" } }, "TIME"),
+        // What's next in this pool, once this game is over (on a night with
+        // a gap, e.g. Pool B sitting out a one-game stretch).
+        finished && !alarmOn && nextGame && h("div", { style: { fontSize: "3vh", fontWeight: 700, opacity: 0.8, marginTop: "1vh" } }, "Next" + (showPool ? " in " + pg.pool : "") + ": " + nextGame.label.replace(" · " + pg.pool, "") + (nextGame.startMin != null ? " at " + minToClock(nextGame.startMin) : "")),
         // The score fills its box's free height (container units), so it can
         // never run into the team name or the + / − buttons.
         h("style", null, "@keyframes guwhFlash { 50% { opacity: 0.25; } } @supports (font-size: 1cqh) { .guwh-score-area { container-type: size; } .guwh-score { font-size: min(95cqh, 60cqw) !important; } }")
@@ -2351,14 +2466,21 @@ GUWH.Pages = GUWH.Pages || {};
           {
             type: "button",
             "aria-label": "Sound the buzzer",
-            style: { flexShrink: 0, width: "13vw", minWidth: 90, alignSelf: "center", height: "min(60%, 34vh)", minHeight: 90, borderRadius: 24, border: "4px solid #fff", background: "#d62828", color: "#fff", fontSize: "max(18px, min(4.5vh, 2.6vw))", fontWeight: 900, letterSpacing: "0.03em", cursor: "pointer", boxShadow: "0 0 0 6px rgba(214,40,40,0.35)", touchAction: "manipulation" },
-            onClick: () => playAlarm(audio.current),
+            style: { flexShrink: 0, width: "13vw", minWidth: 90, alignSelf: "center", height: "min(60%, 34vh)", minHeight: 90, borderRadius: 24, border: "4px solid #fff", background: held ? "#ff5a4e" : "#d62828", color: "#fff", fontSize: "max(18px, min(4.5vh, 2.6vw))", fontWeight: 900, letterSpacing: "0.03em", cursor: "pointer", boxShadow: held ? "0 0 0 12px rgba(255,90,78,0.45)" : "0 0 0 6px rgba(214,40,40,0.35)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none" },
+            onPointerDown: buzzDown,
+            onPointerUp: buzzUp,
+            onPointerLeave: buzzUp,
+            onPointerCancel: buzzUp,
+            onContextMenu: (e) => e.preventDefault(),
+            onKeyDown: (e) => { if ((e.key === "Enter" || e.key === " ") && !e.repeat) buzzDown(e); },
+            onKeyUp: (e) => { if (e.key === "Enter" || e.key === " ") buzzUp(); },
           },
           "Buzzer"
         ),
         side(order[1])
       ),
-      pickerPanel()
+      pickerPanel(),
+      soundPanel()
     );
   }
 
@@ -2369,7 +2491,7 @@ GUWH.Pages = GUWH.Pages || {};
     const [data, setData] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
-    const [board, setBoard] = React.useState(null); // index into allPoolGames while the Scoreboard is open
+    const [board, setBoard] = React.useState(null); // { pool, idx } while the Scoreboard is open
     const [cardsVersion, setCardsVersion] = React.useState(0); // remounts the score sheets after the Scoreboard
 
     function load(date) {
@@ -2407,19 +2529,27 @@ GUWH.Pages = GUWH.Pages || {};
     if (!data) return loading ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…") : error && h("p", { className: "text-sm text-[var(--bad)]" }, error);
 
     const allPoolGames = [];
-    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, single: row.poolGames.length === 1 && pg.pool === "Pool A", startMin: row.startMin, durationMin: row.durationMin })));
-    const boardGames = allPoolGames.map((x) => ({ pg: x.pg, startMin: x.startMin, durationMin: x.durationMin, label: x.single ? x.rowLabel : x.rowLabel + " · " + x.pg.pool }));
+    data.games.forEach((row) => row.poolGames.forEach((pg) => allPoolGames.push({ pg, rowLabel: row.label, startMin: row.startMin, durationMin: row.durationMin })));
+    // A scoreboard per pool (10 Nov 2026, Liam): each one only has its own
+    // pool's games. Two open buttons only when the night uses both pools.
+    const nightPools = ["Pool A", "Pool B"].filter((p) => allPoolGames.some((x) => x.pg.pool === p));
+    const boardGamesFor = (pool) => allPoolGames
+      .filter((x) => x.pg.pool === pool)
+      .map((x) => ({ pg: x.pg, startMin: x.startMin, durationMin: x.durationMin, label: x.rowLabel + " · " + x.pg.pool }));
     // Open on the game being played now (or the next one), else the first.
-    function openBoard(i) {
-      if (i == null) {
+    function openBoard(pool, pgId) {
+      const games = boardGamesFor(pool);
+      let i = pgId != null ? games.findIndex((b) => b.pg.id === pgId) : -1;
+      if (i < 0) {
         const nowMs = Date.now();
-        i = boardGames.findIndex((b) => b.startMin != null && b.durationMin != null && gameClockMs(data.sessionDate, b.startMin + b.durationMin) > nowMs);
+        i = games.findIndex((b) => b.startMin != null && b.durationMin != null && gameClockMs(data.sessionDate, b.startMin + b.durationMin) > nowMs);
         if (i < 0) i = 0;
       }
-      setBoard(i);
+      setBoard({ pool, idx: i });
     }
-    if (board != null && boardGames.length) {
-      return h(Scoreboard, { games: boardGames, startIndex: Math.min(board, boardGames.length - 1), sessionDate: data.sessionDate, onClose: () => { setBoard(null); load(data.sessionDate).then(() => setCardsVersion((v) => v + 1)); coordChanged(); } });
+    const boardGames = board ? boardGamesFor(board.pool) : [];
+    if (board && boardGames.length) {
+      return h(Scoreboard, { key: board.pool, games: boardGames, startIndex: Math.min(board.idx, boardGames.length - 1), sessionDate: data.sessionDate, showPool: nightPools.length > 1, onClose: () => { setBoard(null); load(data.sessionDate).then(() => setCardsVersion((v) => v + 1)); coordChanged(); } });
     }
 
     return h(
@@ -2430,7 +2560,9 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           { className: "flex flex-wrap items-center gap-3" },
-          h(Button, { variant: "dark", onClick: () => openBoard(null) }, "Open scoreboard"),
+          nightPools.length > 1
+            ? nightPools.map((pool) => h(Button, { key: pool, variant: "dark", onClick: () => openBoard(pool) }, "Open scoreboard: " + pool))
+            : h(Button, { variant: "dark", onClick: () => openBoard(nightPools[0]) }, "Open scoreboard"),
           h("p", { className: "text-xs text-[var(--ink-soft)] max-w-md" }, "Full-screen live scores and countdown for a tablet facing the pool. Turn it landscape. Tap + and pick who scored; it saves as you go, and any phone with the scoreboard open shows the same score.")
         ),
       error && h("p", { className: "text-sm text-[var(--bad)]" }, error),
@@ -2441,7 +2573,7 @@ GUWH.Pages = GUWH.Pages || {};
         : h(
             "div",
             { className: "flex flex-col gap-4" },
-            allPoolGames.map(({ pg, rowLabel, single }, i) => h(ScoreCard, { key: pg.id + ":" + cardsVersion, pg, rowLabel, single, onSave: saveScore, nightPlayers: data.nightPlayers, onLineup: changeLineup, onScoreboard: () => openBoard(i) }))
+            allPoolGames.map(({ pg, rowLabel }) => h(ScoreCard, { key: pg.id + ":" + cardsVersion, pg, rowLabel, onSave: saveScore, nightPlayers: data.nightPlayers, onLineup: changeLineup, onScoreboard: () => openBoard(pg.pool, pg.id) }))
           ),
       h(
         "div",

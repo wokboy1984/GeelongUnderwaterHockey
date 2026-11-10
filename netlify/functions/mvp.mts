@@ -39,14 +39,14 @@ function json(body: unknown, status = 200) {
 }
 
 // Every pool game this night, in timetable order, with a label like
-// "Game 2 · Pool B" (just "Game 2" when it was the only game in its slot).
+// "Game 2 · Pool B" (10 Nov 2026: the pool is named for one-game rows too).
 async function sessionGames(db: any, sessionId: number) {
   const rows = await db.sql`
-    select pg.id, pg.pool, tr.label, tr.game_count, tr.row_order, tr.id as row_id
+    select pg.id, pg.pool, tr.label, tr.row_order, tr.id as row_id
     from timetable_pool_games pg join timetable_rows tr on tr.id = pg.row_id
     where tr.session_id = ${sessionId} and tr.archived_at is null and tr.row_type = 'game'
     order by tr.row_order asc, tr.id asc, pg.pool asc`;
-  return rows.map((r: any) => ({ poolGameId: r.id, label: Number(r.game_count) === 1 ? r.label : r.label + " · " + r.pool }));
+  return rows.map((r: any) => ({ poolGameId: r.id, label: r.label + " · " + r.pool }));
 }
 
 async function buildResponse(db: any, sessionId: number, sessionDate: string, caller: { id: string; roles: string[] }) {

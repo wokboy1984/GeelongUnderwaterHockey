@@ -317,8 +317,11 @@ GUWH.Pages = GUWH.Pages || {};
     "Your first three sessions are free. After that there's a game fee each night you play - what you owe shows on your Dashboard.",
   ];
 
+  const PART_CHIP = "rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ring-black/10 bg-white text-[var(--ink)] hover:ring-[var(--accent)] hover:text-[var(--accent-dark)] disabled:opacity-50 transition";
+
   function GettingStartedCard({ profile, status, invites, forumMe, onBook, booking, onProfile }) {
     const [guideOpen, setGuideOpen] = React.useState(false);
+    const [savingPart, setSavingPart] = React.useState(false);
     if (!profile) return null;
     if ((profile.gamesPlayed || 0) >= 3) return h(FinishProfileCard, { profile });
     const seen = profile.onboardingSeen || [];
@@ -329,6 +332,17 @@ GUWH.Pages = GUWH.Pages || {};
     // teaches them to ignore the checklist.
     const answered = !!((status && status.myStatus) || (profile.gamesPlayed || 0) > 0);
     const forumOk = !!(forumMe && forumMe.eligible);
+    // "How will you take part?" (10 Nov 2026, Liam: a lane swimmer was
+    // stuck on 7 of 8 with "Pick your position"). Answered right here: a
+    // position, "Not sure yet" (stays Unknown), or not playing - lane swim
+    // or volunteering, which sets "I usually come to". A non-player (set by
+    // an admin) has nothing to answer.
+    const notPlaying = profile.usualKind === "swim" || profile.usualKind === "volunteer" || !!(status && status.myNonPlayer);
+    const takingPart = notPlaying || seen.includes("position") || !!(profile.position && profile.position !== "Unknown");
+    function answerPart(body) {
+      setSavingPart(true);
+      post(body).finally(() => setSavingPart(false));
+    }
 
     function post(body) {
       return GUWH.Identity.authFetch("/api/profile", { method: "POST", body: JSON.stringify(Object.assign({ action: "onboarding" }, body)) })
@@ -351,9 +365,9 @@ GUWH.Pages = GUWH.Pages || {};
         done: hasProfile, action: "Finish profile", go: "/portal/profile",
       },
       {
-        label: "Pick your position",
-        hint: "Forward, Wing, Centre, Back or Full Back. Not sure yet? Ask on the night and change it later.",
-        done: !!(profile.position && profile.position !== "Unknown"), action: "Choose", go: "/portal/profile",
+        label: "How will you take part?",
+        hint: "Pick your position, or tell us you're not playing. Not sure yet? Pick that - you can change it on your Profile any time.",
+        done: takingPart, takePart: true,
       },
       {
         label: "Add a photo", optional: true,
@@ -430,6 +444,24 @@ GUWH.Pages = GUWH.Pages || {};
             ),
             (!st.done || st.alwaysButton) && (st.button ||
               (st.action && h(Button, { size: "sm", variant: i === firstOpen ? "primary" : "secondary", className: "shrink-0", onClick: () => (st.seenKey ? mark(st.seenKey, st.go) : navigate(st.go)) }, st.action)))
+            ),
+            st.takePart && !st.done && h(
+              "div",
+              { className: "mt-2 ml-9 flex flex-col gap-2" },
+              h("p", { className: "text-[11px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Playing"),
+              h(
+                "div",
+                { className: "flex flex-wrap gap-1.5" },
+                GUWH.POSITIONS.map((pos) => h("button", { key: pos, type: "button", disabled: savingPart, className: PART_CHIP, onClick: () => answerPart({ position: pos }) }, pos)),
+                h("button", { type: "button", disabled: savingPart, className: PART_CHIP, onClick: () => answerPart({ seen: "position" }) }, "Not sure yet")
+              ),
+              h("p", { className: "text-[11px] font-bold uppercase tracking-wide text-[var(--ink-soft)] mt-1" }, "Not playing"),
+              h(
+                "div",
+                { className: "flex flex-wrap gap-1.5" },
+                h("button", { type: "button", disabled: savingPart, className: PART_CHIP, onClick: () => answerPart({ usualKind: "swim" }) }, "Lane swim only"),
+                h("button", { type: "button", disabled: savingPart, className: PART_CHIP, onClick: () => answerPart({ usualKind: "volunteer" }) }, "Volunteering")
+              )
             ),
             st.guide && guideOpen && h(
               "ul",
