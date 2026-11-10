@@ -23,6 +23,9 @@ export type TemplateRow = {
   durationMin: number | null;
   notes: string | null;
   gameCount: number;
+  // A one-game row's pool (10 Nov 2026); older saved timetables don't have
+  // it, and take it from their game's pool (always Pool A then).
+  singlePool?: string;
   games: TemplateGame[];
 };
 

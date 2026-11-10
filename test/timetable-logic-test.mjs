@@ -190,6 +190,13 @@ assert(T.endMin(null, 20) === null, "endMin is null when start is unknown");
   assert(errors.length === 0, "an archived row is excluded from validation entirely");
 }
 
+// -------------------------------------------------------------- row pools
+// One game in Pool A or Pool B, or both pools at once (10 Nov 2026).
+assert(JSON.stringify(T.rowPools(2, "Pool B")) === '["Pool A","Pool B"]', "a two-game row uses both pools");
+assert(JSON.stringify(T.rowPools(1, "Pool B")) === '["Pool B"]', "a one-game row can be in Pool B");
+assert(JSON.stringify(T.rowPools(1, null)) === '["Pool A"]', "a one-game row with no pool set is Pool A");
+assert(JSON.stringify(T.rowPools(1, "nonsense")) === '["Pool A"]', "an unknown pool falls back to Pool A");
+
 // --------------------------------------------------------------- suggestions
 assert(T.suggestNextStart(null) === null, "no previous row means no suggested start");
 assert(T.suggestNextStart({ startMin: 0, durationMin: 20 }) === 20, "suggested start is previous start + duration");

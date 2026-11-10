@@ -250,6 +250,8 @@ let gameCountColumnReady = false;
 export async function ensureGameCountColumn(db: any): Promise<void> {
   if (gameCountColumnReady) return;
   await db.sql`alter table timetable_rows add column if not exists game_count smallint not null default 2`;
+  // Which pool a one-game row is in (10 Nov 2026), migration 20261110000001.
+  await db.sql`alter table timetable_rows add column if not exists single_pool text not null default 'Pool A'`;
   gameCountColumnReady = true;
 }
 

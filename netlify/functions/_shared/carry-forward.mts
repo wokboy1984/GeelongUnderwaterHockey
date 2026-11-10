@@ -22,7 +22,8 @@
 // Both only ever touch the upcoming session. Everything here can be
 // changed by the coordinator before publishing.
 
-import { ensureDevelopmentTeams } from "./roles.mts";
+import { ensureDevelopmentTeams, ensureGameCountColumn } from "./roles.mts";
+import { rowPools } from "./timetable.mts";
 import { startingTeamFor } from "./team-roster.mts";
 
 let columnsReady = false;
@@ -31,7 +32,7 @@ export async function ensureCarryForwardColumns(db: any): Promise<void> {
   if (columnsReady) return;
   await db.sql`alter table sessions add column if not exists timetable_copied_at timestamptz`;
   await db.sql`alter table sessions add column if not exists timetable_copied_from date`;
-  await db.sql`alter table timetable_rows add column if not exists game_count smallint not null default 2`;
+  await ensureGameCountColumn(db);
   await db.sql`
     create table if not exists team_autoplaced (
       session_id integer not null references sessions(id) on delete cascade,
@@ -96,22 +97,22 @@ export async function copyForwardWeek(
   let copiedRows = 0;
   if (rowCount === 0) {
     const rows = await db.sql`
-      select id, row_order, row_type, label, start_min, duration_min, notes, game_count
+      select id, row_order, row_type, label, start_min, duration_min, notes, game_count, single_pool
       from timetable_rows
       where session_id = ${prev.id} and archived_at is null
       order by row_order asc, id asc
     `;
     for (const r of rows) {
       const [row] = await db.sql`
-        insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count)
-        values (${sessionId}, ${r.row_order}, ${r.row_type}, ${r.label}, ${r.start_min}, ${r.duration_min}, ${r.notes}, ${callerId}, ${callerId}, ${Number(r.game_count) === 1 ? 1 : 2})
+        insert into timetable_rows (session_id, row_order, row_type, label, start_min, duration_min, notes, created_by, updated_by, game_count, single_pool)
+        values (${sessionId}, ${r.row_order}, ${r.row_type}, ${r.label}, ${r.start_min}, ${r.duration_min}, ${r.notes}, ${callerId}, ${callerId}, ${Number(r.game_count) === 1 ? 1 : 2}, ${rowPools(1, r.single_pool)[0]})
         returning id
       `;
       copiedRows++;
       if (r.row_type !== "game") continue;
-      // Same pool games the builder would create: Pool A, plus Pool B for
-      // a two-games-at-once row.
-      for (const pool of Number(r.game_count) === 1 ? ["Pool A"] : ["Pool A", "Pool B"]) {
+      // Same pool games the builder would create: both pools for a
+      // two-games-at-once row, else the row's one pool.
+      for (const pool of rowPools(r.game_count, r.single_pool)) {
         await db.sql`insert into timetable_pool_games (row_id, pool) values (${row.id}, ${pool}) on conflict (row_id, pool) do nothing`;
       }
       const pgs = await db.sql`select pool, black_team_id, white_team_id from timetable_pool_games where row_id = ${r.id}`;
