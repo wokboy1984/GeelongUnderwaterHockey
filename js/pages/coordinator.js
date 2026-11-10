@@ -685,7 +685,11 @@ GUWH.Pages = GUWH.Pages || {};
     return h(
       "div",
       {
-        className: cx("flex items-center justify-between bg-white rounded-xl px-3 py-2 gap-3", onDragStart && "cursor-grab active:cursor-grabbing"),
+        // One line per person where there's room (11 Nov 2026, Liam: in the
+        // half-width team cards the dropdowns squeezed the name into a
+        // column one word wide). The name and tags never break mid-phrase;
+        // when the card is too narrow, the dropdowns move under the name.
+        className: cx("flex flex-wrap items-center bg-white rounded-xl px-3 py-2 gap-x-3 gap-y-2", onDragStart && "cursor-grab active:cursor-grabbing"),
         draggable: !!onDragStart,
         onDragStart: onDragStart ? (e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", player.email); onDragStart(player); } : undefined,
         onDragEnd: onDragEnd || undefined,
@@ -693,14 +697,14 @@ GUWH.Pages = GUWH.Pages || {};
       onDragStart && h(Icon, { name: "grip", size: 14, className: "text-[var(--ink-soft)] shrink-0 hidden sm:block" }),
       h(
         "div",
-        { className: "flex-1 flex items-center gap-2 flex-wrap min-w-0" },
-        h("span", { className: "text-sm text-[var(--ink)]" }, GUWH.displayName(player)),
-        player.isNew && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px]" }, "New"),
-        player.grade && h(Pill, { tone: "dark", className: "!py-0.5 !px-2 !text-[10px]" }, "Grade " + player.grade),
-        player.position && h("span", { className: "text-xs text-[var(--ink-soft)]" }, player.position),
-        fromLastWeek && h("span", { className: "text-[10px] font-semibold text-[var(--accent-dark)]" }, "Same team as last week")
+        { className: "flex-1 basis-56 min-w-0 flex items-center gap-x-2 gap-y-1 flex-wrap" },
+        h("span", { className: "text-sm font-medium text-[var(--ink)] whitespace-nowrap" }, GUWH.displayName(player)),
+        player.isNew && h(Pill, { tone: "accent", className: "!py-0.5 !px-2 !text-[10px] whitespace-nowrap" }, "New"),
+        player.grade && h(Pill, { tone: "dark", className: "!py-0.5 !px-2 !text-[10px] whitespace-nowrap" }, "Grade " + player.grade),
+        player.position && h("span", { className: "text-xs text-[var(--ink-soft)] whitespace-nowrap" }, player.position),
+        fromLastWeek && h("span", { className: "text-[10px] font-semibold text-[var(--accent-dark)] whitespace-nowrap" }, "Same team as last week")
       ),
-      action
+      action && h("div", { className: "ml-auto" }, action)
     );
   }
 
@@ -998,7 +1002,9 @@ GUWH.Pages = GUWH.Pages || {};
 
       board.teams.length === 0
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No teams yet — add one above.")
-        : mainTeams.length > 0 && h("div", { className: "grid sm:grid-cols-2 gap-5" }, mainTeams.map(teamCard)),
+        : // Full-width team cards (11 Nov 2026, Liam): one line per player -
+          // two columns left too little room for the name, tags and dropdowns.
+          mainTeams.length > 0 && h("div", { className: "flex flex-col gap-5" }, mainTeams.map(teamCard)),
 
       devTeams.length > 0 &&
         h(
@@ -1006,7 +1012,7 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "mt-8" },
           h("h3", { className: "font-display font-bold text-[var(--ink)] mb-1" }, "Development teams"),
           h("p", { className: "text-xs text-[var(--ink-soft)] mb-3" }, "For the development game. Each player here also keeps their main team for the later games."),
-          h("div", { className: "grid sm:grid-cols-2 gap-5" }, devTeams.map(teamCard))
+          h("div", { className: "flex flex-col gap-5" }, devTeams.map(teamCard))
         ),
 
       // Lane swim & volunteering (5 Nov 2026): so they can be put back in
