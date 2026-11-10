@@ -539,15 +539,56 @@ GUWH.Pages = GUWH.Pages || {};
           h(FormField, { label: "Phone *" }, h("input", { type: "tel", className: inputCls, value: form.phone, onChange: (e) => set("phone", e.target.value) })),
           h(FormField, { label: "Date of birth *" }, h("input", { type: "date", className: inputCls, value: form.dateOfBirth, onChange: (e) => set("dateOfBirth", e.target.value) }))
         ),
+        // Order (10 Nov 2026, Liam): about you, then gender and the
+        // emergency contact, then how you take part - "I usually come to"
+        // followed by grade and position.
+        // Gender (5 Nov 2026): only used for the MVP awards' male and female
+        // categories. Optional.
+        h(
+          FormField,
+          { label: "Gender", hint: "Optional. Only used for the MVP awards (junior/senior, male/female)." },
+          h(
+            "select",
+            { className: inputCls + " sm:max-w-xs", value: form.gender, onChange: (e) => set("gender", e.target.value) },
+            h("option", { value: "" }, "Not specified"),
+            h("option", { value: "male" }, "Male"),
+            h("option", { value: "female" }, "Female")
+          )
+        ),
+        h("hr", { className: "border-black/5" }),
+        h("p", { className: "text-xs font-mono uppercase tracking-wide text-[var(--ink-soft)]" }, "Private — never shown on This Week's Game"),
+
+        h(
+          "div",
+          { className: "grid sm:grid-cols-2 gap-4" },
+          h(FormField, { label: "Emergency contact name *" }, h("input", { className: inputCls, value: form.emergencyName, onChange: (e) => set("emergencyName", e.target.value) })),
+          h(FormField, { label: "Emergency contact phone *" }, h("input", { type: "tel", className: inputCls, value: form.emergencyPhone, onChange: (e) => set("emergencyPhone", e.target.value) }))
+        ),
+        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — your full name and phone so the club can identify and reach you, an emergency contact for poolside, and date of birth is what unlocks the Members Forum."),
+
+        h("hr", { className: "border-black/5" }),
+        // How they usually come (3 Nov 2026, committee request): the
+        // default when they book in from the Dashboard.
+        h(
+          FormField,
+          { label: "I usually come to", hint: "What you're booked in as when you say you're coming. You can still pick something else on the Dashboard each week." },
+          h(
+            "select",
+            { className: inputCls + " sm:max-w-xs", value: form.usualKind, onChange: (e) => set("usualKind", e.target.value) },
+            h("option", { value: "player" }, "Play"),
+            h("option", { value: "swim" }, "Lane swim only"),
+            h("option", { value: "volunteer" }, "Volunteer")
+          )
+        ),
         // Read-only numbers (games played, goals) live on the Player Stats
         // page now (14 Oct 2026) - this page is only things you can edit.
         // Grade and position are for players only (10 Nov 2026, Liam: a lane
         // swimmer was shown "Grade: Not set" and "Unknown" as if her profile
         // was unfinished). They're kept, just hidden, while "I usually come
-        // to" below is Lane swim or Volunteer.
+        // to" above is Lane swim or Volunteer.
         form.usualKind !== "player" &&
           h("p", { className: "text-sm text-[var(--ink-soft)] rounded-xl bg-[var(--sand)] px-4 py-3" },
-            "Grade and position are only needed for playing. Change \"I usually come to\" below to Play if you'd like to join the games."),
+            "Grade and position are only needed for playing. Change \"I usually come to\" above to Play if you'd like to join the games."),
         form.usualKind === "player" && h(
           "div",
           { className: "grid sm:grid-cols-2 gap-4" },
@@ -576,43 +617,6 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "text-xs text-[var(--ink-soft)] -mt-3" },
           "Pick your own grade to start — a Game Coordinator or Administrator may adjust it once they've seen you play."
         ),
-        // Gender (5 Nov 2026): only used for the MVP awards' male and female
-        // categories. Optional.
-        h(
-          FormField,
-          { label: "Gender", hint: "Optional. Only used for the MVP awards (junior/senior, male/female)." },
-          h(
-            "select",
-            { className: inputCls + " sm:max-w-xs", value: form.gender, onChange: (e) => set("gender", e.target.value) },
-            h("option", { value: "" }, "Not specified"),
-            h("option", { value: "male" }, "Male"),
-            h("option", { value: "female" }, "Female")
-          )
-        ),
-        // How they usually come (3 Nov 2026, committee request): the
-        // default when they book in from the Dashboard.
-        h(
-          FormField,
-          { label: "I usually come to", hint: "What you're booked in as when you say you're coming. You can still pick something else on the Dashboard each week." },
-          h(
-            "select",
-            { className: inputCls + " sm:max-w-xs", value: form.usualKind, onChange: (e) => set("usualKind", e.target.value) },
-            h("option", { value: "player" }, "Play"),
-            h("option", { value: "swim" }, "Lane swim only"),
-            h("option", { value: "volunteer" }, "Volunteer")
-          )
-        ),
-
-        h("hr", { className: "border-black/5" }),
-        h("p", { className: "text-xs font-mono uppercase tracking-wide text-[var(--ink-soft)]" }, "Private — never shown on This Week's Game"),
-
-        h(
-          "div",
-          { className: "grid sm:grid-cols-2 gap-4" },
-          h(FormField, { label: "Emergency contact name *" }, h("input", { className: inputCls, value: form.emergencyName, onChange: (e) => set("emergencyName", e.target.value) })),
-          h(FormField, { label: "Emergency contact phone *" }, h("input", { type: "tel", className: inputCls, value: form.emergencyPhone, onChange: (e) => set("emergencyPhone", e.target.value) }))
-        ),
-        h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, "* Required — your full name and phone so the club can identify and reach you, an emergency contact for poolside, and date of birth is what unlocks the Members Forum."),
 
         h(
           "div",
