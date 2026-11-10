@@ -21,6 +21,56 @@ GUWH.Pages = GUWH.Pages || {};
   const ROLE_ORDER = ["game_coordinator", "community_moderator", "treasurer", "administrator"];
   const GRADES = ["A", "B", "Casual", "Junior"];
 
+  // Season break (11 Nov 2026, Liam): the last game of the year and the
+  // first game back. Between them, Try It Free offers no dates, members
+  // can't book in, and the 8pm auto-close skips the night.
+  function SeasonCard() {
+    const [form, setForm] = React.useState(null);
+    const [saving, setSaving] = React.useState(false);
+    const [msg, setMsg] = React.useState(null);
+    React.useEffect(() => {
+      GUWH.Identity.authFetch("/api/admin/settings").then((r) => r.json()).then((d) => {
+        if (d.ok && d.season) setForm({ lastSession: d.season.lastSession || "", returnDate: d.season.returnDate || "" });
+      }).catch(() => {});
+    }, []);
+    if (!form) return null;
+    async function save(ev) {
+      ev.preventDefault();
+      setSaving(true); setMsg(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/settings", { method: "POST", body: JSON.stringify({ season: form }) });
+        const d = await res.json();
+        if (!d.ok) { setMsg({ bad: true, text: d.error || "Couldn't save" }); return; }
+        setForm({ lastSession: d.season.lastSession || "", returnDate: d.season.returnDate || "" });
+        setMsg({ text: "Saved" });
+        fetch("/api/season").then((r) => r.json()).then((s) => { if (s.ok && GUWH.setSeason) GUWH.setSeason(s); }).catch(() => {});
+      } catch (e) {
+        setMsg({ bad: true, text: "Couldn't save - check your connection" });
+      } finally {
+        setSaving(false);
+      }
+    }
+    const set = (k) => (e) => setForm((f) => Object.assign({}, f, { [k]: e.target.value }));
+    return h(
+      "form",
+      { onSubmit: save, className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mb-8 flex flex-col gap-4" },
+      h("div", null,
+        h("h2", { className: "font-display text-lg font-bold text-[var(--ink)]" }, "Summer break"),
+        h("p", { className: "text-sm text-[var(--ink-soft)] mt-0.5" }, "No games between these two Wednesdays. Try It Free won't offer those dates and members can't book in. Leave the first game back empty until it's decided.")
+      ),
+      h("div", { className: "flex flex-wrap gap-4" },
+        h("label", { className: "flex flex-col gap-1 text-sm font-semibold text-[var(--ink)]" }, "Last game of the year",
+          h("input", { id: "season-last", type: "date", className: inputCls + " !w-48", value: form.lastSession, onChange: set("lastSession") })),
+        h("label", { className: "flex flex-col gap-1 text-sm font-semibold text-[var(--ink)]" }, "First game back",
+          h("input", { id: "season-return", type: "date", className: inputCls + " !w-48", value: form.returnDate, onChange: set("returnDate") }))
+      ),
+      h("div", { className: "flex items-center gap-3" },
+        h(Button, { type: "submit", size: "sm", disabled: saving }, saving ? "Saving…" : "Save"),
+        msg && h("span", { className: msg.bad ? "text-sm text-[var(--bad)]" : "text-sm text-[var(--good-dark)]" }, msg.text)
+      )
+    );
+  }
+
   function AdminRolesPage() {
     const [q, setQ] = React.useState("");
     const [members, setMembers] = React.useState([]);
@@ -144,6 +194,7 @@ GUWH.Pages = GUWH.Pages || {};
       Container,
       { className: "py-10 sm:py-14 max-w-4xl" },
       h(SectionHeading, { eyebrow: "Administration", title: "Roles & permissions", sub: "Every grant or revoke here is logged — who, to whom, what, and when." }),
+      h(SeasonCard),
 
       error && h("p", { className: "text-sm text-[var(--bad)] mb-4" }, error),
 

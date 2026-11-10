@@ -35,22 +35,29 @@ import { getDatabase } from "@netlify/database";
 import { ensureMember, ensureNicknameColumn, getVerifiedUser, adminName, hasPermission, unauthorized, forbidden } from "./_shared/roles.mts";
 import { cleanRef, ensureInviteColumns, newToken, resolveRef } from "./_shared/invite-links.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
+import { getSeason, isBreakDate, seasonInfo, type Season } from "./_shared/season.mts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-// The next four Wednesdays, starting with the upcoming one (which is today
-// on a Wednesday - same rule as the rest of the site).
-function nextFourWednesdays(): string[] {
+// The next four game nights, starting with the upcoming Wednesday (which
+// is today on a Wednesday - same rule as the rest of the site). Wednesdays
+// in the summer break are skipped (11 Nov 2026); with the first game back
+// not set yet, nothing after the last game is offered, so the list can be
+// short or empty. Looks no more than 16 weeks ahead.
+function nextFourWednesdays(season: Season): string[] {
   const first = nextSessionDateISO();
   const [y, m, d] = first.split("-").map(Number);
   const base = Date.UTC(y, m - 1, d, 12);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return [0, 1, 2, 3].map((i) => {
+  const out: string[] = [];
+  for (let i = 0; i < 16 && out.length < 4; i++) {
     const dt = new Date(base + i * 7 * 86400000);
-    return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
-  });
+    const iso = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+    if (!isBreakDate(iso, season)) out.push(iso);
+  }
+  return out;
 }
 
 // Same table as migration 20261002000001_nickname_trials - created here too
@@ -167,7 +174,8 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "GET") {
       const r = await resolveRef(db, cleanRef(url.searchParams.get("ref")));
-      return json({ ok: true, dates: nextFourWednesdays(), invite: r ? { inviterName: r.inviterName, guestName: r.guestName, children: r.children || [] } : null });
+      const season = await getSeason(db);
+      return json({ ok: true, dates: nextFourWednesdays(season), season: seasonInfo(season, nextSessionDateISO()), invite: r ? { inviterName: r.inviterName, guestName: r.guestName, children: r.children || [] } : null });
     }
 
     if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
@@ -210,7 +218,7 @@ export default async (req: Request, context: Context) => {
     }
     const parentPlaying = !(children.length && body.parentPlaying === false);
 
-    if (!nextFourWednesdays().includes(sessionDate)) {
+    if (!nextFourWednesdays(await getSeason(db)).includes(sessionDate)) {
       return json({ ok: false, error: "Please pick one of the Wednesdays in the list." }, 400);
     }
 

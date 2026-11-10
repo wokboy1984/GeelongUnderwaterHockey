@@ -379,7 +379,8 @@ GUWH.Pages = GUWH.Pages || {};
     // Answering "I'm Not Coming" is using the feature exactly as intended,
     // so it ticks the box. Nagging someone who has already replied just
     // teaches them to ignore the checklist.
-    const answered = !!((status && status.myStatus) || (profile.gamesPlayed || 0) > 0);
+    // Nothing to answer over the summer break (11 Nov 2026).
+    const answered = !!((status && (status.myStatus || (status.season && status.season.onBreak))) || (profile.gamesPlayed || 0) > 0);
     const forumOk = !!(forumMe && forumMe.eligible);
     // "How will you take part?" (10 Nov 2026, Liam: a lane swimmer was
     // stuck on 7 of 8 with "Pick your position"). Answered right here: a
@@ -816,6 +817,9 @@ GUWH.Pages = GUWH.Pages || {};
     // fallback while /api/profile is still loading.
     const identityName = (user.user_metadata && user.user_metadata.full_name) || user.email.split("@")[0];
     const firstName = profile ? ((profile.nickname && profile.nickname.trim()) || profile.firstName || identityName.split(" ")[0]) : identityName.split(" ")[0];
+    // Summer break (11 Nov 2026): no game this Wednesday.
+    const onBreak = !!(status && status.season && status.season.onBreak);
+    const breakLines = status && status.season ? GUWH.seasonLines(status.season) : null;
     const sessionDateObj = status
       ? new Date(status.sessionDate + "T00:00:00")
       : board
@@ -842,8 +846,10 @@ GUWH.Pages = GUWH.Pages || {};
           "div",
           { className: "min-w-0" },
           h("p", { className: "font-mono text-xs font-bold uppercase tracking-[0.15em] text-[var(--accent-dark)]" }, "G'day " + firstName),
-          h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-1" }, "Upcoming Wednesday"),
-          sessionDateObj && h("p", { className: "font-display text-xl sm:text-2xl font-bold text-[var(--accent-dark)] mt-1" }, GUWH.formatDate(sessionDateObj))
+          h("h1", { className: "font-display text-3xl sm:text-4xl font-bold text-[var(--ink)] mt-1" }, onBreak ? "Summer break" : "Upcoming Wednesday"),
+          onBreak
+            ? h("p", { className: "font-display text-xl sm:text-2xl font-bold text-[var(--accent-dark)] mt-1" }, status.season.returnDate ? "Back " + GUWH.formatDate(new Date(status.season.returnDate + "T00:00:00")) : "Back in early February")
+            : sessionDateObj && h("p", { className: "font-display text-xl sm:text-2xl font-bold text-[var(--accent-dark)] mt-1" }, GUWH.formatDate(sessionDateObj))
         ),
         h(
           "div",
@@ -866,7 +872,16 @@ GUWH.Pages = GUWH.Pages || {};
         h(
           "div",
           null,
-          status
+          onBreak
+            ? h(
+                "div",
+                { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" },
+                h("p", { className: "font-display text-2xl font-bold" }, "No games over summer"),
+                breakLines && h("p", { className: "mt-3 text-sm text-white/80" }, breakLines.last + "."),
+                breakLines && h("p", { className: "mt-1 text-sm text-white/80" }, breakLines.back + "."),
+                h("p", { className: "mt-4 text-sm text-white/60" }, "Booking opens again for our first game back. Have a great break!")
+              )
+            : status
             ? h(
                 "div",
                 { className: "rounded-3xl bg-[var(--navy)] text-white p-6 sm:p-8" },
@@ -939,6 +954,9 @@ GUWH.Pages = GUWH.Pages || {};
                     h("span", { className: "font-display font-bold text-white" }, status.confirmedCount),
                     " members confirmed"
                   ),
+                  // The last game before the summer break (11 Nov 2026), for its last four weeks.
+                  GUWH.seasonRelevant(status.season, 28) && breakLines &&
+                    h("p", { className: "mt-2 text-sm font-semibold text-[var(--accent-light)]" }, breakLines.last + ", then summer break (" + breakLines.backShort + ")."),
                   h(
                     "div",
                     { className: "mt-5 pt-5 border-t border-white/15 flex flex-wrap items-center gap-3" },
@@ -954,7 +972,7 @@ GUWH.Pages = GUWH.Pages || {};
           // Shown for drafts too, flagged as provisional.
           board && board.hasDraft && profile && h("div", { className: "mt-4" }, h(MyTeamCard, { board, memberId: profile.id, kind: status && status.myStatus === "in" ? status.myKind : null })),
           // Directly under the attendance card so it's the next thing seen.
-          status && h("div", { className: "mt-4" }, h(WhosComingCard, { confirmed: status.confirmed }))
+          status && !onBreak && h("div", { className: "mt-4" }, h(WhosComingCard, { confirmed: status.confirmed }))
         ),
 
         // ---- Profile + finance, secondary column ----

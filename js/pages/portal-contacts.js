@@ -54,6 +54,8 @@ GUWH.Pages = GUWH.Pages || {};
 
   function ContactsPage() {
     const club = GUWH.club || {};
+    const season = GUWH.useSeason();
+    const lines = GUWH.seasonRelevant(season) ? GUWH.seasonLines(season) : null;
     const c = club.committee || {};
     const link = "font-semibold text-[var(--accent-dark)] hover:underline";
     return h(
@@ -70,6 +72,8 @@ GUWH.Pages = GUWH.Pages || {};
           club.venue, h("br"), club.venueAddress, h("br"),
           club.mapUrl && h("a", { className: link, href: club.mapUrl, target: "_blank", rel: "noopener" }, "Open in Maps")),
         h(ContactRow, { icon: "clock", label: "When" }, "Every " + club.sessionDay + ", " + club.sessionTime),
+        // Summer break (11 Nov 2026): set in Administration.
+        lines && h(ContactRow, { icon: "calendar", label: season.onBreak ? "Summer break - no games" : "Summer break" }, lines.last, h("br"), lines.back),
         club.postalAddress && h(ContactRow, { icon: "mail", label: "Post" }, club.postalAddress)
       ),
 

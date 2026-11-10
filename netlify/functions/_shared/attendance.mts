@@ -1,3 +1,4 @@
+import { getSeason, isBreakDate } from "./season.mts";
 export function clubToday(now = new Date()): string {
  const parts = new Intl.DateTimeFormat('en-AU',{timeZone:'Australia/Melbourne',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
  const value=(name:string)=>parts.find(p=>p.type===name)!.value;
@@ -97,6 +98,7 @@ export function autoCloseAt(sessionDate: string): Date {
 // Returns the nights it closed just now.
 export async function autoCloseAttendance(db: any, now = new Date()): Promise<string[]> {
  await ensureAutoClose(db);
+ const season = await getSeason(db);
  const today = clubToday(now);
  const due = await db.sql`
   select to_char(s.session_date, 'YYYY-MM-DD') as d from sessions s
@@ -106,6 +108,7 @@ export async function autoCloseAttendance(db: any, now = new Date()): Promise<st
  const closed: string[] = [];
  for (const { d } of due) {
   if (now < autoCloseAt(d)) continue;
+  if (isBreakDate(d, season)) continue; // summer break: no game that night
   // Claim the night first, so two runs at once can't both do it.
   const claimed = await db.sql`insert into attendance_autoclose_runs (session_date) values (${d}::date) on conflict do nothing returning session_date`;
   if (!claimed.length) continue;

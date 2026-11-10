@@ -535,6 +535,51 @@ window.GUWH = window.GUWH || {};
     );
   }
 
+  // Season break (11 Nov 2026, Liam): the last game of the year and the
+  // first game back, from /api/season (set in Administration). Fetched once
+  // per visit and shared; null until it arrives, and in the concept preview.
+  const seasonState = { data: null, loading: false, listeners: new Set() };
+  function loadSeason() {
+    if (seasonState.data || seasonState.loading || !GUWH.Identity) return;
+    seasonState.loading = true;
+    fetch("/api/season")
+      .then((r) => r.json())
+      .then((d) => { if (d.ok) { seasonState.data = d; seasonState.listeners.forEach((fn) => fn()); } })
+      .catch(() => {})
+      .finally(() => { seasonState.loading = false; });
+  }
+  GUWH.useSeason = function useSeason() {
+    const [, rerender] = React.useReducer((n) => n + 1, 0);
+    React.useEffect(() => {
+      seasonState.listeners.add(rerender);
+      loadSeason();
+      return () => { seasonState.listeners.delete(rerender); };
+    }, []);
+    return seasonState.data;
+  };
+  // After an Administrator saves new dates.
+  GUWH.setSeason = function setSeason(d) { seasonState.data = d; seasonState.listeners.forEach((fn) => fn()); };
+  // The two lines shown to people, or null when no break is set.
+  GUWH.seasonLines = function seasonLines(s) {
+    if (!s || !s.lastSession) return null;
+    const day = (iso) => GUWH.formatDate(new Date(iso + "T00:00:00"));
+    return {
+      last: "Last game for " + s.lastSession.slice(0, 4) + ": " + day(s.lastSession),
+      back: s.returnDate
+        ? "First game back: " + day(s.returnDate) + " " + s.returnDate.slice(0, 4)
+        : "First game back is usually early February, date to be announced",
+      backShort: s.returnDate ? "back " + day(s.returnDate) : "back in February",
+    };
+  };
+  // Worth mentioning: on the break now, or the last game is coming up
+  // (within `days` days, if given) - not once the season has started again.
+  GUWH.seasonRelevant = function seasonRelevant(s, days) {
+    if (!s || !s.lastSession) return false;
+    if (s.onBreak) return true;
+    if (!s.upcoming || s.upcoming > s.lastSession) return false;
+    return days == null || (Date.parse(s.lastSession) - Date.parse(s.upcoming)) / 86400000 <= days;
+  };
+
   // Free-trial booking alerts (11 Nov 2026, Liam): bookings from the Try It
   // Free page that no coordinator has added yet. Shared by the Attendance
   // badge in the menu and the Dashboard card, so it's fetched once and
