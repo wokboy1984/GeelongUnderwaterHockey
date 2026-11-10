@@ -536,8 +536,18 @@ window.GUWH = window.GUWH || {};
 
   // devTeam (27 Oct 2026): the development team they play the early game
   // in, alongside their main team. Either can be missing.
-  function MyTeamSummary({ team, devTeam, colours, memberId, className }) {
+  // kind (10 Nov 2026, Liam): "swim" or "volunteer" when they're coming
+  // for that, so a lane swimmer isn't told they're "not in a team yet".
+  function MyTeamSummary({ team, devTeam, colours, memberId, className, kind }) {
     if (!team && devTeam) { team = devTeam; devTeam = null; }
+    if (!team && (kind === "swim" || kind === "volunteer")) {
+      return h(
+        "div",
+        { className: cx("rounded-xl bg-white px-4 py-3", className) },
+        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, kind === "swim" ? "You're lane swimming - no team needed" : "You're volunteering - no team needed"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Teams are only for players. Want to play instead? Change \"What for?\" when you book in.")
+      );
+    }
     if (!team) {
       return h(
         "div",

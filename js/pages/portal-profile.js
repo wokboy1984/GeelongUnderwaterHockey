@@ -252,7 +252,9 @@ GUWH.Pages = GUWH.Pages || {};
   // version — marked as draft by GUWH.UI.DraftNotice when it isn't final.
   // Reuses the exact renderer the public board uses (GUWH.Pages.
   // PublicTimetable), so the two can't drift apart.
-  function MyTimetableCard({ memberId }) {
+  // kind: how they usually come (Profile), so a lane swimmer or volunteer
+  // isn't told they're not in a team yet (10 Nov 2026).
+  function MyTimetableCard({ memberId, kind }) {
     const [board, setBoard] = React.useState(null);
     const [loaded, setLoaded] = React.useState(false);
 
@@ -282,7 +284,7 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "text-xs text-[var(--ink-soft)]" }, GUWH.formatDate(new Date(board.sessionDate + "T00:00:00")))
       ),
       !board.published && h(GUWH.UI.DraftNotice),
-      h(GUWH.UI.MyTeamSummary, { team: myTeam, devTeam, colours, memberId }),
+      h(GUWH.UI.MyTeamSummary, { team: myTeam, devTeam, colours, memberId, kind }),
       h(
         "div",
         { className: "rounded-2xl bg-white p-4" },
@@ -620,7 +622,7 @@ GUWH.Pages = GUWH.Pages || {};
         )
       ),
 
-      h("div", { className: "mt-6" }, h(MyTimetableCard, { memberId: member.id })),
+      h("div", { className: "mt-6" }, h(MyTimetableCard, { memberId: member.id, kind: member.usualKind })),
 
       h("div", { className: "mt-6" }, h(FamilyCard)),
 

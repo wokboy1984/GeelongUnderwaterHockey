@@ -125,7 +125,7 @@ GUWH.Pages = GUWH.Pages || {};
   // "Your team this week" on the Dashboard (20 Oct 2026). Reads the board
   // the page already loaded — no extra request — and leans on the shared
   // MyTeamSummary so Profile and This Week's Game say the same thing.
-  function MyTeamCard({ board, memberId }) {
+  function MyTeamCard({ board, memberId, kind }) {
     const team = myTeamFor(board, memberId);
     const devTeam = myDevTeamFor(board, memberId);
     const colours = myGameColours(board, [devTeam, team]);
@@ -143,7 +143,7 @@ GUWH.Pages = GUWH.Pages || {};
             "Draft"
           )
       ),
-      h(GUWH.UI.MyTeamSummary, { team, devTeam, colours, memberId }),
+      h(GUWH.UI.MyTeamSummary, { team, devTeam, colours, memberId, kind }),
       // Spelled out immediately above the link through to the board, where
       // a member is about to act on what they've just read. The pill up top
       // is easy to skim past; this sentence is the one that lands.
@@ -902,7 +902,7 @@ GUWH.Pages = GUWH.Pages || {};
           // Your team and stick colour, first thing after the attendance
           // card — what a member most wants once teams exist (20 Oct 2026).
           // Shown for drafts too, flagged as provisional.
-          board && board.hasDraft && profile && h("div", { className: "mt-4" }, h(MyTeamCard, { board, memberId: profile.id })),
+          board && board.hasDraft && profile && h("div", { className: "mt-4" }, h(MyTeamCard, { board, memberId: profile.id, kind: status && status.myStatus === "in" ? status.myKind : null })),
           // Directly under the attendance card so it's the next thing seen.
           status && h("div", { className: "mt-4" }, h(WhosComingCard, { confirmed: status.confirmed }))
         ),
