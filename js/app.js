@@ -61,6 +61,8 @@
     // juniors from seeing it exists.
     if (showForum) items.push({ label: "Forum", path: "/portal/forum" });
     items.push({ label: "Bring a Mate", path: "/portal/bring-a-mate" });
+    // Contacts (11 Nov 2026, Liam): committee and how to reach the club.
+    items.push({ label: "Contacts", path: "/portal/contacts" });
     items.push({ label: "Profile", path: "/portal/profile" });
     return items;
   }
@@ -261,6 +263,7 @@
     "/portal/stats": "Player Stats",
     "/portal/forum": "Forum",
     "/portal/bring-a-mate": "Bring a Mate",
+    "/portal/contacts": "Contacts",
     "/portal/profile": "My Profile",
     "/attendance": "Attendance",
     "/attendance/history": "Attendance",
@@ -419,6 +422,10 @@
         return h(GUWH.Pages.BringAMate);
       }
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate);
+    }
+    if (path === "/portal/contacts") {
+      if (GUWH.Identity && !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      return GUWH.Pages.Contacts ? h(GUWH.Pages.Contacts) : null;
     }
     if (path === "/portal/stats") {
       if (GUWH.Identity) {

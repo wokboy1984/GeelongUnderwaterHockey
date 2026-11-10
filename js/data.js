@@ -18,6 +18,31 @@ GUWH.club = {
   highlightsVideo: "https://www.youtube.com/watch?v=JoiUTu4emcE",
   highlightsVideoId: "JoiUTu4emcE",
   email: "info@geelongunderwaterhockey.org.au",
+  postalAddress: "PO Box 5006, Geelong North VIC 3215",
+  // Committee (11 Nov 2026, from the old club site's contact page), shown on
+  // the member Contacts page (js/pages/portal-contacts.js). Update after
+  // each AGM.
+  committee: {
+    season: "2025–2026",
+    officeBearers: [
+      { role: "President", name: "Matthew Walters" },
+      { role: "Vice-President", name: "Charlie Di Iorio" },
+      { role: "Secretary", name: "Nicola Fraser" },
+      { role: "Treasurer", name: "Stuart McCallum" },
+      { role: "Vice-Treasurer", name: "Charlie Di Iorio" },
+      { role: "Supplier & Grants Liaison", name: "Gail Joordens" },
+    ],
+    general: [
+      { name: "Liam Cooke" },
+      { name: "Scott Powell" },
+      { name: "Kevin Chisholm" },
+    ],
+    exOfficio: [
+      { role: "Advisor Representing Club Youth", name: "Byron Fraser" },
+      { role: "Chief Referee", name: "Kevin Chisholm" },
+      { role: "Member Protection & Information Officer", name: "Matthew Walters" },
+    ],
+  },
   founded: 1978,
   poolCapacity: 48,
   fees: {
