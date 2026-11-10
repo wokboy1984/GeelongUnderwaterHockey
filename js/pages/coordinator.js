@@ -704,7 +704,8 @@ GUWH.Pages = GUWH.Pages || {};
         player.position && h("span", { className: "text-xs text-[var(--ink-soft)] whitespace-nowrap" }, player.position),
         fromLastWeek && h("span", { className: "text-[10px] font-semibold text-[var(--accent-dark)] whitespace-nowrap" }, "Same team as last week")
       ),
-      action && h("div", { className: "ml-auto" }, action)
+      // Full width under the name on a phone, so the dropdowns sit side by side.
+      action && h("div", { className: "w-full sm:w-auto sm:ml-auto" }, action)
     );
   }
 
@@ -855,7 +856,7 @@ GUWH.Pages = GUWH.Pages || {};
       return h(
         "select",
         {
-          className: inputCls + " !w-auto !py-1 text-xs",
+          className: inputCls + " !w-auto !py-1 text-xs flex-1 min-w-0 sm:flex-none",
           value: cur != null ? String(cur) : "none",
           "aria-label": "Development game team for " + GUWH.displayName(p),
           onChange: (e) => moveTo(p, e.target.value, true),
@@ -868,7 +869,7 @@ GUWH.Pages = GUWH.Pages || {};
       return h(
         "select",
         {
-          className: inputCls + " !w-auto !py-1 text-xs",
+          className: inputCls + " !w-auto !py-1 text-xs flex-1 min-w-0 sm:flex-none",
           value: String(team.id),
           "aria-label": "Move " + GUWH.displayName(p) + " to",
           onChange: (e) => (e.target.value === "swim" || e.target.value === "volunteer" ? notPlaying(p, e.target.value) : moveTo(p, e.target.value, false)),
