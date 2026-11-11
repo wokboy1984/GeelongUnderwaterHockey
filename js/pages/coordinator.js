@@ -1371,6 +1371,17 @@ GUWH.Pages = GUWH.Pages || {};
       if (trimmed && trimmed !== row.label) onUpdateRow(row, { label: trimmed });
       else setLabel(row.label);
     }
+    // Game rows have notes too (11 Nov 2026, Liam): players see them under
+    // the game on the timetable, and a duplicated row brings its notes
+    // along, so they need to be editable.
+    const notesInput = h("input", {
+      className: inputCls + " text-sm",
+      "aria-label": "Notes for " + (row.label || "this row"),
+      placeholder: row.rowType === "game" ? "Optional notes players see under this game" : "Optional notes (e.g. bring a plate, meet at the BBQ area)",
+      value: notes,
+      onChange: (e) => setNotes(e.target.value),
+      onBlur: commitNotes,
+    });
     function commitNotes() {
       const trimmed = notes.trim();
       if (trimmed !== (row.notes || "")) onUpdateRow(row, { notes: trimmed || null });
@@ -1496,20 +1507,14 @@ GUWH.Pages = GUWH.Pages || {};
             )
           )
       ),
-      !isGame &&
-        h("input", {
-          className: inputCls + " text-sm",
-          placeholder: "Optional notes (e.g. bring a plate, meet at the BBQ area)",
-          value: notes,
-          onChange: (e) => setNotes(e.target.value),
-          onBlur: commitNotes,
-        }),
+      !isGame && notesInput,
       isGame &&
         h(
           "div",
           { className: "flex flex-col sm:flex-row gap-3" },
           pools.map((pool) => h(PoolBlock, { key: pool, rowId: row.id, pool, poolGame: poolGameFor(pool), teams, drag, setDrag, dragOverKey, setDragOverKey, onAssignTeam, onSwapOrMove, onAssignRef, onUnassignRef }))
         ),
+      isGame && notesInput,
       rowErrors.length > 0 &&
         h(
           "div",
