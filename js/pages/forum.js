@@ -956,6 +956,7 @@ GUWH.Pages = GUWH.Pages || {};
         topic.pinned && h(Pill, { tone: "dark", className: "!py-0.5" }, "Pinned"),
         topic.isAnnouncement && h(Pill, { tone: "accent", className: "!py-0.5" }, "Announcement"),
         topic.locked && h(Pill, { tone: "warn", className: "!py-0.5" }, "Locked"),
+        topic.archivedAt && h(Pill, { tone: "dark", className: "!py-0.5" }, "Archived " + GUWH.formatRelativeTime(topic.archivedAt)),
         h("span", { className: "text-xs font-mono uppercase tracking-wide text-[var(--ink-soft)]" }, topic.categoryName)
       ),
       h("h3", { className: "font-display font-bold text-[var(--ink)] text-lg" }, topic.title),
@@ -988,7 +989,8 @@ GUWH.Pages = GUWH.Pages || {};
     }
     function loadTopics() {
       setLoading(true);
-      const qs = activeCategory ? "?categoryId=" + activeCategory : "";
+      // "archived" (11 Nov 2026): moderators' and admins' Archived view.
+      const qs = activeCategory === "archived" ? "?archived=1" : activeCategory ? "?categoryId=" + activeCategory : "";
       return GUWH.Identity.authFetch("/api/forum/topics" + qs)
         .then((r) => r.json())
         .then((d) => { if (d.ok) setTopics(d.topics); else setError(d.error || "Something went wrong"); })
@@ -1012,8 +1014,10 @@ GUWH.Pages = GUWH.Pages || {};
             { key: c.id, type: "button", onClick: () => setActiveCategory(c.id), className: cx("px-3.5 py-1.5 rounded-full text-sm font-semibold", activeCategory === c.id ? "bg-[var(--ink)] text-white" : "bg-[var(--sand)] text-[var(--ink-soft)]") },
             c.name + " (" + c.topicCount + ")"
           )
-        )
+        ),
+        isModerator && h("button", { type: "button", onClick: () => setActiveCategory("archived"), className: cx("px-3.5 py-1.5 rounded-full text-sm font-semibold ring-1", activeCategory === "archived" ? "bg-[var(--ink)] text-white ring-[var(--ink)]" : "bg-white text-[var(--ink-soft)] ring-black/15") }, "Archived")
       ),
+      activeCategory === "archived" && h("p", { className: "text-sm text-[var(--ink-soft)] -mt-2 mb-4" }, "Only moderators and admins see this list. Open a discussion and press Restore to bring it back."),
       h(
         "div",
         { className: "flex flex-wrap gap-2 mb-6" },
@@ -1025,7 +1029,7 @@ GUWH.Pages = GUWH.Pages || {};
       loading
         ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…")
         : topics.length === 0
-        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, "No discussions yet — be the first to suggest one.")
+        ? h("p", { className: "text-sm text-[var(--ink-soft)]" }, activeCategory === "archived" ? "Nothing archived." : "No discussions yet — be the first to suggest one.")
         : h("div", { className: "flex flex-col gap-3" }, topics.map((t) => h(TopicCard, { key: t.id, topic: t })))
     );
   }
