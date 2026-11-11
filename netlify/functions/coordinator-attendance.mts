@@ -5,7 +5,10 @@
 //
 // GET  /api/coordinator/attendance -> { ok, sessionDate, players: [...], declined: [...], noReply }
 // POST /api/coordinator/attendance { memberEmail, in } -> same shape
-// POST /api/coordinator/attendance { firstName, lastName, email, kind?, children?, trialSignupId? }
+// POST /api/coordinator/attendance { firstName, lastName, email, kind?, children?, trialSignupId?, markAttended? }
+//   markAttended (11 Nov 2026): on a past week, also tick them (and any
+//   children) on that night's roll - adding someone after the night is
+//   only ever done because they came.
 //   -> adds a player and invites them; with children (5 Nov 2026), a whole
 //   family in one go - see _shared/family-signup.mts. kind 'none' = only
 //   bringing the kids (account made, not booked in). trialSignupId fills
@@ -21,7 +24,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureAttendanceKinds, ensureFamilyColumns, ensureMember, ensureNicknameColumn, getVerifiedUser, hasPermission, logAudit, adminName, unauthorized, forbidden, isLikelyEmail } from "./_shared/roles.mts";
-import { defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
+import { clubToday, defaultRollDateISO, requestedSessionDate } from "./_shared/attendance.mts";
 import { inviteMember } from "./_shared/identity-admin.mts";
 import { addChildren, cleanChildren, toAdultKind } from "./_shared/family-signup.mts";
 import { ensureUsualKindColumn } from "./_shared/roles.mts";
@@ -203,6 +206,22 @@ export default async (req: Request, context: Context) => {
         }
         const childIds = await addChildren(db, targetId, children, sessionId);
         if (trial) await db.sql`update trial_signups set added_member_id = ${targetId} where id = ${trial.id}`;
+        // Added after the night: they came, so they go on that night's roll,
+        // as whatever they were booked in as (same as Save roll).
+        if (body.markAttended === true && sessionDate < clubToday()) {
+          const onRoll = (adultKind !== "none" ? [targetId] : []).concat(childIds);
+          for (const id of onRoll) {
+            await db.sql`with changed as (
+              insert into session_attendance (session_date, member_id, attended, marked_by, kind)
+              values (${sessionDate}::date, ${id}, true, ${caller.id},
+                coalesce((select b.kind from bookings b where b.member_id = ${id} and b.session_id = ${sessionId}), 'player'))
+              on conflict (session_date, member_id) do update set attended = true, marked_by = excluded.marked_by, marked_at = now(), kind = excluded.kind
+              where session_attendance.attended is distinct from true
+              returning session_date, member_id, attended, marked_by
+            ) insert into session_attendance_history (session_date, member_id, attended, marked_by)
+            select session_date, member_id, attended, marked_by from changed`;
+          }
+        }
         await logAudit(db, {
           actorId: caller.id,
           actorEmail: caller.email,

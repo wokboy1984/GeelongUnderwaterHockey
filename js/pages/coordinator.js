@@ -259,6 +259,11 @@ GUWH.Pages = GUWH.Pages || {};
     }
 
     // Free-trial signup -> real members, booked in, in one tap.
+    // The week on screen is in the past (11 Nov 2026): "Add to tonight"
+    // would book them into that week, so it says which week, and ticks them
+    // on that night's roll - you only add someone afterwards if they came.
+    const pastWeek = !!(checkin && checkin.upcoming && sessionDate && sessionDate < checkin.upcoming);
+    const weekLabel = sessionDate ? new Date(sessionDate + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) : "";
     async function addTrialToTonight(t) {
       setAddingTrial(t.id);
       const ok = await postNewPlayer({
@@ -268,8 +273,10 @@ GUWH.Pages = GUWH.Pages || {};
         kind: t.parentPlaying ? "player" : "none",
         children: (t.children || []).map((c) => ({ firstName: c.firstName })),
         trialSignupId: t.id,
+        markAttended: pastWeek,
       });
       setAddingTrial(null);
+      if (ok && pastWeek) load(sessionDate); // shows them ticked on that roll
       if (ok) {
         setTrialSignups((list) => list.map((x) => (x.id === t.id ? Object.assign({}, x, { added: true }) : x)));
         coordChanged(); // clears it from the menu badge and Dashboard card
@@ -571,6 +578,8 @@ GUWH.Pages = GUWH.Pages || {};
                   { className: "min-w-0" },
                   h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, t.name + (t.age ? " (" + t.age + ")" : "")),
                   t.invitedBy && h("p", { className: "text-xs font-semibold text-[var(--accent-dark)]" }, t.invitedBy + "'s mate"),
+                  t.earlier && h("p", { className: "text-xs font-semibold text-[var(--bad)]" },
+                    "Booked for " + new Date(t.bookedFor + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) + ", never added. Coming tonight instead? Add them here."),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Fins/shoe " + (t.finSize || "?") + " · " + (t.handed || "Right") + "-handed" + (t.heardFrom ? " · heard via " + t.heardFrom : "")),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, (t.phone ? t.phone + " · " : "") + t.email),
                   h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Emergency: " + t.emergencyName + " " + t.emergencyPhone),
@@ -585,7 +594,9 @@ GUWH.Pages = GUWH.Pages || {};
                   h(Pill, { tone: "accent" }, "Free trial"),
                   t.added
                     ? h("span", { className: "text-xs font-semibold text-[var(--good-dark)] flex items-center gap-1" }, h(Icon, { name: "check", size: 12 }), "Added")
-                    : h(Button, { size: "sm", disabled: addingTrial === t.id, onClick: () => addTrialToTonight(t) }, addingTrial === t.id ? "Adding…" : (t.children || []).length ? "Add family to tonight" : "Add to tonight"),
+                    : h(Button, { size: "sm", disabled: addingTrial === t.id, onClick: () => addTrialToTonight(t) },
+                        addingTrial === t.id ? "Adding…" : ((t.children || []).length ? "Add family to " : "Add to ") + (pastWeek ? weekLabel : "tonight")),
+                  !t.added && pastWeek && h("span", { className: "text-[11px] text-[var(--ink-soft)] text-right max-w-[11rem]" }, "Books them into " + weekLabel + " and ticks them on that roll"),
                   !t.added && (t.dismissed
                     ? h("button", { type: "button", onClick: () => setTrialDismissed(t, false), className: "text-xs font-semibold text-[var(--ink-soft)] hover:underline" }, "Marked didn't come · Undo")
                     : h("button", { type: "button", onClick: () => setTrialDismissed(t, true), className: "text-xs font-semibold text-[var(--ink-soft)] hover:underline" }, "Didn't come"))
