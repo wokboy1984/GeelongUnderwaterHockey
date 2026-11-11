@@ -303,7 +303,11 @@ export default async (req: Request, context: Context) => {
     }
 
     // Feed (main, or one category) — pinned first, then recency order.
+    // ?archived=1 (11 Nov 2026, Liam): moderators and admins only - archived
+    // discussions, newest archived first (merged ones left out; they point
+    // at the topic they were merged into).
     const categoryFilter = categoryIdParam ? Number(categoryIdParam) : null;
+    const archivedView = url.searchParams.get("archived") === "1" && !!access.isModerator;
     const topics = await db.sql`
       select t.id, t.title, t.category_id, c.name as category_name, m.first_name, m.last_name, m.nickname,
         t.pinned, t.locked, t.archived_at, t.is_announcement, t.important, t.expires_at,
@@ -320,9 +324,10 @@ export default async (req: Request, context: Context) => {
       from forum_topics t
       join forum_categories c on c.id = t.category_id
       left join members m on m.id = t.author_id
-      where t.archived_at is null and (${categoryFilter}::int is null or t.category_id = ${categoryFilter})
-      order by t.pinned desc, t.last_activity_at desc
-      limit 40
+      where (${categoryFilter}::int is null or t.category_id = ${categoryFilter})
+        and case when ${archivedView} then t.archived_at is not null and t.merged_into_id is null else t.archived_at is null end
+      order by case when ${archivedView} then t.archived_at end desc nulls last, t.pinned desc, t.last_activity_at desc
+      limit ${archivedView ? 100 : 40}
     `;
 
     return new Response(
@@ -342,6 +347,7 @@ export default async (req: Request, context: Context) => {
           isAnnouncement: t.is_announcement,
           important: t.important,
           expired: isExpired(t.expires_at),
+          archivedAt: t.archived_at,
           createdAt: t.created_at,
           lastActivityAt: t.last_activity_at,
           replyCount: t.reply_count,

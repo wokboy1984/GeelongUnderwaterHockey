@@ -144,14 +144,20 @@ export default async (req: Request, context: Context) => {
       }
       const askedDate = url.searchParams.get("date");
       const sessionDate = askedDate ? requestedSessionDate(askedDate) : nextSessionDateISO();
+      // This week's list (11 Nov 2026) also carries bookings from the last
+      // two weeks that were never added or marked "Didn't come", so they
+      // can be added to tonight without retyping their details.
+      const thisWeek = sessionDate === nextSessionDateISO();
       const rows = await db.sql`
-        select t.id, t.first_name, t.last_name, t.email, t.phone, t.age, t.fin_size, t.handed, t.emergency_name, t.emergency_phone, t.heard_from, t.created_at,
+        select to_char(t.session_date, 'YYYY-MM-DD') as booked_for, t.id, t.first_name, t.last_name, t.email, t.phone, t.age, t.fin_size, t.handed, t.emergency_name, t.emergency_phone, t.heard_from, t.created_at,
                t.children, t.parent_playing, t.added_member_id, t.dismissed_at,
                m.nickname as inv_nickname, m.first_name as inv_first_name, m.last_name as inv_last_name
         from trial_signups t
         left join members m on m.id = t.invited_by
         where t.session_date = ${sessionDate}
-        order by t.created_at asc
+           or (${thisWeek} and t.session_date < ${sessionDate}::date and t.session_date >= ${sessionDate}::date - 14
+               and t.added_member_id is null and t.dismissed_at is null)
+        order by t.session_date desc, t.created_at asc
       `;
       return json({
         ok: true,
@@ -165,6 +171,8 @@ export default async (req: Request, context: Context) => {
           parentPlaying: r.parent_playing !== false,
           added: !!r.added_member_id,
           dismissed: !!r.dismissed_at,
+          bookedFor: r.booked_for,
+          earlier: r.booked_for !== sessionDate,
           email: r.email,
           phone: r.phone,
           age: r.age,

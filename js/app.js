@@ -204,7 +204,10 @@
       open &&
         h(
           "div",
-          { className: "lg:hidden border-t border-white/10 bg-[var(--navy)]" },
+          // Scrolls on its own (11 Nov 2026, Liam): the header is sticky, so
+          // a menu taller than the phone screen used to cut off its last
+          // items (Finance, Administration, Log out) with no way to reach them.
+          { className: "lg:hidden border-t border-white/10 bg-[var(--navy)] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain" },
           h(
             Container,
             { className: "flex flex-col py-3 gap-1" },
