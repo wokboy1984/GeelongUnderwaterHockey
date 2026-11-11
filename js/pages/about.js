@@ -257,9 +257,9 @@ GUWH.Pages = GUWH.Pages || {};
       h(
         "div",
         { className: "mt-10 rounded-2xl bg-[var(--sand)] p-5 sm:p-6" },
-        h("h3", { className: "font-display text-xl font-bold text-[var(--ink)] mb-1" }, "Volunteering, not playing?"),
+        h("h3", { className: "font-display text-xl font-bold text-[var(--ink)] mb-1" }, "Non-playing volunteers"),
         h("p", { className: "text-sm text-[var(--ink)] max-w-3xl" },
-          "Sign up for the AUF's free Non-Paying Volunteer Membership. It recognises the people who help the sport without getting in the water, and there's no club fee for volunteering on the night either."),
+          "If you help the club but never play or lane swim, sign up for the AUF's free Non-Paying Volunteer Membership. It recognises the people who support the sport from the pool deck. There's no club fee for volunteering on the night either."),
         h("div", { className: "mt-4 grid sm:grid-cols-2 gap-4 text-sm" },
           h("div", null,
             h("p", { className: "font-semibold text-[var(--ink)] mb-1" }, "It's for"),
@@ -268,7 +268,7 @@ GUWH.Pages = GUWH.Pages || {};
           ),
           h("div", null,
             h("p", { className: "font-semibold text-[var(--ink)] mb-1" }, "It's not for"),
-            h("p", { className: "text-[var(--ink-soft)]" }, "Players and participants - underwater hockey, underwater rugby, finswimming, freediving, spearfishing, recreational diving or coaching in the water. They need the usual AUF membership."),
+            h("p", { className: "text-[var(--ink-soft)]" }, "Anyone who plays or lane swims, even now and then, or takes part in the water: underwater hockey, underwater rugby, finswimming, freediving, spearfishing, recreational diving or coaching in the water. They need the usual AUF membership."),
             h("p", { className: "text-[var(--ink-soft)] mt-2" }, "The AUF checks with the club that each application is a genuine volunteer.")
           )
         ),
