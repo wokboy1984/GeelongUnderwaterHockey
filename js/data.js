@@ -20,6 +20,8 @@ GUWH.club = {
   // Club email (11 Nov 2026, as on the old site's contact page).
   email: "club@geelongunderwaterhockey.org.au",
   postalAddress: "PO Box 5006, Geelong North VIC 3215",
+  // AUF Non-Paying Volunteer Membership sign-up (free; 11 Nov 2026, Liam).
+  aufVolunteerUrl: "https://regoform.mygameday.app/#/lT2se0ofmQ4EJ6VxzX/zVueNpoaynIGxky4M3",
   // Committee (11 Nov 2026, from the old club site's contact page), shown on
   // the member Contacts page (js/pages/portal-contacts.js). Update after
   // each AGM. email = that role's club address, never a personal one.

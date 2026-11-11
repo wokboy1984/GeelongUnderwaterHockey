@@ -252,6 +252,29 @@ GUWH.Pages = GUWH.Pages || {};
         h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Pay on the night, in advance, or in arrears — whatever's easiest. AUF membership covers insurance while you play.")
       ),
 
+      // AUF Non-Paying Volunteer Membership (11 Nov 2026, Liam): free, for
+      // people who help but don't get in the water. Created at the 2024 AUF AGM.
+      h(
+        "div",
+        { className: "mt-10 rounded-2xl bg-[var(--sand)] p-5 sm:p-6" },
+        h("h3", { className: "font-display text-xl font-bold text-[var(--ink)] mb-1" }, "Volunteering, not playing?"),
+        h("p", { className: "text-sm text-[var(--ink)] max-w-3xl" },
+          "Sign up for the AUF's free Non-Paying Volunteer Membership. It recognises the people who help the sport without getting in the water, and there's no club fee for volunteering on the night either."),
+        h("div", { className: "mt-4 grid sm:grid-cols-2 gap-4 text-sm" },
+          h("div", null,
+            h("p", { className: "font-semibold text-[var(--ink)] mb-1" }, "It's for"),
+            h("ul", { className: "flex flex-col gap-1 text-[var(--ink-soft)]" },
+              ["Committee and admin helpers", "Scorers and competition organisers", "Chaperones", "Fundraisers", "Non-playing coaches and referees", "Non-playing life members"].map((t) => h("li", { key: t }, "· " + t)))
+          ),
+          h("div", null,
+            h("p", { className: "font-semibold text-[var(--ink)] mb-1" }, "It's not for"),
+            h("p", { className: "text-[var(--ink-soft)]" }, "Players and participants - underwater hockey, underwater rugby, finswimming, freediving, spearfishing, recreational diving or coaching in the water. They need the usual AUF membership."),
+            h("p", { className: "text-[var(--ink-soft)] mt-2" }, "The AUF checks with the club that each application is a genuine volunteer.")
+          )
+        ),
+        GUWH.club.aufVolunteerUrl && h("a", { href: GUWH.club.aufVolunteerUrl, target: "_blank", rel: "noopener", className: "mt-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] text-white text-sm font-semibold px-4 py-2 hover:bg-[var(--accent-dark)]" }, "Apply for free volunteer membership →")
+      ),
+
       h(
         "div",
         { className: "mt-14 flex flex-wrap gap-4" },
