@@ -235,9 +235,20 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "grid sm:grid-cols-2 lg:grid-cols-4 gap-4" },
           h(FeeCard, { title: "Unwaged / junior", rows: [{ label: "Joining fee", value: f.unwaged.joining }, { label: "Yearly membership", value: f.unwaged.yearly }, { label: "Per-game pool fee", value: f.unwaged.perGame }, { label: "AUF membership", value: f.unwaged.auf }] }),
           h(FeeCard, { title: "Waged", rows: [{ label: "Joining fee", value: f.waged.joining }, { label: "Yearly membership", value: f.waged.yearly }, { label: "Per-game pool fee", value: f.waged.perGame }, { label: "AUF membership", value: f.waged.auf }] }),
-          h(FeeCard, { title: "Family", rows: [{ label: "Yearly membership", value: f.family.yearly }] }),
-          h(FeeCard, { title: "Lap swimmers", rows: [{ label: "Pool collection", value: f.lapSwimmer.perGame }] })
+          // Family cap per game night (11 Nov 2026, Liam: the 28 Oct
+          // committee change, as Finance charges it).
+          h(FeeCard, { title: "Family", rows: [
+            { label: "Yearly membership", value: f.family.yearly },
+            { label: "Night cap: juniors only", value: f.family.nightJuniors },
+            { label: "Night cap: 1 adult", value: f.family.nightOneAdult },
+            { label: "Night cap: 2 adults", value: f.family.nightTwoAdults },
+          ] }),
+          h(FeeCard, { title: "Lane swimmers", rows: [{ label: "Pool collection", value: f.lapSwimmer.perGame }] })
         ),
+        h("p", { className: "mt-4 text-sm text-[var(--ink-soft)]" },
+          "Families: on a game night your family pays at most $" + f.family.nightJuniors + " for its juniors (under 18), plus $" + (f.family.nightOneAdult - f.family.nightJuniors) +
+          " for each adult playing. So juniors only is $" + f.family.nightJuniors + ", one adult with any number of juniors is $" + f.family.nightOneAdult + ", and two adults is $" + f.family.nightTwoAdults +
+          ". Volunteers are free and don't count as an adult; lane swims aren't included. Ask an Administrator to link your family's accounts so the cap applies."),
         h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Pay on the night, in advance, or in arrears — whatever's easiest. AUF membership covers insurance while you play.")
       ),
 

@@ -49,7 +49,11 @@ GUWH.club = {
   fees: {
     unwaged: { joining: 10, yearly: 5, perGame: 10, auf: 55 },
     waged: { joining: 20, yearly: 20, perGame: 20, auf: 95 },
-    family: { yearly: 30 },
+    // Family cap per game night (committee decision, from 28 Oct 2026; the
+    // rule Finance charges by - see FAMILY_CAP_FROM / familyCapCents in
+    // netlify/functions/_shared/finance.mts): at most $20 for the juniors,
+    // plus $10 for each adult charged. Lane swims aren't included.
+    family: { yearly: 30, nightJuniors: 20, nightOneAdult: 30, nightTwoAdults: 40 },
     lapSwimmer: { perGame: 10 },
   },
   inclusion: [
