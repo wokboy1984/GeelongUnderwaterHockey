@@ -96,3 +96,30 @@ test('season dates must be real Wednesdays', () => {
   assert.ok(!isSeasonDate('2026-02-30'));
   assert.ok(!isSeasonDate(''));
 });
+
+// Club calendar (11 Nov 2026): season set-up and the phone feed.
+import { seasonDates, buildICS } from '../netlify/functions/_shared/calendar.mts';
+import { melbourneToUTC } from '../netlify/functions/_shared/attendance.mts';
+
+test('season set-up makes one game night per Wednesday, skipping chosen dates', () => {
+  const d = seasonDates('2027-02-01', '2027-03-03', 3, ['2027-02-17']);
+  assert.deepEqual(d, ['2027-02-03', '2027-02-10', '2027-02-24', '2027-03-03']);
+  assert.deepEqual(seasonDates('2027-03-03', '2027-02-01', 3), [], 'last before first gives nothing');
+  assert.equal(seasonDates('2027-01-01', '2029-12-31', 3).length, 60, 'capped at 60 nights');
+});
+
+test('phone feed: Melbourne times in UTC, cancelled nights marked', () => {
+  const items = [
+    { id: 1, date: '2026-12-02', kind: 'game', title: 'Last game for 2026', startTime: '18:00', endTime: '19:45', location: 'Handbury Centre for Wellbeing', notes: null, cancelled: false, cancelReason: null },
+    { id: 2, date: '2027-02-10', kind: 'game', title: 'Game night', startTime: '18:00', endTime: '19:45', location: null, notes: null, cancelled: true, cancelReason: 'Pool closed' },
+    { id: 3, date: '2026-12-05', kind: 'event', title: 'End of year BBQ, Eastern Beach', startTime: null, endTime: null, location: null, notes: null, cancelled: false, cancelReason: null },
+  ];
+  const ics = buildICS(items, melbourneToUTC, 'example.org', new Date('2026-11-11T00:00:00Z'));
+  assert.match(ics, /DTSTART:20261202T070000Z/, '6pm AEDT is 07:00 UTC');
+  assert.match(ics, /DTEND:20261202T084500Z/);
+  assert.match(ics, /SUMMARY:Cancelled: Underwater hockey\r\n/);
+  assert.match(ics, /STATUS:CANCELLED/);
+  assert.match(ics, /DTSTART;VALUE=DATE:20261205/, 'no time = all day');
+  assert.ok(ics.includes('SUMMARY:End of year BBQ' + String.fromCharCode(92) + ', Eastern Beach'), 'commas escaped');
+  assert.ok(ics.startsWith('BEGIN:VCALENDAR\r\n') && ics.endsWith('END:VCALENDAR\r\n'));
+});
