@@ -2,9 +2,9 @@
 //
 // GET  /api/calendar[?from=YYYY-MM-DD&to=YYYY-MM-DD]
 //   -> { ok, from, to, items[], canEdit }   public; canEdit only when logged
-//      in as a Game Coordinator or Administrator. Default range: the start
+//      in as an Administrator. Default range: the start
 //      of last month to a year ahead.
-// POST /api/calendar { action, ... }   Game Coordinator / Administrator
+// POST /api/calendar { action, ... }   Administrators only (11 Nov 2026, Liam)
 //   create_season { from, to, startTime, endTime, location?, skip?: [date] }
 //       -> one game night every Wednesday from..to, except skip. Nights
 //          already on the calendar are left alone. Returns created + skipped.
@@ -42,12 +42,12 @@ export default async (req: Request, context: Context) => {
     // Who's asking: a logged-in editor sees the edit controls.
     const user = await getVerifiedUser(req);
     const caller = user ? await ensureMember(db, user) : null;
-    const canEdit = !!caller && hasPermission(caller.roles, "arrange_teams");
+    const canEdit = !!caller && hasPermission(caller.roles, "manage_platform_settings"); // Administrators only
 
     let message: string | null = null;
     if (req.method === "POST") {
       if (!caller) return unauthorized();
-      if (!canEdit) return forbidden("Only Game Coordinators and Administrators can change the calendar");
+      if (!canEdit) return forbidden("Only Administrators can change the calendar");
       const body = await req.json().catch(() => ({}));
       const action = String(body.action || "");
       const audit = (what: string, newValue: unknown, resourceId = "calendar") =>

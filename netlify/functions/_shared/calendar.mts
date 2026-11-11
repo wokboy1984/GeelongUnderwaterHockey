@@ -1,6 +1,6 @@
 // Club calendar (11 Nov 2026, Liam): game nights and club events, shown on
-// the member Calendar tab and as a phone calendar feed. Game Coordinators
-// and Administrators add and change them; anyone can read them (dates,
+// the member Calendar tab and as a phone calendar feed. Administrators
+// add and change them; anyone can read them (dates,
 // times and places only - never names).
 //
 // Step 1 of 2: for now the calendar sits alongside the rest of the site.

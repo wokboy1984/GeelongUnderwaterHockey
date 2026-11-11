@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Club calendar (11 Nov 2026, Liam): game nights and club events, by month,
-// in the member menu after This Week's Game. Game Coordinators and
-// Administrators set up a whole season of game nights at once, add events,
+// in the member menu after This Week's Game. Administrators (only, 11 Nov
+// 2026, Liam) set up a whole season of game nights at once, add events,
 // and cancel, change or remove anything, right here. Members can add it to
 // their phone's calendar (Apple, Google, Outlook) as a subscription that
 // updates itself. Server: netlify/functions/calendar.mts and
@@ -298,7 +298,7 @@ GUWH.Pages = GUWH.Pages || {};
         { className: "rounded-2xl bg-white ring-1 ring-black/5 p-5 mb-6" },
         h("div", { className: "flex flex-wrap items-center justify-between gap-3" },
           h("div", null,
-            h("p", { className: "font-mono text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Coordinators and admins"),
+            h("p", { className: "font-mono text-[10px] font-bold uppercase tracking-wide text-[var(--ink-soft)]" }, "Administrators"),
             h("p", { className: "font-display text-lg font-bold text-[var(--ink)]" }, panel === "season" ? "Set up season" : panel === "event" ? "Add event" : "Change the calendar")),
           h("div", { className: "flex gap-2" },
             h(Button, { size: "sm", variant: panel === "season" ? "dark" : "secondary", onClick: () => setPanel(panel === "season" ? null : "season") }, "Set up season"),
