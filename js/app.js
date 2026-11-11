@@ -61,6 +61,8 @@
     // juniors from seeing it exists.
     if (showForum) items.push({ label: "Forum", path: "/portal/forum" });
     items.push({ label: "Bring a Mate", path: "/portal/bring-a-mate" });
+    // Contacts (11 Nov 2026, Liam): committee and how to reach the club.
+    items.push({ label: "Contacts", path: "/portal/contacts" });
     items.push({ label: "Profile", path: "/portal/profile" });
     return items;
   }
@@ -114,6 +116,8 @@
         : role === "organiser" ? ORGANISER_NAV : PLAYER_NAV
       : [];
     const adminItems = loggedIn && GUWH.Identity ? adminNavFor(GUWH.Identity.currentRoles()) : [];
+    const trialList = GUWH.useTrialAlerts();
+    const trialCount = trialList ? trialList.length : 0;
     const homeHref = "/"; // logo always goes to the public homepage, logged in or not
     // Logged in: "Try It Free" is for newcomers, and the Members button goes
     // to the same place as the member nav's "Home", so both are dropped.
@@ -130,13 +134,19 @@
         Object.assign(linkProps(item.path), {
           key: item.label,
           className: cx(
-            "rounded-full font-semibold transition",
+            "rounded-full font-semibold transition inline-flex items-center gap-1.5",
             small ? "px-3 py-1.5 text-xs" : "px-3 py-2 text-sm",
             active ? "bg-white/15 text-white" : "text-white/70 hover:text-white"
           ),
         }),
-        item.label
+        item.label,
+        trialBadge(item)
       );
+    }
+    // New free-trial bookings not yet added (11 Nov 2026), on Attendance.
+    function trialBadge(item) {
+      if (item.path !== "/attendance" || !trialCount) return null;
+      return h("span", { className: "min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[var(--accent2)] text-white text-[11px] font-bold leading-5 text-center", title: trialCount + " free-trial booking" + (trialCount === 1 ? "" : "s") + " to add" }, String(trialCount));
     }
 
     return h(
@@ -224,8 +234,9 @@
               adminItems.map((item) =>
                 h(
                   "a",
-                  Object.assign(linkProps(item.path, () => setOpen(false)), { key: item.path, className: cx("block text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") }),
-                  item.label
+                  Object.assign(linkProps(item.path, () => setOpen(false)), { key: item.path, className: cx("flex items-center gap-2 text-left px-3 py-2.5 rounded-lg text-sm font-semibold", path === item.path ? "bg-white/15 text-white" : "text-white/70") }),
+                  item.label,
+                  trialBadge(item)
                 )
               ),
             !loggedIn
@@ -252,6 +263,7 @@
     "/portal/stats": "Player Stats",
     "/portal/forum": "Forum",
     "/portal/bring-a-mate": "Bring a Mate",
+    "/portal/contacts": "Contacts",
     "/portal/profile": "My Profile",
     "/attendance": "Attendance",
     "/attendance/history": "Attendance",
@@ -410,6 +422,10 @@
         return h(GUWH.Pages.BringAMate);
       }
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate);
+    }
+    if (path === "/portal/contacts") {
+      if (GUWH.Identity && !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      return GUWH.Pages.Contacts ? h(GUWH.Pages.Contacts) : null;
     }
     if (path === "/portal/stats") {
       if (GUWH.Identity) {

@@ -8,6 +8,12 @@
 //        -> { ok, dates: ["YYYY-MM-DD" x4], invite? }  the next four Wednesdays (public);
 //           with a Bring a Mate ref, invite = { inviterName, guestName } for the
 //           "Kev invited you" banner and a pre-filled name (13 Oct 2026)
+// GET  /api/trial-signup?scope=alerts
+//        -> { ok, pending[] }  in-app alert (11 Nov 2026, Liam): free-trial
+//                              bookings nobody has added yet, from two weeks
+//                              back (missed: true) to any future Wednesday.
+//                              Game Coordinator / Administrator; anyone else
+//                              gets an empty list.
 // GET  /api/trial-signup?scope=coordinator
 //        -> { ok, sessionDate, signups[] }     newcomers booked for the upcoming
 //                                              Wednesday, with gear + emergency
@@ -29,22 +35,29 @@ import { getDatabase } from "@netlify/database";
 import { ensureMember, ensureNicknameColumn, getVerifiedUser, adminName, hasPermission, unauthorized, forbidden } from "./_shared/roles.mts";
 import { cleanRef, ensureInviteColumns, newToken, resolveRef } from "./_shared/invite-links.mts";
 import { nextSessionDateISO, requestedSessionDate } from "./_shared/attendance.mts";
+import { getSeason, isBreakDate, seasonInfo, type Season } from "./_shared/season.mts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-// The next four Wednesdays, starting with the upcoming one (which is today
-// on a Wednesday - same rule as the rest of the site).
-function nextFourWednesdays(): string[] {
+// The next four game nights, starting with the upcoming Wednesday (which
+// is today on a Wednesday - same rule as the rest of the site). Wednesdays
+// in the summer break are skipped (11 Nov 2026); with the first game back
+// not set yet, nothing after the last game is offered, so the list can be
+// short or empty. Looks no more than 16 weeks ahead.
+function nextFourWednesdays(season: Season): string[] {
   const first = nextSessionDateISO();
   const [y, m, d] = first.split("-").map(Number);
   const base = Date.UTC(y, m - 1, d, 12);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return [0, 1, 2, 3].map((i) => {
+  const out: string[] = [];
+  for (let i = 0; i < 16 && out.length < 4; i++) {
     const dt = new Date(base + i * 7 * 86400000);
-    return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
-  });
+    const iso = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+    if (!isBreakDate(iso, season)) out.push(iso);
+  }
+  return out;
 }
 
 // Same table as migration 20261002000001_nickname_trials - created here too
@@ -87,6 +100,34 @@ export default async (req: Request, context: Context) => {
     const db = getDatabase();
     await ensureTable(db);
     const url = new URL(req.url);
+
+    if (req.method === "GET" && url.searchParams.get("scope") === "alerts") {
+      const user = await getVerifiedUser(req);
+      if (!user) return unauthorized();
+      const caller = await ensureMember(db, user);
+      if (!hasPermission(caller.roles, "manage_others_attendance")) return json({ ok: true, pending: [] });
+      const upcoming = nextSessionDateISO();
+      const rows = await db.sql`
+        select id, first_name, last_name, phone, children, parent_playing, to_char(session_date, 'YYYY-MM-DD') as session_date
+        from trial_signups
+        where added_member_id is null and session_date >= ${upcoming}::date - 14
+        order by session_date asc, created_at asc
+        limit 30
+      `;
+      return json({
+        ok: true,
+        upcoming,
+        pending: rows.map((r: any) => ({
+          id: r.id,
+          name: `${r.first_name} ${r.last_name}`.trim(),
+          phone: r.phone,
+          sessionDate: r.session_date,
+          kids: Array.isArray(r.children) ? r.children.length : 0,
+          parentPlaying: r.parent_playing !== false,
+          missed: r.session_date < upcoming,
+        })),
+      });
+    }
 
     if (req.method === "GET" && url.searchParams.get("scope") === "coordinator") {
       const user = await getVerifiedUser(req);
@@ -133,7 +174,8 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "GET") {
       const r = await resolveRef(db, cleanRef(url.searchParams.get("ref")));
-      return json({ ok: true, dates: nextFourWednesdays(), invite: r ? { inviterName: r.inviterName, guestName: r.guestName, children: r.children || [] } : null });
+      const season = await getSeason(db);
+      return json({ ok: true, dates: nextFourWednesdays(season), season: seasonInfo(season, nextSessionDateISO()), invite: r ? { inviterName: r.inviterName, guestName: r.guestName, children: r.children || [] } : null });
     }
 
     if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
@@ -176,7 +218,7 @@ export default async (req: Request, context: Context) => {
     }
     const parentPlaying = !(children.length && body.parentPlaying === false);
 
-    if (!nextFourWednesdays().includes(sessionDate)) {
+    if (!nextFourWednesdays(await getSeason(db)).includes(sessionDate)) {
       return json({ ok: false, error: "Please pick one of the Wednesdays in the list." }, 400);
     }
 

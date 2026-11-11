@@ -17,13 +17,45 @@ GUWH.club = {
   facebook: "https://www.facebook.com/GeelongUWHStu",
   highlightsVideo: "https://www.youtube.com/watch?v=JoiUTu4emcE",
   highlightsVideoId: "JoiUTu4emcE",
-  email: "info@geelongunderwaterhockey.org.au",
+  // Club email (11 Nov 2026, as on the old site's contact page).
+  email: "club@geelongunderwaterhockey.org.au",
+  postalAddress: "PO Box 5006, Geelong North VIC 3215",
+  // AUF Non-Paying Volunteer Membership sign-up (free; 11 Nov 2026, Liam).
+  aufVolunteerUrl: "https://regoform.mygameday.app/#/lT2se0ofmQ4EJ6VxzX/zVueNpoaynIGxky4M3",
+  // Committee (11 Nov 2026, from the old club site's contact page), shown on
+  // the member Contacts page (js/pages/portal-contacts.js). Update after
+  // each AGM. email = that role's club address, never a personal one.
+  committee: {
+    season: "2025–2026",
+    officeBearers: [
+      { role: "President", name: "Matthew Walters", email: "president@geelongunderwaterhockey.org.au" },
+      { role: "Vice-President", name: "Charlie Di Iorio" },
+      { role: "Secretary", name: "Nicola Fraser", email: "secretary@geelongunderwaterhockey.org.au" },
+      { role: "Treasurer", name: "Stuart McCallum" },
+      { role: "Vice-Treasurer", name: "Charlie Di Iorio" },
+      { role: "Supplier & Grants Liaison", name: "Gail Joordens" },
+    ],
+    general: [
+      { name: "Liam Cooke" },
+      { name: "Scott Powell" },
+      { name: "Kevin Chisholm" },
+    ],
+    exOfficio: [
+      { role: "Advisor Representing Club Youth", name: "Byron Fraser" },
+      { role: "Chief Referee", name: "Kevin Chisholm", email: "chief.referee@geelongunderwaterhockey.org.au" },
+      { role: "Member Protection & Information Officer", name: "Matthew Walters", email: "mpio@geelongunderwaterhockey.org.au" },
+    ],
+  },
   founded: 1978,
   poolCapacity: 48,
   fees: {
     unwaged: { joining: 10, yearly: 5, perGame: 10, auf: 55 },
     waged: { joining: 20, yearly: 20, perGame: 20, auf: 95 },
-    family: { yearly: 30 },
+    // Family cap per game night (committee decision, from 28 Oct 2026; the
+    // rule Finance charges by - see FAMILY_CAP_FROM / familyCapCents in
+    // netlify/functions/_shared/finance.mts): at most $20 for the juniors,
+    // plus $10 for each adult charged. Lane swims aren't included.
+    family: { yearly: 30, nightJuniors: 20, nightOneAdult: 30, nightTwoAdults: 40 },
     lapSwimmer: { perGame: 10 },
   },
   inclusion: [

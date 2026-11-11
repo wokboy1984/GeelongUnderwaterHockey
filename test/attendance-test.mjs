@@ -73,3 +73,26 @@ test('isLikelyEmail accepts ordinary addresses, including ones with an s', () =>
   for (const ok of ['lucas@gmail.com', 'wokboy@gmail.com', 'liam_cooke@bio-rad.com', 'a@mail.bio.com']) assert.ok(isLikelyEmail(ok), ok);
   for (const bad of ['', 'no at sign', 'x@y', 'two words@x.com', 'a@@b.com']) assert.ok(!isLikelyEmail(bad), bad);
 });
+
+// Season break (11 Nov 2026): no game between the last game of the year and
+// the first game back.
+import { isBreakDate, isSeasonDate } from '../netlify/functions/_shared/season.mts';
+
+test('season break covers the Wednesdays after the last game, until the first game back', () => {
+  const tba = { lastSession: '2026-12-02', returnDate: null };
+  assert.equal(isBreakDate('2026-12-02', tba), false, 'the last game itself is on');
+  assert.equal(isBreakDate('2026-12-09', tba), true);
+  assert.equal(isBreakDate('2027-03-03', tba), true, 'with no return date, every later Wednesday is off');
+  const back = { lastSession: '2026-12-02', returnDate: '2027-02-03' };
+  assert.equal(isBreakDate('2027-01-27', back), true);
+  assert.equal(isBreakDate('2027-02-03', back), false, 'the first game back is on');
+  assert.equal(isBreakDate('2026-11-25', back), false);
+  assert.equal(isBreakDate('2026-12-09', { lastSession: null, returnDate: null }), false, 'no break set');
+});
+
+test('season dates must be real Wednesdays', () => {
+  assert.ok(isSeasonDate('2026-12-02'));
+  assert.ok(!isSeasonDate('2026-12-03'));
+  assert.ok(!isSeasonDate('2026-02-30'));
+  assert.ok(!isSeasonDate(''));
+});

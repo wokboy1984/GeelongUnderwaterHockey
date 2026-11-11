@@ -14,6 +14,7 @@ window.GUWH = window.GUWH || {};
     chevronRight: "m9 5 7 7-7 7",
     chevronLeft: "m15 5-7 7 7 7",
     mapPin: "M12 21s7-6.1 7-11.5A7 7 0 0 0 5 9.5C5 14.9 12 21 12 21ZM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
+    mail: "M3.5 6.5h17v11h-17v-11ZM3.5 7l8.5 6.5L20.5 7",
     clock: "M12 7.5V12l3 2M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0Z",
     trophy: "M8 4h8v4a4 4 0 0 1-8 0V4ZM5 5h3v2a3 3 0 0 1-3 3 2 2 0 0 1-2-2 3 3 0 0 1 2-3ZM19 5h-3v2a3 3 0 0 0 3 3 2 2 0 0 0 2-2 3 3 0 0 0-2-3ZM10 13.5v2.5M14 13.5v2.5M8.5 20.5h7M9.5 16h5l.5 4.5h-6l.5-4.5Z",
     plus: "M12 5v14M5 12h14",
@@ -534,10 +535,110 @@ window.GUWH = window.GUWH || {};
     );
   }
 
+  // Season break (11 Nov 2026, Liam): the last game of the year and the
+  // first game back, from /api/season (set in Administration). Fetched once
+  // per visit and shared; null until it arrives, and in the concept preview.
+  const seasonState = { data: null, loading: false, listeners: new Set() };
+  function loadSeason() {
+    if (seasonState.data || seasonState.loading || !GUWH.Identity) return;
+    seasonState.loading = true;
+    fetch("/api/season")
+      .then((r) => r.json())
+      .then((d) => { if (d.ok) { seasonState.data = d; seasonState.listeners.forEach((fn) => fn()); } })
+      .catch(() => {})
+      .finally(() => { seasonState.loading = false; });
+  }
+  GUWH.useSeason = function useSeason() {
+    const [, rerender] = React.useReducer((n) => n + 1, 0);
+    React.useEffect(() => {
+      seasonState.listeners.add(rerender);
+      loadSeason();
+      return () => { seasonState.listeners.delete(rerender); };
+    }, []);
+    return seasonState.data;
+  };
+  // After an Administrator saves new dates.
+  GUWH.setSeason = function setSeason(d) { seasonState.data = d; seasonState.listeners.forEach((fn) => fn()); };
+  // The two lines shown to people, or null when no break is set.
+  GUWH.seasonLines = function seasonLines(s) {
+    if (!s || !s.lastSession) return null;
+    const day = (iso) => GUWH.formatDate(new Date(iso + "T00:00:00"));
+    return {
+      last: "Last game for " + s.lastSession.slice(0, 4) + ": " + day(s.lastSession),
+      back: s.returnDate
+        ? "First game back: " + day(s.returnDate) + " " + s.returnDate.slice(0, 4)
+        : "First game back is usually early February, date to be announced",
+      backShort: s.returnDate ? "back " + day(s.returnDate) : "back in February",
+    };
+  };
+  // Worth mentioning: on the break now, or the last game is coming up
+  // (within `days` days, if given) - not once the season has started again.
+  GUWH.seasonRelevant = function seasonRelevant(s, days) {
+    if (!s || !s.lastSession) return false;
+    if (s.onBreak) return true;
+    if (!s.upcoming || s.upcoming > s.lastSession) return false;
+    return days == null || (Date.parse(s.lastSession) - Date.parse(s.upcoming)) / 86400000 <= days;
+  };
+
+  // Free-trial booking alerts (11 Nov 2026, Liam): bookings from the Try It
+  // Free page that no coordinator has added yet. Shared by the Attendance
+  // badge in the menu and the Dashboard card, so it's fetched once and
+  // refreshed every 5 minutes, on login, and whenever coordinator tools
+  // change something (guwh:coord-changed). Only coordinators and admins.
+  const trialAlerts = { data: null, at: 0, loading: false, listeners: new Set() };
+  function canSeeTrialAlerts() {
+    const roles = GUWH.Identity && GUWH.Identity.currentRoles ? GUWH.Identity.currentRoles() || [] : [];
+    return roles.indexOf("game_coordinator") !== -1 || roles.indexOf("administrator") !== -1;
+  }
+  function refreshTrialAlerts(force) {
+    if (!canSeeTrialAlerts() || trialAlerts.loading) return;
+    if (!force && Date.now() - trialAlerts.at < 60000) return;
+    trialAlerts.loading = true;
+    GUWH.Identity.authFetch("/api/trial-signup?scope=alerts")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.ok) return;
+        trialAlerts.data = d.pending || [];
+        trialAlerts.at = Date.now();
+        trialAlerts.listeners.forEach((fn) => fn());
+      })
+      .catch(() => {})
+      .finally(() => { trialAlerts.loading = false; });
+  }
+  GUWH.refreshTrialAlerts = refreshTrialAlerts;
+  GUWH.useTrialAlerts = function useTrialAlerts() {
+    const [, rerender] = React.useReducer((n) => n + 1, 0);
+    React.useEffect(() => {
+      trialAlerts.listeners.add(rerender);
+      refreshTrialAlerts(false);
+      const timer = setInterval(() => refreshTrialAlerts(true), 5 * 60000);
+      const onCoord = () => refreshTrialAlerts(true);
+      window.addEventListener("guwh:coord-changed", onCoord);
+      const offIdentity = GUWH.Identity && GUWH.Identity.onChange ? GUWH.Identity.onChange(() => { refreshTrialAlerts(false); rerender(); }) : null;
+      return () => {
+        trialAlerts.listeners.delete(rerender);
+        clearInterval(timer);
+        window.removeEventListener("guwh:coord-changed", onCoord);
+        if (offIdentity) offIdentity();
+      };
+    }, []);
+    return canSeeTrialAlerts() ? trialAlerts.data : null;
+  };
+
   // devTeam (27 Oct 2026): the development team they play the early game
   // in, alongside their main team. Either can be missing.
-  function MyTeamSummary({ team, devTeam, colours, memberId, className }) {
+  // kind (10 Nov 2026, Liam): "swim" or "volunteer" when they're coming
+  // for that, so a lane swimmer isn't told they're "not in a team yet".
+  function MyTeamSummary({ team, devTeam, colours, memberId, className, kind }) {
     if (!team && devTeam) { team = devTeam; devTeam = null; }
+    if (!team && (kind === "swim" || kind === "volunteer")) {
+      return h(
+        "div",
+        { className: cx("rounded-xl bg-white px-4 py-3", className) },
+        h("p", { className: "text-sm font-semibold text-[var(--ink)]" }, kind === "swim" ? "You're lane swimming - no team needed" : "You're volunteering - no team needed"),
+        h("p", { className: "text-xs text-[var(--ink-soft)] mt-0.5" }, "Teams are only for players. Want to play instead? Change \"What for?\" when you book in.")
+      );
+    }
     if (!team) {
       return h(
         "div",

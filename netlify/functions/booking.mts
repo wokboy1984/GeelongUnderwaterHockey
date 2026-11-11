@@ -29,6 +29,7 @@ import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { ensureAttendanceKinds, ensureFamilyColumns, ensureNonPlayerColumn, ensureUsualKindColumn, ensureMember, ensureNicknameColumn, familyMembers, familyOf, getVerifiedUser, memberDisplayName } from "./_shared/roles.mts";
 import { nextSessionDateISO, toAttendanceKind } from "./_shared/attendance.mts";
+import { getSeason, seasonInfo } from "./_shared/season.mts";
 
 function firstNameFrom(fullName: string | undefined, email: string): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
@@ -66,6 +67,14 @@ export default async (req: Request, context: Context) => {
     const memberId: string = caller.id;
     const email: string = caller.email;
     const sessionDate = nextSessionDateISO();
+    // Season break (11 Nov 2026): no game this Wednesday, so nothing to book.
+    const season = seasonInfo(await getSeason(db), sessionDate);
+    if (season.onBreak) {
+      if (req.method === "POST") {
+        return new Response(JSON.stringify({ ok: false, error: "There's no game this Wednesday - we're on our summer break." }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ ok: true, sessionDate, season, myStatus: null, inSession: false, confirmedCount: 0, confirmed: [], family: [] }), { headers: { "content-type": "application/json" } });
+    }
     await ensureNicknameColumn(db);
     await ensureFamilyColumns(db);
     await ensureAttendanceKinds(db);
@@ -192,6 +201,7 @@ export default async (req: Request, context: Context) => {
       JSON.stringify({
         ok: true,
         sessionDate,
+        season,
         inSession: mine ? mine.status === "in" : false,
         // "in" | "out" | null (20 Oct 2026). inSession alone can't tell a
         // member who said no apart from one who hasn't answered — both are

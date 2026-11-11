@@ -235,10 +235,44 @@ GUWH.Pages = GUWH.Pages || {};
           { className: "grid sm:grid-cols-2 lg:grid-cols-4 gap-4" },
           h(FeeCard, { title: "Unwaged / junior", rows: [{ label: "Joining fee", value: f.unwaged.joining }, { label: "Yearly membership", value: f.unwaged.yearly }, { label: "Per-game pool fee", value: f.unwaged.perGame }, { label: "AUF membership", value: f.unwaged.auf }] }),
           h(FeeCard, { title: "Waged", rows: [{ label: "Joining fee", value: f.waged.joining }, { label: "Yearly membership", value: f.waged.yearly }, { label: "Per-game pool fee", value: f.waged.perGame }, { label: "AUF membership", value: f.waged.auf }] }),
-          h(FeeCard, { title: "Family", rows: [{ label: "Yearly membership", value: f.family.yearly }] }),
-          h(FeeCard, { title: "Lap swimmers", rows: [{ label: "Pool collection", value: f.lapSwimmer.perGame }] })
+          // Family cap per game night (11 Nov 2026, Liam: the 28 Oct
+          // committee change, as Finance charges it).
+          h(FeeCard, { title: "Family", rows: [
+            { label: "Yearly membership", value: f.family.yearly },
+            { label: "Night cap: juniors only", value: f.family.nightJuniors },
+            { label: "Night cap: 1 adult", value: f.family.nightOneAdult },
+            { label: "Night cap: 2 adults", value: f.family.nightTwoAdults },
+          ] }),
+          h(FeeCard, { title: "Lane swimmers", rows: [{ label: "Pool collection", value: f.lapSwimmer.perGame }] })
         ),
+        h("p", { className: "mt-4 text-sm text-[var(--ink-soft)]" },
+          "Families: on a game night your family pays at most $" + f.family.nightJuniors + " for its juniors (under 18), plus $" + (f.family.nightOneAdult - f.family.nightJuniors) +
+          " for each adult playing. So juniors only is $" + f.family.nightJuniors + ", one adult with any number of juniors is $" + f.family.nightOneAdult + ", and two adults is $" + f.family.nightTwoAdults +
+          ". Volunteers are free and don't count as an adult; lane swims aren't included. Ask an Administrator to link your family's accounts so the cap applies."),
         h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Pay on the night, in advance, or in arrears — whatever's easiest. AUF membership covers insurance while you play.")
+      ),
+
+      // AUF Non-Paying Volunteer Membership (11 Nov 2026, Liam): free, for
+      // people who help but don't get in the water. Created at the 2024 AUF AGM.
+      h(
+        "div",
+        { className: "mt-10 rounded-2xl bg-[var(--sand)] p-5 sm:p-6" },
+        h("h3", { className: "font-display text-xl font-bold text-[var(--ink)] mb-1" }, "Non-playing volunteers"),
+        h("p", { className: "text-sm text-[var(--ink)] max-w-3xl" },
+          "If you help the club but never play or lane swim, sign up for the AUF's free Non-Paying Volunteer Membership. It recognises the people who support the sport from the pool deck. There's no club fee for volunteering on the night either."),
+        h("div", { className: "mt-4 grid sm:grid-cols-2 gap-4 text-sm" },
+          h("div", null,
+            h("p", { className: "font-semibold text-[var(--ink)] mb-1" }, "It's for"),
+            h("ul", { className: "flex flex-col gap-1 text-[var(--ink-soft)]" },
+              ["Committee and admin helpers", "Scorers and competition organisers", "Chaperones", "Fundraisers", "Non-playing coaches and referees", "Non-playing life members"].map((t) => h("li", { key: t }, "· " + t)))
+          ),
+          h("div", null,
+            h("p", { className: "font-semibold text-[var(--ink)] mb-1" }, "It's not for"),
+            h("p", { className: "text-[var(--ink-soft)]" }, "Anyone who plays or lane swims, even now and then, or takes part in the water: underwater hockey, underwater rugby, finswimming, freediving, spearfishing, recreational diving or coaching in the water. They need the usual AUF membership."),
+            h("p", { className: "text-[var(--ink-soft)] mt-2" }, "The AUF checks with the club that each application is a genuine volunteer.")
+          )
+        ),
+        GUWH.club.aufVolunteerUrl && h("a", { href: GUWH.club.aufVolunteerUrl, target: "_blank", rel: "noopener", className: "mt-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] text-white text-sm font-semibold px-4 py-2 hover:bg-[var(--accent-dark)]" }, "Apply for free volunteer membership →")
       ),
 
       h(

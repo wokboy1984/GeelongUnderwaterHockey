@@ -31,6 +31,9 @@ GUWH.Pages = GUWH.Pages || {};
 
   function HomePage() {
     const wed = GUWH.nextWednesday();
+    // Summer break line (11 Nov 2026): from six weeks before the last game.
+    const season = GUWH.useSeason();
+    const seasonLines = GUWH.seasonRelevant(season, 42) ? GUWH.seasonLines(season) : null;
     // Live booking count for the upcoming Wednesday, from the public,
     // unauthenticated /api/public-stats endpoint — not the concept's fake
     // demo store. Stays null (number hidden) until it loads or if the
@@ -87,6 +90,13 @@ GUWH.Pages = GUWH.Pages || {};
             { className: "mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-white/85 text-sm font-semibold" },
             h("span", { className: "flex items-center gap-1.5" }, h(Icon, { name: "clock", size: 16, className: "text-[var(--accent-light)]" }), "Wednesdays, " + GUWH.club.sessionTime),
             h("span", { className: "flex items-center gap-1.5" }, h(Icon, { name: "mapPin", size: 16, className: "text-[var(--accent-light)]" }), GUWH.club.venue + ", Corio")
+          ),
+          // Summer break (11 Nov 2026): from six weeks before the last game.
+          seasonLines && h(
+            "p",
+            { className: "mt-2 flex items-center gap-1.5 text-white/85 text-sm font-semibold" },
+            h(Icon, { name: "calendar", size: 16, className: "text-[var(--accent-light)]" }),
+            season.onBreak ? "On summer break, " + seasonLines.backShort : seasonLines.last + ", then summer break (" + seasonLines.backShort + ")"
           ),
           h(
             "div",

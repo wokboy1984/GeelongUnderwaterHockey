@@ -26,6 +26,21 @@ GUWH.Pages = GUWH.Pages || {};
     };
   }
 
+  // Shown instead of the booking form when there's no Wednesday to book
+  // (summer break, 11 Nov 2026).
+  function BreakNotice({ season }) {
+    const lines = GUWH.seasonLines(season);
+    return h(
+      "div",
+      { className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 flex flex-col gap-3 h-fit" },
+      h("h2", { className: "font-display text-2xl font-bold text-[var(--ink)]" }, "We're on our summer break"),
+      lines && h("p", { className: "text-sm text-[var(--ink)]" }, lines.last + "."),
+      lines && h("p", { className: "text-sm text-[var(--ink)]" }, lines.back + "."),
+      h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Bookings for your free sessions open again before our first game back. Check back in January, or follow us on Facebook for the date."),
+      GUWH.club.facebook && h("a", { className: "text-sm font-semibold text-[var(--accent-dark)] hover:underline", href: GUWH.club.facebook, target: "_blank", rel: "noopener" }, "Geelong Underwater Hockey on Facebook")
+    );
+  }
+
   function NewPlayerPage() {
     const [form, setForm] = React.useState(emptyForm());
     const [errors, setErrors] = React.useState({});
@@ -38,6 +53,9 @@ GUWH.Pages = GUWH.Pages || {};
     // always matches what the server will accept; the concept preview (no
     // backend) works it out locally.
     const [dates, setDates] = React.useState(() => localNextFourWednesdays());
+    // Summer break (11 Nov 2026): the server leaves break Wednesdays out of
+    // `dates`; with none left, there's nothing to book until we're back.
+    const [season, setSeason] = React.useState(null);
 
     // Bring a Mate link (13 Oct 2026): "#/new-player?ref=..." says who
     // invited them, fills in their name if the member typed it, and is
@@ -50,7 +68,8 @@ GUWH.Pages = GUWH.Pages || {};
       fetch("/api/trial-signup" + (ref ? "?ref=" + encodeURIComponent(ref) : ""))
         .then((r) => r.json())
         .then((d) => {
-          if (d.ok && Array.isArray(d.dates) && d.dates.length) setDates(d.dates);
+          if (d.ok && Array.isArray(d.dates)) setDates(d.dates);
+          if (d.ok && d.season) setSeason(d.season);
           if (d.ok && d.invite) {
             setInvite(d.invite);
             const parts = String(d.invite.guestName || "").trim().split(/\s+/);
@@ -268,7 +287,7 @@ GUWH.Pages = GUWH.Pages || {};
         ),
 
         // ---- form column ----
-        h(
+        season && dates.length === 0 ? h(BreakNotice, { season }) : h(
           "form",
           { onSubmit: handleSubmit, noValidate: true, className: "rounded-3xl bg-white ring-1 ring-black/5 p-6 sm:p-8 flex flex-col gap-5 h-fit" },
           invite && h(
@@ -351,6 +370,8 @@ GUWH.Pages = GUWH.Pages || {};
             )
           ),
           errors.sessionDate && h(FieldError, { text: errors.sessionDate }),
+          season && season.lastSession && dates.indexOf(season.lastSession) !== -1 && GUWH.seasonLines(season) &&
+            h("p", { className: "text-xs text-[var(--ink-soft)] -mt-3" }, GUWH.seasonLines(season).last + ", then we break for summer (" + GUWH.seasonLines(season).backShort + ")."),
 
           // Bringing children (5 Nov 2026): they're booked in with you, on
           // your account. No email or login needed for them.
