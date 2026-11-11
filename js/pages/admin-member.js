@@ -156,6 +156,26 @@ GUWH.Pages = GUWH.Pages || {};
       }
     }
 
+    // Usually comes to (11 Nov 2026, Liam): play, lane swim or volunteer.
+    async function saveUsualKind(value) {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await GUWH.Identity.authFetch("/api/admin/roles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "set_usual_kind", memberId: m.id, usualKind: value }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Couldn't save");
+        setM(data.member);
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setBusy(false);
+      }
+    }
+
     // Non-player (3 Nov 2026): books in as volunteering, never charged.
     async function saveNonPlayer(value) {
       setBusy(true);
@@ -265,6 +285,8 @@ GUWH.Pages = GUWH.Pages || {};
 
     if (loading && !m) return h(Container, { className: "py-10" }, back, h("p", { className: "text-sm text-[var(--ink-soft)]" }, "Loading…"));
     if (!m) return h(Container, { className: "py-10" }, back, h("p", { className: "text-sm text-[var(--bad)]", role: "alert" }, error || "Member not found."));
+    // Plays, as opposed to lane swimming, volunteering or a non-player.
+    const plays = !m.nonPlayer && (m.usualKind || "player") === "player";
 
     const f = m.finance;
     const isChild = !!m.parent;
@@ -341,17 +363,36 @@ GUWH.Pages = GUWH.Pages || {};
                     h("button", { type: "button", className: "text-xs text-[var(--ink-soft)] underline", onClick: () => setDobDraft(null) }, "Cancel")
                   )
             ),
-            h(Field, { label: "Grade", value: m.grade }),
+            h(Field, { label: "Grade", value: plays ? m.grade : "Not playing" }),
             // Editable here (27 Oct 2026, Liam); saves as soon as it's picked.
+            // Only for players (11 Nov 2026): lane swimmers, volunteers and
+            // non-players have no position.
+            plays
+              ? h(
+                  "label",
+                  { className: "min-w-0" },
+                  h("span", { className: "block text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-0.5" }, "Position"),
+                  h(
+                    "select",
+                    { className: inputCls + " !w-auto !py-1 text-sm", value: m.position || "Unknown", disabled: busy, onChange: (e) => savePosition(e.target.value) },
+                    GUWH.POSITIONS.concat("Unknown").map((p) => h("option", { key: p, value: p }, p))
+                  )
+                )
+              : h(Field, { label: "Position", value: "Not playing" }),
+            // Usually comes to (11 Nov 2026, Liam): what they're booked in as.
             h(
               "label",
               { className: "min-w-0" },
-              h("span", { className: "block text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-0.5" }, "Position"),
-              h(
-                "select",
-                { className: inputCls + " !w-auto !py-1 text-sm", value: m.position || "Unknown", disabled: busy, onChange: (e) => savePosition(e.target.value) },
-                GUWH.POSITIONS.concat("Unknown").map((p) => h("option", { key: p, value: p }, p))
-              )
+              h("span", { className: "block text-[10px] font-mono uppercase tracking-wide text-[var(--ink-soft)] mb-0.5" }, "Usually comes to"),
+              m.nonPlayer
+                ? h("span", { className: "text-sm text-[var(--ink)]" }, "Volunteer (non-player)")
+                : h(
+                    "select",
+                    { className: inputCls + " !w-auto !py-1 text-sm", value: m.usualKind || "player", disabled: busy, onChange: (e) => saveUsualKind(e.target.value) },
+                    h("option", { value: "player" }, "Play"),
+                    h("option", { value: "swim" }, "Lane swim only"),
+                    h("option", { value: "volunteer" }, "Volunteer")
+                  )
             ),
             h(
               "label",
@@ -379,10 +420,10 @@ GUWH.Pages = GUWH.Pages || {};
               "span",
               null,
               h("span", { className: "font-semibold" }, "Non-player"),
-              h("span", { className: "block text-xs text-[var(--ink-soft)]" }, "Never plays. Saying they're coming books them in as volunteering, they're left out of teams, and they're never charged a game fee.")
+              h("span", { className: "block text-xs text-[var(--ink-soft)]" }, "Never plays or lane swims, e.g. a committee member who only helps. Saying they're coming books them in as volunteering, they're left out of teams, and they're never charged. For a lane swimmer, leave this off and set Usually comes to: Lane swim only (they pay the $10 lane swim fee).")
             )
           ),
-          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position, Gender and Non-player save as soon as you change them; Date of birth when you press Save.")
+          h("p", { className: "mt-4 text-xs text-[var(--ink-soft)]" }, "Roles, grade and the waiver are changed from the Administration list. Position, Gender, Usually comes to and Non-player save as soon as you change them; Date of birth when you press Save.")
         ),
 
         h(
