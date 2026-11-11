@@ -60,6 +60,11 @@ GUWH.Pages = GUWH.Pages || {};
     const outlook = { key: "outlook", label: "Outlook.com", hint: "Hotmail, Outlook app", href: "https://outlook.live.com/calendar/0/addfromweb?url=" + encodeURIComponent(https) + "&name=" + name };
     const office = { key: "office", label: "Microsoft 365", hint: "Work or school Outlook", href: "https://outlook.office.com/calendar/0/addfromweb?url=" + encodeURIComponent(https) + "&name=" + name };
     const options = /Android/i.test(ua) ? [google, outlook, apple, office] : [apple, google, outlook, office];
+    // Outlook's "add calendar from web" page only works on a computer: on a
+    // phone it opens the plain calendar instead (11 Nov 2026, Liam on iPhone).
+    // A calendar added there then shows in the Outlook app too.
+    const isPhone = /iPhone|iPad|iPod|Android/i.test(ua);
+    const [outlookNote, setOutlookNote] = React.useState(false);
     function copy() {
       const done = () => { setCopied(true); setTimeout(() => setCopied(false), 2500); };
       try { navigator.clipboard.writeText(https).then(done, () => window.prompt("Copy this link", https)); } catch (e) { window.prompt("Copy this link", https); }
@@ -73,11 +78,17 @@ GUWH.Pages = GUWH.Pages || {};
         "div",
         { className: "mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2" },
         options.map((o) =>
-          h("a", { key: o.key, href: o.href, target: o.key === "apple" ? undefined : "_blank", rel: "noopener", className: "rounded-xl bg-white ring-1 ring-black/10 px-3 py-2.5 hover:ring-[var(--accent)] transition" },
+          isPhone && (o.key === "outlook" || o.key === "office")
+            ? h("button", { key: o.key, type: "button", onClick: () => setOutlookNote(true), className: "text-left rounded-xl bg-white ring-1 ring-black/10 px-3 py-2.5 hover:ring-[var(--accent)] transition" },
+                h("span", { className: "block text-sm font-semibold text-[var(--ink)]" }, o.label),
+                h("span", { className: "block text-xs text-[var(--ink-soft)]" }, o.hint))
+            : h("a", { key: o.key, href: o.href, target: o.key === "apple" ? undefined : "_blank", rel: "noopener", className: "rounded-xl bg-white ring-1 ring-black/10 px-3 py-2.5 hover:ring-[var(--accent)] transition" },
             h("span", { className: "block text-sm font-semibold text-[var(--ink)]" }, o.label),
             h("span", { className: "block text-xs text-[var(--ink-soft)]" }, o.hint))
         )
       ),
+      outlookNote && h("p", { className: "mt-3 rounded-xl bg-white ring-1 ring-black/10 px-4 py-3 text-sm text-[var(--ink)]" },
+        "Outlook can only add a calendar from its website on a computer. Open this Calendar page on a computer, tap Outlook.com or Microsoft 365 there, and it will then appear in the Outlook app on your phone too."),
       h("button", { type: "button", onClick: copy, className: "mt-3 text-sm font-semibold text-[var(--accent-dark)] hover:underline" }, copied ? "Link copied" : "Other calendar app? Copy the link")
     );
   }
