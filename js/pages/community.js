@@ -117,6 +117,11 @@ GUWH.Pages = GUWH.Pages || {};
   function SuggestionsPanel({ suggestions, categories, onChanged }) {
     const [decliningId, setDecliningId] = React.useState(null);
     const [declineReason, setDeclineReason] = React.useState("");
+    // Category to publish into (11 Nov 2026, Liam): picked here, starting
+    // on the one the member suggested. It used to fall back silently to the
+    // first category (Announcements) when they hadn't picked one.
+    const [catFor, setCatFor] = React.useState({}); // suggestion id -> category id
+    const [needCat, setNeedCat] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState(null);
 
@@ -159,9 +164,32 @@ GUWH.Pages = GUWH.Pages || {};
               )
             : h(
                 "div",
-                { className: "flex items-center gap-2" },
-                h(Button, { type: "button", size: "sm", disabled: busy, onClick: () => call({ action: "approve", suggestionId: s.id, categoryId: s.suggestedCategoryId || (categories[0] && categories[0].id) }) }, "Approve & publish"),
-                h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => setDecliningId(s.id) }, "Decline")
+                { className: "flex flex-col gap-2" },
+                h(
+                  "div",
+                  { className: "flex flex-wrap items-center gap-2" },
+                  h("label", { className: "text-sm font-semibold text-[var(--ink)]", htmlFor: "pub-cat-" + s.id }, "Publish in"),
+                  h(
+                    "select",
+                    { id: "pub-cat-" + s.id, className: inputCls + " !w-auto !py-1.5 text-sm",
+                      value: String(catFor[s.id] != null ? catFor[s.id] : s.suggestedCategoryId || ""),
+                      onChange: (e) => { setNeedCat(null); setCatFor((m) => Object.assign({}, m, { [s.id]: e.target.value })); } },
+                    h("option", { value: "" }, "Choose a category…"),
+                    categories.map((c) => h("option", { key: c.id, value: String(c.id) }, c.name + (c.id === s.suggestedCategoryId ? " (suggested)" : "")))
+                  )
+                ),
+                needCat === s.id && h("p", { className: "text-xs text-[var(--bad)]" }, "Choose a category to publish it in first."),
+                h(
+                  "div",
+                  { className: "flex items-center gap-2" },
+                  h(Button, { type: "button", size: "sm", disabled: busy, onClick: () => {
+                    const cat = Number(catFor[s.id] != null ? catFor[s.id] : s.suggestedCategoryId || 0);
+                    if (!cat) { setNeedCat(s.id); return; }
+                    call({ action: "approve", suggestionId: s.id, categoryId: cat });
+                  } }, "Approve & publish"),
+                  h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy, onClick: () => setDecliningId(s.id) }, "Decline")
+                ),
+                h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Publishing posts it as " + s.suggestedBy + "'s discussion, with their text as the first post, and lets them know.")
               )
         )
       )
