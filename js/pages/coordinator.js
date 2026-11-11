@@ -154,8 +154,23 @@ GUWH.Pages = GUWH.Pages || {};
         .finally(() => setLoading(false));
     }
 
-    React.useEffect(() => { load(); }, []);
+    // A link from the Dashboard's trial alert opens on that week (11 Nov 2026).
+    React.useEffect(() => {
+      const d = GUWH.Router.queryParam && GUWH.Router.queryParam("date");
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setWeek(d); load(d); } else load();
+    }, []);
     function goToWeek(date) { setWeek(date); setAddQuery(""); setAddResults([]); load(date); }
+    // "Didn't come" on a free-trial booking (11 Nov 2026): off the alerts.
+    function setTrialDismissed(t, dismissed) {
+      GUWH.Identity.authFetch("/api/trial-signup", { method: "POST", body: JSON.stringify({ action: dismissed ? "dismiss" : "undismiss", id: t.id }) })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d.ok) return;
+          setTrialSignups((list) => list.map((x) => (x.id === t.id ? Object.assign({}, x, { dismissed }) : x)));
+          coordChanged();
+        })
+        .catch(() => {});
+    }
 
     // The roll's tick state starts from whatever's already saved for today,
     // every time a fresh `checkin` comes in (first load, and after Save/Close/Reopen).
@@ -570,7 +585,10 @@ GUWH.Pages = GUWH.Pages || {};
                   h(Pill, { tone: "accent" }, "Free trial"),
                   t.added
                     ? h("span", { className: "text-xs font-semibold text-[var(--good-dark)] flex items-center gap-1" }, h(Icon, { name: "check", size: 12 }), "Added")
-                    : h(Button, { size: "sm", disabled: addingTrial === t.id, onClick: () => addTrialToTonight(t) }, addingTrial === t.id ? "Adding…" : (t.children || []).length ? "Add family to tonight" : "Add to tonight")
+                    : h(Button, { size: "sm", disabled: addingTrial === t.id, onClick: () => addTrialToTonight(t) }, addingTrial === t.id ? "Adding…" : (t.children || []).length ? "Add family to tonight" : "Add to tonight"),
+                  !t.added && (t.dismissed
+                    ? h("button", { type: "button", onClick: () => setTrialDismissed(t, false), className: "text-xs font-semibold text-[var(--ink-soft)] hover:underline" }, "Marked didn't come · Undo")
+                    : h("button", { type: "button", onClick: () => setTrialDismissed(t, true), className: "text-xs font-semibold text-[var(--ink-soft)] hover:underline" }, "Didn't come"))
                 )
               )
             )

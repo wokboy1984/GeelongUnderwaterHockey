@@ -276,6 +276,20 @@ GUWH.Pages = GUWH.Pages || {};
     const [reason, setReason] = React.useState("");
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState(null);
+    const [search, setSearch] = React.useState("");
+    const [results, setResults] = React.useState([]);
+    const [picked, setPicked] = React.useState(null);
+    const searchSeq = React.useRef(0);
+    function onSearch(value) {
+      setSearch(value);
+      const seq = ++searchSeq.current;
+      if (value.trim().length < 2) { setResults([]); return; }
+      GUWH.Identity.authFetch("/api/forum/moderation?q=" + encodeURIComponent(value.trim()))
+        .then((r) => r.json())
+        .then((d) => { if (seq === searchSeq.current && d.ok) setResults(d.members || []); })
+        .catch(() => {});
+    }
+    function clearPick() { setPicked(null); setMemberId(""); setReason(""); }
 
     async function call(body) {
       setBusy(true);
@@ -285,6 +299,7 @@ GUWH.Pages = GUWH.Pages || {};
         const d = await res.json();
         if (d.ok) onChanged();
         else setError(d.error || "Something went wrong");
+        return !!d.ok;
       } catch (e) {
         setError(String(e));
       } finally {
@@ -326,13 +341,34 @@ GUWH.Pages = GUWH.Pages || {};
               )
             )
       ),
+      // Find the member by name (11 Nov 2026, Liam: it used to ask for a
+      // member ID, which moderators can't look up). Fields line up on one
+      // row; the actions sit under them.
       h(
         "div",
-        { className: "rounded-xl bg-[var(--sand)] p-3 flex flex-wrap items-end gap-2" },
-        h(FormField, { label: "Member ID", hint: "From Administration → Roles" }, h("input", { className: inputCls + " !w-48", value: memberId, onChange: (e) => setMemberId(e.target.value) })),
-        h(FormField, { label: "Reason" }, h("input", { className: inputCls + " !w-56", value: reason, onChange: (e) => setReason(e.target.value) })),
-        h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy || !memberId.trim() || !reason.trim(), onClick: () => call({ action: "restrict_member", memberId: memberId.trim(), reason: reason.trim() }) }, "Restrict posting"),
-        h(Button, { type: "button", size: "sm", variant: "ghost", disabled: busy || !memberId.trim() || !reason.trim(), onClick: () => call({ action: "suspend_member", memberId: memberId.trim(), reason: reason.trim() }) }, "Suspend")
+        { className: "rounded-xl bg-[var(--sand)] p-4 flex flex-col gap-3" },
+        h(
+          "div",
+          { className: "grid sm:grid-cols-2 gap-3 items-start" },
+          h(FormField, { label: "Member" },
+            picked
+              ? h("div", { className: "flex items-center justify-between gap-2 rounded-xl bg-white ring-1 ring-black/10 px-3 py-2.5" },
+                  h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, picked.display),
+                  h("button", { type: "button", className: "text-xs font-semibold text-[var(--ink-soft)] hover:underline", onClick: () => { setPicked(null); setMemberId(""); } }, "Change"))
+              : h("div", { className: "relative" },
+                  h("input", { className: inputCls, value: search, placeholder: "Start typing a name", onChange: (e) => onSearch(e.target.value) }),
+                  results.length > 0 && h("ul", { className: "absolute z-10 left-0 right-0 mt-1 rounded-xl bg-white ring-1 ring-black/10 shadow-lg overflow-hidden" },
+                    results.map((m) => h("li", { key: m.id },
+                      h("button", { type: "button", className: "w-full text-left px-3 py-2 text-sm hover:bg-[var(--sand)]", onClick: () => { setPicked(m); setMemberId(m.id); setSearch(""); setResults([]); } }, m.display)))))),
+          h(FormField, { label: "Reason" }, h("input", { className: inputCls, value: reason, placeholder: "What happened", onChange: (e) => setReason(e.target.value) }))
+        ),
+        h(
+          "div",
+          { className: "flex flex-wrap gap-2" },
+          h(Button, { type: "button", size: "sm", variant: "secondary", disabled: busy || !memberId.trim() || !reason.trim(), onClick: () => call({ action: "restrict_member", memberId: memberId.trim(), reason: reason.trim() }).then((ok) => ok && clearPick()) }, "Restrict posting"),
+          h(Button, { type: "button", size: "sm", variant: "secondary", disabled: busy || !memberId.trim() || !reason.trim(), onClick: () => call({ action: "suspend_member", memberId: memberId.trim(), reason: reason.trim() }).then((ok) => ok && clearPick()) }, "Suspend from forum")
+        ),
+        h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Restrict: they can read but not post. Suspend: they can't open the forum. Both need a reason, and either can be lifted above.")
       )
     );
   }

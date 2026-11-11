@@ -53,6 +53,8 @@
     const items = [
       { label: "Home", path: "/portal/dashboard" },
       { label: "This Week's Game", path: "/portal/board" },
+      // Club calendar (11 Nov 2026): game nights and events.
+      { label: "Calendar", path: "/portal/calendar" },
       { label: "Player Stats", path: "/portal/stats" },
     ];
     // Members Forum only ever appears for adult members — juniors get zero
@@ -260,6 +262,7 @@
     "/portal/waiver": "Waiver",
     "/portal/dashboard": "Dashboard",
     "/portal/board": "This Week's Game",
+    "/portal/calendar": "Calendar",
     "/portal/stats": "Player Stats",
     "/portal/forum": "Forum",
     "/portal/bring-a-mate": "Bring a Mate",
@@ -422,6 +425,10 @@
         return h(GUWH.Pages.BringAMate);
       }
       const r = requireAuth(path, "player"); if (r) { navigate(r); return null; } return h(GUWH.Pages.BringAMate);
+    }
+    if (path === "/portal/calendar") {
+      if (GUWH.Identity && !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }
+      return GUWH.Pages.Calendar ? h(GUWH.Pages.Calendar) : null;
     }
     if (path === "/portal/contacts") {
       if (GUWH.Identity && !GUWH.Identity.currentUser()) { navigate("/portal"); return null; }

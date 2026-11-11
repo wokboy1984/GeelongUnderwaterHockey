@@ -14,6 +14,9 @@
 //                              back (missed: true) to any future Wednesday.
 //                              Game Coordinator / Administrator; anyone else
 //                              gets an empty list.
+// POST /api/trial-signup { action: "dismiss" | "undismiss", id }
+//        -> { ok }   "Didn't come" (11 Nov 2026): takes a booking off the
+//                    trial alerts. Game Coordinator / Administrator.
 // GET  /api/trial-signup?scope=coordinator
 //        -> { ok, sessionDate, signups[] }     newcomers booked for the upcoming
 //                                              Wednesday, with gear + emergency
@@ -88,6 +91,9 @@ async function ensureTable(db: any) {
   await db.sql`alter table trial_signups add column if not exists children jsonb`;
   await db.sql`alter table trial_signups add column if not exists parent_playing boolean not null default true`;
   await db.sql`alter table trial_signups add column if not exists added_member_id text`;
+  // "Didn't come" (11 Nov 2026), migration 20261111000003_trial_dismissed.
+  await db.sql`alter table trial_signups add column if not exists dismissed_at timestamptz`;
+  await db.sql`alter table trial_signups add column if not exists dismissed_by text`;
   await ensureNicknameColumn(db);
   await ensureInviteColumns(db);
   tableReady = true;
@@ -110,7 +116,7 @@ export default async (req: Request, context: Context) => {
       const rows = await db.sql`
         select id, first_name, last_name, phone, children, parent_playing, to_char(session_date, 'YYYY-MM-DD') as session_date
         from trial_signups
-        where added_member_id is null and session_date >= ${upcoming}::date - 14
+        where added_member_id is null and dismissed_at is null and session_date >= ${upcoming}::date - 14
         order by session_date asc, created_at asc
         limit 30
       `;
@@ -140,7 +146,7 @@ export default async (req: Request, context: Context) => {
       const sessionDate = askedDate ? requestedSessionDate(askedDate) : nextSessionDateISO();
       const rows = await db.sql`
         select t.id, t.first_name, t.last_name, t.email, t.phone, t.age, t.fin_size, t.handed, t.emergency_name, t.emergency_phone, t.heard_from, t.created_at,
-               t.children, t.parent_playing, t.added_member_id,
+               t.children, t.parent_playing, t.added_member_id, t.dismissed_at,
                m.nickname as inv_nickname, m.first_name as inv_first_name, m.last_name as inv_last_name
         from trial_signups t
         left join members m on m.id = t.invited_by
@@ -158,6 +164,7 @@ export default async (req: Request, context: Context) => {
           children: Array.isArray(r.children) ? r.children : [],
           parentPlaying: r.parent_playing !== false,
           added: !!r.added_member_id,
+          dismissed: !!r.dismissed_at,
           email: r.email,
           phone: r.phone,
           age: r.age,
@@ -181,6 +188,19 @@ export default async (req: Request, context: Context) => {
     if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
 
     const body = await req.json().catch(() => ({}));
+
+    // "Didn't come" / undo, from the coordinators' trial alerts (11 Nov 2026).
+    if (body.action === "dismiss" || body.action === "undismiss") {
+      const user = await getVerifiedUser(req);
+      if (!user) return unauthorized();
+      const caller = await ensureMember(db, user);
+      if (!hasPermission(caller.roles, "manage_others_attendance")) return forbidden("Only Game Coordinators and Administrators can change trial bookings");
+      const id = Number(body.id);
+      if (body.action === "dismiss") await db.sql`update trial_signups set dismissed_at = now(), dismissed_by = ${caller.id} where id = ${id}`;
+      else await db.sql`update trial_signups set dismissed_at = null, dismissed_by = null where id = ${id}`;
+      return json({ ok: true });
+    }
+
     if (clean(body.website)) return json({ ok: true, signup: null }); // honeypot - drop silently
 
     const firstName = clean(body.firstName, 60);

@@ -7,6 +7,11 @@
 //   restrictedMembers, suspendedMembers, recentDiscussions, recentActivity
 // }
 //
+// GET /api/forum/moderation?q=<name> -> { ok, members: [{ id, display }] }
+//   Member search by name for Restrict / Suspend (11 Nov 2026, Liam: the
+//   form asked moderators for a member ID they had no way to look up).
+//   People with a login only, at most 10.
+//
 // POST /api/forum/moderation { action, ... }
 //   assign_report      { reportId }
 //   resolve_report      { reportId, status: 'resolved'|'dismissed', resolution }
@@ -119,6 +124,19 @@ export default async (req: Request, context: Context) => {
       }
 
       return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+    }
+
+    const q = new URL(req.url).searchParams.get("q");
+    if (q != null) {
+      const term = "%" + q.trim().toLowerCase().slice(0, 60) + "%";
+      if (q.trim().length < 2) return new Response(JSON.stringify({ ok: true, members: [] }), { headers: { "content-type": "application/json" } });
+      const rows = await db.sql`
+        select id, nickname, first_name, last_name from members
+        where email not like '%@no-login.guwh'
+          and (lower(first_name) like ${term} or lower(last_name) like ${term} or lower(coalesce(nickname, '')) like ${term}
+               or lower(first_name || ' ' || last_name) like ${term})
+        order by lower(first_name), lower(last_name) limit 10`;
+      return new Response(JSON.stringify({ ok: true, members: rows.map((r: any) => ({ id: r.id, display: adminName(r.nickname, r.first_name, r.last_name) })) }), { headers: { "content-type": "application/json" } });
     }
 
     const [suggestionCount] = await db.sql`select count(*)::int as count from forum_suggestions where status = 'pending'`;

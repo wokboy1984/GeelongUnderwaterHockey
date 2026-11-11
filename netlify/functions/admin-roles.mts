@@ -8,6 +8,8 @@
 // POST   /api/admin/roles  { action: "grade", memberId, grade }
 // POST   /api/admin/roles  { action: "set_position", memberId, position }
 // POST   /api/admin/roles  { action: "set_non_player", memberId, nonPlayer }
+// POST   /api/admin/roles  { action: "set_usual_kind", memberId, usualKind: "player"|"swim"|"volunteer" }
+//        (11 Nov 2026, Liam): "Usually comes to", same as I usually come to on Profile
 // POST   /api/admin/roles  { action: "set_gender", memberId, gender: "male" | "female" | null }
 //        -> for the MVP awards' categories (5 Nov 2026)
 // POST   /api/admin/roles  { action: "set_dob", memberId, dateOfBirth | null }
@@ -34,7 +36,8 @@ import type { Context, Config } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { inviteMember } from "./_shared/identity-admin.mts";
 import { ensureGameMvp, isGender } from "./_shared/game-mvp.mts";
-import { ensureNonPlayerColumn, SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
+import { isAttendanceKind } from "./_shared/attendance.mts";
+import { ensureUsualKindColumn, ensureNonPlayerColumn, SUPER_ADMIN_EMAIL, adminName, isLikelyEmail, ageFromDOB, ensureFamilyColumns, familyMembers, familyOf, ensureMember, ensureNicknameColumn, getVerifiedUser, hasRole, isGrade, isPosition, isRole, logAudit, shortName, unauthorized, forbidden } from "./_shared/roles.mts";
 import { byDate, categoryOn, gameFeeEntries, melbourneDate, totals } from "./_shared/finance.mts";
 
 const RESTRICTED_FOR_JUNIORS = new Set(["community_moderator", "treasurer", "administrator"]);
@@ -127,7 +130,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
   const [m] = await db.sql`
     select m.id, m.email, m.nickname, m.first_name, m.last_name, m.date_of_birth, m.grade, m.position, m.phone,
            m.emergency_name, m.emergency_phone, m.waiver_accepted_at, m.waiver_signed_name, m.created_at,
-           m.parent_id, m.dependant_removed_at, m.non_player, m.gender,
+           m.parent_id, m.dependant_removed_at, m.non_player, m.gender, m.usual_kind,
            array_remove(array_agg(mr.role), null) as roles
     from members m left join member_roles mr on mr.member_id = m.id
     where m.id = ${id}
@@ -219,6 +222,7 @@ async function memberDetail(db: any, id: string, extra: Record<string, unknown> 
       joined: m.created_at,
       removedChild: !!m.dependant_removed_at,
       nonPlayer: !!m.non_player,
+      usualKind: m.usual_kind || "player",
       gender: m.gender || null,
       parent: parent ? { id: parent.id, displayName: shortName(parent.nickname, parent.first_name, parent.last_name), fullName: [parent.first_name, parent.last_name].filter(Boolean).join(" "), adminName: adminName(parent.nickname, parent.first_name, parent.last_name) } : null,
       family: family.map((f: any) => ({ id: f.id, adminName: adminName(f.nickname, f.first_name, f.last_name), isChild: !!f.parent_id, age: ageFromDOB(f.date_of_birth) })),
@@ -240,6 +244,7 @@ export default async (req: Request, context: Context) => {
   await ensureNicknameColumn(db);
   await ensureFamilyColumns(db);
   await ensureNonPlayerColumn(db);
+  await ensureUsualKindColumn(db);
   await ensureGameMvp(db);
   const caller = await ensureMember(db, user);
   if (!hasRole(caller.roles, "administrator")) {
@@ -353,6 +358,30 @@ export default async (req: Request, context: Context) => {
         resourceType: "member", resourceId: target.id,
         previousValue: { gender: target.gender || null }, newValue: { gender },
         note: `${caller.email} set ${target.first_name} ${target.last_name}'s gender to ${gender || "not specified"}`,
+      });
+      return await memberDetail(db, target.id);
+    }
+
+    // Usually comes to (11 Nov 2026, Liam): play, lane swim or volunteer -
+    // the member's own "I usually come to" on Profile, which an
+    // Administrator can now see and correct here. It's the default when
+    // they book in; Non-player (below) is the separate never-plays rule.
+    if (req.method === "POST" && body.action === "set_usual_kind") {
+      const id = String(body.memberId || "").trim();
+      const kind = String(body.usualKind || "");
+      if (!isAttendanceKind(kind)) {
+        return new Response(JSON.stringify({ ok: false, error: "Not a valid choice" }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const [target] = await db.sql`select id, first_name, last_name, usual_kind from members where id = ${id}`;
+      if (!target) {
+        return new Response(JSON.stringify({ ok: false, error: "Member not found" }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      await db.sql`update members set usual_kind = ${kind === "player" ? null : kind} where id = ${target.id}`;
+      await logAudit(db, {
+        actorId: caller.id, actorEmail: caller.email, action: "usual_kind_changed",
+        resourceType: "member", resourceId: target.id,
+        previousValue: { usualKind: target.usual_kind || "player" }, newValue: { usualKind: kind },
+        note: `${caller.email} set ${target.first_name} ${target.last_name} as usually coming to ${kind === "swim" ? "lane swim" : kind === "volunteer" ? "volunteer" : "play"}`,
       });
       return await memberDetail(db, target.id);
     }
