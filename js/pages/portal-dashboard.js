@@ -50,13 +50,23 @@ GUWH.Pages = GUWH.Pages || {};
     const missed = list.filter((t) => t.missed);
     const day = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
     const who = (t) => t.name + (t.kids ? (t.parentPlaying ? " + " : " (bringing ") + t.kids + (t.kids === 1 ? " child" : " children") + (t.parentPlaying ? "" : ")") : "");
+    // Each name opens Attendance on that booking's week (11 Nov 2026), where
+    // "New players this week" has their details and Add to tonight. A
+    // missed one can be cleared with "Didn't come".
+    function dismiss(t) {
+      GUWH.Identity.authFetch("/api/trial-signup", { method: "POST", body: JSON.stringify({ action: "dismiss", id: t.id }) })
+        .then(() => GUWH.refreshTrialAlerts && GUWH.refreshTrialAlerts(true))
+        .catch(() => {});
+    }
     const row = (t) =>
       h(
         "li",
-        { key: t.id, className: "flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2" },
-        h("span", { className: "text-sm font-semibold text-[var(--ink)]" }, who(t)),
-        h("span", { className: cx("text-xs whitespace-nowrap", t.missed ? "font-semibold text-[var(--bad)]" : "text-[var(--ink-soft)]") },
-          day(t.sessionDate) + (t.missed ? " · not added" + (t.phone ? " · " + t.phone : "") : ""))
+        { key: t.id, className: "flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2" },
+        h("a", Object.assign(GUWH.Router.linkProps("/attendance?date=" + t.sessionDate), { className: "text-sm font-semibold text-[var(--ink)] underline decoration-black/20 underline-offset-2 hover:text-[var(--accent-dark)]" }), who(t)),
+        h("span", { className: "flex items-center gap-2" },
+          h("span", { className: cx("text-xs whitespace-nowrap", t.missed ? "font-semibold text-[var(--bad)]" : "text-[var(--ink-soft)]") },
+            day(t.sessionDate) + (t.missed ? " · not added" + (t.phone ? " · " + t.phone : "") : "")),
+          t.missed && h("button", { type: "button", onClick: () => dismiss(t), className: "rounded-full ring-1 ring-black/15 bg-white px-2.5 py-0.5 text-xs font-semibold text-[var(--ink)] hover:ring-[var(--bad)]" }, "Didn't come"))
       );
     return h(
       "div",
@@ -80,7 +90,7 @@ GUWH.Pages = GUWH.Pages || {};
           React.Fragment,
           null,
           h("p", { className: "mt-3 text-xs font-bold uppercase tracking-wide text-[var(--bad)]" }, "Booked but never added"),
-          h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Their Wednesday has gone. Give them a call, or add them by name on Attendance if they came."),
+          h("p", { className: "text-xs text-[var(--ink-soft)]" }, "Their Wednesday has gone. If they came, tap their name and press Add to tonight on that week. If not, give them a call, or press Didn't come to clear it."),
           h("ul", { className: "divide-y divide-black/5" }, missed.map(row))
         )
     );
